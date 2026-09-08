@@ -74,7 +74,7 @@ Cek "  robot lama sudah DISCONNECTED" (($rob | Where-Object name -eq 'UjiRobot')
 
 $jobs = Invoke-RestMethod "$base/api/jobs?limit=500" -Headers $h
 Cek "GET /api/jobs: jumlah" $jobs.Count 34
-Cek "  yang berhasil" (($jobs | Where-Object state -eq 'SUCCESSFUL').Count) 28
+Cek "  yang berhasil" (@($jobs | Where-Object state -eq 'SUCCESSFUL').Count) 28
 
 $logs = Invoke-RestMethod "$base/api/logs?limit=5000" -Headers $h
 Cek "GET /api/logs: dibatasi di 2000, bukan seluruhnya" $logs.Count 2000

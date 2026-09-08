@@ -33,6 +33,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-ganti-nilai-ini-dengan-rahasia-minimal-32-karakter}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       FORGEHUB_SIGNING_KEY: /data/signing.key
+      FORGEHUB_TZ: ${FORGEHUB_TZ:-Asia/Jakarta}
     volumes:
       # signing.key MILIK ForgeHub .NET, dipasang apa adanya dan hanya-baca.
       #

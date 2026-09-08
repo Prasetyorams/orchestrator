@@ -36,6 +36,13 @@ spring:
     baseline-on-migrate: true
 
 forgehub:
+  # Zona untuk menghitung batas "hari ini" di dasbor.
+  #
+  # BUKAN zona server. Di dalam container zona server adalah UTC, dan orang
+  # yang membuka dasbor pukul 7 pagi WIB akan melihat angka "hari ini" yang
+  # masih menghitung kemarin sore. Nilainya nama IANA, mis. Asia/Jakarta.
+  display-timezone: ${FORGEHUB_TZ:UTC}
+
   secret:
     # Kunci induk untuk menyandikan kredensial. Bukan sekadar berkas rahasia
     # biasa: kredensial yang sudah ada di forgehub.db disandikan dengan kunci
