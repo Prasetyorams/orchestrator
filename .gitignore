@@ -19,3 +19,6 @@ forgehub-migrasi.sql
 # Kunci penyandian. Kalau ini masuk ke repositori, seluruh kredensial yang
 # disandikan dengannya ikut terbuka bagi siapa pun yang bisa membaca repo.
 signing.key
+
+# Cache inkremental TypeScript: dihasilkan ulang tiap kali diperiksa.
+*.tsbuildinfo

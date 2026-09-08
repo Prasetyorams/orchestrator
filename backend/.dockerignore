@@ -1,0 +1,3 @@
+# Keluaran build di host tidak dipakai: Dockerfile menjalankan mvn package
+# sendiri di dalam container, dengan JDK-nya sendiri.
+target

@@ -6,66 +6,75 @@ import {
   Activity,
   Bot,
   Boxes,
+  Clock,
   Database,
+  FolderOpen,
   Gauge,
+  KeyRound,
   Layers,
   ListChecks,
+  ScrollText,
   Settings,
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 
 type Item = { label: string; href: string; icon: typeof Gauge };
-type Group = { title?: string; items: Item[] };
+type Kelompok = { judul?: string; items: Item[] };
 
 /**
  * Menu samping.
  *
- * Dikelompokkan seperti yang diminta: Robots, Automation, dan Monitoring
- * masing-masing membawa anak-anaknya. Pengelompokan itu bukan hiasan — tanpa
- * judul kelompok, sebelas menu berderet lurus dan orang harus membaca
- * semuanya untuk menemukan satu.
+ * Label ditulis dalam bahasa Indonesia dan diterjemahkan saat dirender, sama
+ * seperti seluruh antarmuka: kunci kamusnya adalah teks Indonesianya sendiri,
+ * jadi label yang belum diterjemahkan tetap terbaca, bukan berubah menjadi
+ * kode.
+ *
+ * Dikelompokkan karena tanpa judul kelompok, empat belas menu berderet lurus
+ * dan orang harus membaca semuanya untuk menemukan satu.
  */
-const groups: Group[] = [
+const KELOMPOK: Kelompok[] = [
   {
-    items: [{ label: "Dashboard", href: "/", icon: Gauge }],
+    items: [{ label: "Beranda", href: "/", icon: Gauge }],
   },
   {
-    title: "Robots",
+    judul: "Pemantauan",
     items: [
-      { label: "Machines", href: "/robots/machines", icon: Bot },
-      { label: "Environments", href: "/robots/environments", icon: Layers },
-      { label: "Credentials", href: "/robots/credentials", icon: Database },
+      { label: "Pekerjaan", href: "/monitoring/jobs", icon: Activity },
+      { label: "Catatan", href: "/monitoring/logs", icon: ScrollText },
+      { label: "Pemicu", href: "/monitoring/triggers", icon: Clock },
     ],
   },
   {
-    title: "Automation",
+    judul: "Otomasi",
     items: [
-      { label: "Processes", href: "/automation/processes", icon: Boxes },
-      { label: "Packages", href: "/automation/packages", icon: Boxes },
-      { label: "Libraries", href: "/automation/libraries", icon: Boxes },
+      { label: "Proses", href: "/automation/processes", icon: Boxes },
+      { label: "Paket", href: "/automation/packages", icon: Layers },
+      { label: "Gudang", href: "/automation/libraries", icon: FolderOpen },
     ],
   },
   {
-    title: "Monitoring",
+    judul: "Robot",
     items: [
-      { label: "Jobs", href: "/monitoring/jobs", icon: Activity },
-      { label: "Logs", href: "/monitoring/logs", icon: ListChecks },
-      { label: "Triggers", href: "/monitoring/triggers", icon: Activity },
+      { label: "Robot", href: "/robots/machines", icon: Bot },
+      { label: "Lingkungan", href: "/robots/environments", icon: Layers },
+      { label: "Kredensial", href: "/robots/credentials", icon: KeyRound },
     ],
   },
   {
     items: [
-      { label: "Queues", href: "/queues", icon: ListChecks },
-      { label: "Assets", href: "/assets", icon: Database },
-      { label: "Tenant Management", href: "/tenants", icon: Users },
-      { label: "Settings", href: "/settings", icon: Settings },
+      { label: "Antrean", href: "/queues", icon: ListChecks },
+      { label: "Aset", href: "/assets", icon: Database },
+      { label: "Penyewa", href: "/tenants", icon: Users },
+      { label: "Setelan", href: "/settings", icon: Settings },
     ],
   },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { t } = useT();
 
   return (
     <aside className="flex h-screen w-60 shrink-0 flex-col bg-sidebar text-slate-300">
@@ -80,17 +89,19 @@ export function Sidebar() {
       </div>
 
       <nav className="thin-scroll flex-1 overflow-y-auto px-3 pb-6">
-        {groups.map((group, index) => (
-          <div key={index} className="mb-4">
-            {group.title ? (
+        {KELOMPOK.map((kelompok, i) => (
+          <div key={i} className="mb-4">
+            {kelompok.judul ? (
               <p className="px-2 pb-1.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                {group.title}
+                {t(kelompok.judul)}
               </p>
             ) : null}
 
-            {group.items.map((item) => {
-              const active = pathname === item.href;
-              const Icon = item.icon;
+            {kelompok.items.map((item) => {
+              // Cocok PERSIS, bukan startsWith: "/" adalah awalan dari setiap
+              // jalur, jadi Beranda akan selalu tampak aktif.
+              const aktif = pathname === item.href;
+              const Ikon = item.icon;
 
               return (
                 <Link
@@ -98,13 +109,13 @@ export function Sidebar() {
                   href={item.href}
                   className={cn(
                     "mb-0.5 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition",
-                    active
+                    aktif
                       ? "bg-sidebarHover font-medium text-white"
                       : "hover:bg-sidebarHover/60 hover:text-white",
                   )}
                 >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  {item.label}
+                  <Ikon className="h-4 w-4 shrink-0" />
+                  {t(item.label)}
                 </Link>
               );
             })}

@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
 import { Providers } from "@/components/Providers";
-import { Sidebar } from "@/components/Sidebar";
-import { TopNav } from "@/components/TopNav";
+import { I18nProvider } from "@/lib/i18n";
+import { Shell } from "@/components/Shell";
 
 export const metadata: Metadata = {
   title: "ForgeHub — JakForge Orchestrator",
@@ -15,17 +15,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="id">
       <body>
         <Providers>
-          <div className="flex h-screen overflow-hidden">
-            <Sidebar />
-
-            <div className="flex min-w-0 flex-1 flex-col">
-              <TopNav />
-              {/* Hanya bagian isi yang menggulir; sidebar dan bilah atas
-                  tetap di tempat, supaya menu tidak ikut hilang saat tabel
-                  panjang digulir. */}
-              <main className="thin-scroll flex-1 overflow-y-auto p-6">{children}</main>
-            </div>
-          </div>
+          <I18nProvider>
+            <Shell>{children}</Shell>
+          </I18nProvider>
         </Providers>
       </body>
     </html>

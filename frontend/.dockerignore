@@ -1,0 +1,14 @@
+# node_modules TIDAK dikirim ke konteks build.
+#
+# Dockerfile memasang dependensinya sendiri di dalam container, jadi menyalin
+# yang di host cuma memperlambat — dan lebih buruk: yang dipasang di host bisa
+# berisi symlink dan biner untuk sistem operasi lain. Percobaan pertama gagal
+# persis begitu, dengan "invalid file request node_modules/.bin/autoprefixer".
+node_modules
+.next
+out
+
+# Berkas setempat yang tidak ada urusannya dengan image.
+.env
+.env.local
+npm-debug.log
