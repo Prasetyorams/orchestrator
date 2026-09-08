@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="id">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ForgeHub — Orkestrator JakForge</title>
+    <link rel="stylesheet" href="app.css" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%234A3A2A'/><text x='16' y='22' font-family='Segoe UI,sans-serif' font-size='15' font-weight='700' fill='%23E8DECB' text-anchor='middle'>FH</text></svg>" />
+</head>
+<body>
+
+<!-- ================= Layar masuk ================= -->
+<div id="login">
+    <form class="login-card" id="loginForm" autocomplete="on">
+        <div class="login-brand">
+            <div class="mark">FH</div>
+            <div>
+                <h1>ForgeHub</h1>
+                <p>Orkestrator untuk JakForge Studio &amp; JakRunner</p>
+            </div>
+        </div>
+
+        <div class="field">
+            <label for="u">Nama pengguna</label>
+            <input id="u" name="username" autocomplete="username" value="FH_Admin" required />
+        </div>
+
+        <div class="field">
+            <label for="p">Kata sandi</label>
+            <input id="p" name="password" type="password" autocomplete="current-password" required />
+        </div>
+
+        <button class="btn primary" type="submit" style="width:100%;padding:11px" id="loginBtn">Masuk</button>
+
+        <div id="loginError" class="login-error" hidden></div>
+
+        <select class="lang-pick" id="langPickLogin" title="Bahasa" style="width:100%;margin-bottom:12px"></select>
+
+        <div class="login-hint">
+            Pemasangan baru memakai <b>FH_Admin</b> / <b>forgehub</b>.<br />
+            Gantilah dari halaman Pengaturan setelah masuk.
+        </div>
+    </form>
+</div>
+
+<!-- ================= Aplikasi ================= -->
+<div id="app">
+
+    <aside id="sidebar">
+        <div class="brand">
+            <div class="mark">FH</div>
+            <div>
+                <div class="name">ForgeHub</div>
+                <div class="sub">JakForge Orchestrator</div>
+            </div>
+        </div>
+
+        <nav id="nav"></nav>
+
+        <div class="sidebar-foot">
+            <div><span class="dot off" id="connDot"></span><span id="connText">memeriksa…</span></div>
+            <div id="serverInfo" style="margin-top:4px"></div>
+        </div>
+    </aside>
+
+    <div id="main">
+        <header id="topbar">
+            <div class="tenant">
+                <span>Penyewa</span>
+                <b id="tenantName">—</b>
+            </div>
+
+            <div class="search">
+                <span class="glass">⌕</span>
+                <input id="globalSearch" placeholder="Cari proses, robot, antrean, aset, pemicu…" autocomplete="off" />
+                <div class="search-results" id="searchResults"></div>
+            </div>
+
+            <div class="top-actions">
+                <select class="lang-pick" id="langPick" title="Bahasa"></select>
+                <button class="icon-btn" id="btnLogs" title="Log langsung">✉</button>
+                <button class="icon-btn" id="btnAlerts" title="Peringatan">
+                    ⚑<span class="badge" id="alertBadge" hidden>0</span>
+                </button>
+                <div class="who" id="whoBox">
+                    <div class="avatar" id="whoInitials">FH</div>
+                    <div>
+                        <div class="who-name" id="whoName">—</div>
+                        <div class="who-role" id="whoRole">—</div>
+                    </div>
+                </div>
+                <button class="btn sm" id="btnLogout">Keluar</button>
+            </div>
+        </header>
+
+        <main id="page"></main>
+    </div>
+</div>
+
+<div class="veil" id="veil"><div class="dialog" id="dialog"></div></div>
+<div id="toasts"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

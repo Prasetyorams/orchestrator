@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    ForgeHub yang BISA DIJALANKAN hari ini.
+
+    Folder backend/ dan frontend/ berisi versi Java + Next.js untuk penyebaran
+    perusahaan; keduanya butuh JDK, Maven, Node, dan PostgreSQL. Proyek ini
+    adalah ForgeHub yang sama — API dan dasbor yang sama — di atas ASP.NET Core
+    dan SQLite, sehingga cukup satu perintah `dotnet run` tanpa memasang apa pun.
+
+    Sengaja TIDAK dimasukkan ke OpenRPA.sln: solusi itu net462 bergaya lama,
+    dan mencampur proyek SDK net10.0 ke dalamnya berisiko mengganggu build
+    Studio yang sudah berjalan.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>ForgeHub</RootNamespace>
+    <AssemblyName>ForgeHub.Server</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
+
+    <!--
+      Disematkan lebih tinggi daripada yang ditarik Microsoft.Data.Sqlite:
+      2.1.11 masih kena GHSA-2m69-gcr7-jv3q, 2.1.13 sudah ditambal.
+    -->
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.13" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.13" />
+  </ItemGroup>
+
+</Project>

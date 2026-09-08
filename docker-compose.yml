@@ -1,0 +1,56 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: forgehub-db
+    environment:
+      POSTGRES_DB: forgehub
+      POSTGRES_USER: forgehub
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-forgehub}
+    volumes:
+      - forgehub-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      # Backend menunggu sampai basis datanya SIAP MENERIMA, bukan sekadar
+      # sampai containernya hidup. Tanpa ini, Flyway berjalan lebih dulu dan
+      # gagal pada percobaan pertama setiap kali docker compose up dijalankan.
+      test: ["CMD-SHELL", "pg_isready -U forgehub -d forgehub"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build:
+      context: ./backend
+    container_name: forgehub-backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/forgehub
+      DB_USER: forgehub
+      DB_PASSWORD: ${DB_PASSWORD:-forgehub}
+      JWT_SECRET: ${JWT_SECRET:-ganti-nilai-ini-dengan-rahasia-minimal-32-karakter}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+    container_name: forgehub-frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+
+volumes:
+  forgehub-data:

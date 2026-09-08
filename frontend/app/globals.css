@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-canvas text-ink;
+}
+
+/* Bilah gulir tipis untuk panel log; bawaan Windows terlalu tebal di panel
+   sempit dan memakan ruang teks yang justru mau dibaca. */
+.thin-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  @apply rounded bg-slate-300;
+}
+.thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
