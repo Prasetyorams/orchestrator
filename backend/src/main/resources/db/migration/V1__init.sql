@@ -304,10 +304,12 @@ CREATE TABLE logs (
     robot_name    VARCHAR(160),
     machine_name  VARCHAR(160),
     process_name  VARCHAR(200),
-    -- Sengaja BUKAN foreign key ke jobs: log adalah catatan sejarah, dan
+    -- Bertipe UUID supaya penggabungan dengan jobs.id cocok tanpa penyandian
+    -- ulang, tapi sengaja BUKAN foreign key: log adalah catatan sejarah, dan
     -- menghapus pekerjaan lama tidak boleh ikut menghapus jejak apa yang
-    -- pernah terjadi. ON DELETE CASCADE di sini akan melakukan persis itu.
-    job_id        VARCHAR(64),
+    -- pernah terjadi. ON DELETE CASCADE di sini akan melakukan persis itu,
+    -- dan yang hilang justru baris yang paling dicari saat menyelidiki.
+    job_id        UUID,
     logged_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
 

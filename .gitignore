@@ -1,0 +1,21 @@
+# Keluaran build — dihasilkan ulang setiap kali dibangun, dan besarnya
+# puluhan megabita. Yang masuk ke git adalah yang ditulis orang.
+backend/target/
+frontend/.next/
+frontend/node_modules/
+frontend/out/
+
+# Basis data SQLite milik server/ .NET. Isinya data sungguhan milik
+# pemakainya, bukan bagian dari kode.
+*.db
+*.db-shm
+*.db-wal
+
+# Hasil alat pindah: dihasilkan ulang dari forgehub.db kapan saja, dan
+# memuat seluruh isi basis data — termasuk hash kata sandi dan kredensial
+# tersandi.
+forgehub-migrasi.sql
+
+# Kunci penyandian. Kalau ini masuk ke repositori, seluruh kredensial yang
+# disandikan dengannya ikut terbuka bagi siapa pun yang bisa membaca repo.
+signing.key

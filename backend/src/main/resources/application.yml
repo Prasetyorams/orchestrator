@@ -18,7 +18,12 @@ spring:
       # mengubah skema berarti bentuk basis data bergantung pada versi
       # kode yang kebetulan jalan terakhir — dan itu tidak bisa ditinjau
       # sebelum dijalankan.
-      ddl-auto: validate
+      #
+      # "none", bukan "validate": lapisan datanya memakai JdbcTemplate dan
+      # tidak ada satu pun @Entity yang tersisa. Membiarkan "validate" pada
+      # pemetaan kosong tidak salah, tapi menyalakan pemeriksa untuk sesuatu
+      # yang tidak diperiksa hanya menambah satu tahap yang bisa gagal.
+      ddl-auto: none
     open-in-view: false
     properties:
       hibernate:

@@ -1,6 +1,7 @@
 package id.jakforge.forgehub.config;
 
 import id.jakforge.forgehub.security.JwtAuthenticationFilter;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -8,8 +9,6 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
@@ -32,17 +31,14 @@ public class SecurityConfig {
         this.allowedOrigins = allowedOrigins;
     }
 
-    /**
-     * BCrypt dengan kekuatan 12.
-     *
-     * Bawaannya 10. Dinaikkan karena biaya verifikasi hanya terasa saat
-     * masuk — sekali per sesi — sedangkan biaya menebak sandi curian naik
-     * empat kali lipat.
-     */
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder(12);
-    }
+    // Tidak ada bean PasswordEncoder di sini.
+    //
+    // Sebelumnya ada BCrypt kekuatan 12, dan itu dibuang bukan karena BCrypt
+    // buruk melainkan karena TIDAK DIPAKAI: kata sandi disimpan sebagai
+    // PBKDF2-SHA256 oleh id.jakforge.forgehub.security.Passwords, mengikuti
+    // hash yang sudah ada di basis data. Membiarkan encoder BCrypt tersedia
+    // untuk disuntikkan berarti cepat atau lambat ada kode yang memakainya,
+    // lalu menulis hash yang tidak akan pernah cocok dengan yang lain.
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -55,9 +51,31 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/login").permitAll()
-                        .requestMatchers("/actuator/health").permitAll()
+                        .requestMatchers("/actuator/health", "/api/health").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .anyRequest().authenticated())
+
+                // 401 untuk permintaan TANPA identitas yang sah, bukan 403.
+                //
+                // Bawaan Spring Security di sini adalah 403, dan itu tampak
+                // seperti perbedaan kosmetik sampai seseorang melihat apa yang
+                // dilakukan kliennya: Studio, JakRunner, dan activity
+                // Orchestrator semuanya MEMBUANG TOKENNYA saat menerima 401,
+                // lalu masuk lagi. Dengan 403 mereka menyimpan token yang sudah
+                // kedaluwarsa selamanya — jadi robot berhenti bekerja delapan
+                // jam setelah dinyalakan, dan gejalanya bukan "token
+                // kedaluwarsa" melainkan setiap panggilan gagal tanpa sebab
+                // yang jelas.
+                //
+                // 403 tetap dipakai untuk yang sudah dikenali tapi tidak
+                // berhak; itu memang bukan urusan token.
+                .exceptionHandling(e -> e.authenticationEntryPoint((request, response, ex) -> {
+                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                    response.setContentType("application/json;charset=UTF-8");
+                    response.getWriter().write(
+                            "{\"error\":\"Token tidak sah atau sudah kedaluwarsa.\"}");
+                }))
+
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

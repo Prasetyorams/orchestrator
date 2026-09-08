@@ -32,13 +32,28 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-forgehub}
       JWT_SECRET: ${JWT_SECRET:-ganti-nilai-ini-dengan-rahasia-minimal-32-karakter}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      FORGEHUB_SIGNING_KEY: /data/signing.key
+    volumes:
+      # signing.key MILIK ForgeHub .NET, dipasang apa adanya dan hanya-baca.
+      #
+      # Ini bagian yang mudah terlewat dan akibatnya sunyi: kredensial di
+      # basis data disandikan dengan kunci ini. Container yang membuat kunci
+      # sendiri tetap menyala dengan gembira, lalu setiap kredensial terbaca
+      # sebagai kosong — dan yang terlihat cuma "login gagal" di aplikasi yang
+      # diotomasi robot, jauh dari sini.
+      - ${FORGEHUB_DATA:-${LOCALAPPDATA}/JakForge/ForgeHub}/signing.key:/data/signing.key:ro
     ports:
       - "8080:8080"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health || exit 1"]
+      # Memeriksa ISI jawabannya, bukan sekadar bahwa ada jawaban. Actuator
+      # tetap membalas 200 dengan status DOWN pada beberapa keadaan, dan
+      # container yang lulus pemeriksaan justru saat basis datanya putus
+      # adalah pemeriksaan yang menyesatkan.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health | grep -q '\"status\":\"UP\"'"]
       interval: 10s
       timeout: 5s
       retries: 12
+      start_period: 40s
 
   frontend:
     build:
@@ -51,6 +66,40 @@ services:
         condition: service_healthy
     ports:
       - "3000:3000"
+
+  # -------------------------------------------------------------------
+  # Pemindah data, sekali jalan.
+  #
+  # TIDAK ikut "docker compose up" biasa — hanya lewat profil:
+  #
+  #     docker compose --profile pindah run --rm pindah
+  #
+  # Alasannya: memasukkan data yang sama dua kali bukan sekadar mubazir.
+  # Tabel yang tidak punya batasan UNIQUE (jobs, logs, queue_items) akan
+  # benar-benar bertambah ganda, dan tidak ada cara membedakan mana salinan
+  # kedua sesudahnya.
+  #
+  # Menunggu backend SEHAT, bukan sekadar hidup: berkas SQL-nya menyisipkan
+  # ke tabel yang baru dibuat Flyway, dan Flyway berjalan saat backend naik.
+  # -------------------------------------------------------------------
+  pindah:
+    image: postgres:17-alpine
+    container_name: forgehub-pindah
+    profiles: ["pindah"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${DB_PASSWORD:-forgehub}
+    volumes:
+      - ${FORGEHUB_DATA:-${LOCALAPPDATA}/JakForge/ForgeHub}:/pindahan:ro
+    # ON_ERROR_STOP: tanpa ini psql melanjutkan sesudah pernyataan yang gagal
+    # dan keluar dengan kode 0, jadi pindahan yang separuh gagal terlihat
+    # persis seperti yang berhasil.
+    command: >
+      psql -h db -U forgehub -d forgehub
+           -v ON_ERROR_STOP=1
+           -f /pindahan/forgehub-migrasi.sql
 
 volumes:
   forgehub-data:

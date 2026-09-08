@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>PindahKePostgres</AssemblyName>
+    <RootNamespace>PindahKePostgres</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Versi disamakan dengan server/ForgeHub.Server.csproj. Dua versi
+         Microsoft.Data.Sqlite yang berbeda di satu repositori adalah cara
+         paling mudah mendapat perbedaan perilaku yang tidak ada yang cari. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
+
+    <!-- Disematkan karena versi yang ditarik Microsoft.Data.Sqlite (2.1.11)
+         punya kerentanan tingkat tinggi, GHSA-2m69-gcr7-jv3q. server/ sudah
+         menyematkan yang sama; alasannya baru terlihat di sini saat NuGet
+         mengeluhkannya. -->
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.13" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.13" />
+  </ItemGroup>
+</Project>
