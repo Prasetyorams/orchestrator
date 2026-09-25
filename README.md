@@ -53,7 +53,8 @@ ForgeHub dulu tinggal di folder `ForgeHub/` di dalam repo Studio. Sejak
 25 September 2026 ia berdiri sendiri di repo ini, lengkap dengan riwayatnya,
 supaya mengembangkan orchestrator tidak mengganggu Studio dan sebaliknya.
 
-Keduanya hanya bersambung lewat API HTTP. Pemanggilnya tetap di repo Studio:
+Keduanya hanya bersambung lewat API HTTP. Pemanggilnya tetap di
+[repo Studio](https://github.com/Fahib16/Studio):
 
 | Klien | Berkas di repo Studio |
 |---|---|
@@ -132,8 +133,7 @@ jadi setiap penarikan hanya membawa baris yang benar-benar baru.
 ## Menjalankan
 
 ```bash
-cd ForgeHub
-cp .env.example .env      # lalu GANTI JWT_SECRET
+cp .env.example .env      # lalu isi — setiap variabel dijelaskan di dalamnya
 docker compose up --build
 ```
 

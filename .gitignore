@@ -20,6 +20,11 @@ forgehub-migrasi.sql
 # disandikan dengannya ikut terbuka bagi siapa pun yang bisa membaca repo.
 signing.key
 
+# Setelan docker compose milik SATU mesin: jalur data dan rahasianya
+# (JWT_SECRET, DB_PASSWORD). Yang masuk git adalah templatnya,
+# .env.example.
+.env
+
 # Cache inkremental TypeScript: dihasilkan ulang tiap kali diperiksa.
 *.tsbuildinfo
 /.metadata/
