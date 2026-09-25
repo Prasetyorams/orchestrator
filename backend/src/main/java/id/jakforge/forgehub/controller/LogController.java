@@ -34,9 +34,10 @@ public class LogController {
     // Catatan
     // -----------------------------------------------------------------
 
+    /** {@code level} boleh lebih dari satu: {@code ?level=WARN,ERROR} atau {@code ?level=WARN&level=ERROR}. */
     @GetMapping("/logs")
     public List<Map<String, Object>> daftar(
-            @RequestParam(required = false) String level,
+            @RequestParam(required = false) List<String> level,
             @RequestParam(required = false) String robot,
             @RequestParam(required = false) String process,
             @RequestParam(name = "jobId", required = false) String jobId,
@@ -68,12 +69,14 @@ public class LogController {
     // Peringatan
     // -----------------------------------------------------------------
 
+    /** {@code severity} boleh lebih dari satu, sama seperti {@code level} pada catatan. */
     @GetMapping("/alerts")
     public List<Map<String, Object>> peringatan(
             @RequestParam(required = false) String unread,
+            @RequestParam(required = false) List<String> severity,
             @RequestParam(required = false) Integer limit) {
 
-        return service.peringatan(tenant(), unread, limit);
+        return service.peringatan(tenant(), unread, severity, limit);
     }
 
     @PostMapping("/alerts/{id}/read")

@@ -10,7 +10,7 @@ import { DataTable } from "@/components/DataTable";
 import { Dialog, Isian, kelasIsian } from "@/components/Dialog";
 
 export default function Lingkungan() {
-  const { t } = useT();
+  const { t, tp } = useT();
   const klien = useQueryClient();
 
   const [baru, setBaru] = useState(false);
@@ -55,7 +55,7 @@ export default function Lingkungan() {
           kunci={(l) => l.name}
           kolom={[
             { judul: "Nama", sel: (l) => <span className="font-medium">{l.name}</span>, urut: (l) => l.name },
-            { judul: "Keterangan", sel: (l) => <span className="text-muted">{l.description ?? "-"}</span> },
+            { judul: "Keterangan", sel: (l) => <span className="text-muted">{l.description ? tp(l.description) : "-"}</span> },
             { judul: "Robot", sel: (l) => <span className="tabular-nums">{l.robotCount}</span>, urut: (l) => l.robotCount },
             { judul: "Dibuat", sel: (l) => <span className="text-muted">{dateTimeOf(l.createdAt)}</span>, urut: (l) => l.createdAt },
             {
@@ -78,7 +78,7 @@ export default function Lingkungan() {
       </Card>
 
       <Dialog
-        judul={`${t("Tambah")} ${t("Lingkungan").toLowerCase()}`}
+        judul={t("Tambah lingkungan")}
         terbuka={baru}
         onTutup={() => setBaru(false)}
         aksi={
@@ -88,7 +88,7 @@ export default function Lingkungan() {
               variant="primary"
               disabled={simpan.isPending}
               onClick={() => {
-                if (!nama.trim()) return setGalat("Nama lingkungan wajib diisi.");
+                if (!nama.trim()) return setGalat(t("Nama lingkungan wajib diisi."));
                 simpan.mutate({ name: nama.trim(), description: ket });
               }}
             >

@@ -9,9 +9,12 @@ import id.jakforge.forgehub.repository.LogRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /** Aturan tentang catatan dan peringatan. */
@@ -42,7 +45,12 @@ public class LogService {
     // Catatan
     // -----------------------------------------------------------------
 
-    public List<Map<String, Object>> cari(UUID tenantId, String level, String robot,
+    /**
+     * @param level tingkat yang ingin dilihat — satu atau lebih, dari
+     *              {@code ?level=INFO,WARN} maupun {@code ?level=INFO&level=WARN}.
+     *              Kosong berarti semua tingkat.
+     */
+    public List<Map<String, Object>> cari(UUID tenantId, List<String> level, String robot,
                                           String process, String jobId, Integer batas) {
 
         UUID job = null;
@@ -55,10 +63,51 @@ public class LogService {
             if (job == null) return Db.kosong();
         }
 
-        String tingkat = level == null || level.isBlank() ? null : LogLevel.dari(level).name();
+        Set<LogLevel> diminta = tingkatDiminta(level);
 
-        return catatan.cari(tenantId, tingkat, robot, process, job,
+        // Tingkat rincian tidak pernah ditampilkan (lihat LogLevel.rincian).
+        // Yang HANYA meminta rincian memang tidak mendapat apa-apa; yang
+        // memintanya bersama tingkat lain mendapat tingkat lain itu saja.
+        if (!diminta.isEmpty() && diminta.stream().allMatch(LogLevel::rincian)) return Db.kosong();
+
+        Set<String> ejaan = new LinkedHashSet<>();
+
+        for (LogLevel t : diminta) {
+            if (!t.rincian()) ejaan.addAll(t.ejaan());
+        }
+
+        return catatan.cari(tenantId, ejaan, robot, process, job,
                 Batas.antara(batas, BATAS_BAWAAN, BATAS_MAKS));
+    }
+
+    /**
+     * Tingkat yang diminta, sebagai himpunan.
+     *
+     * <p>Koma dipecah di sini juga, bukan hanya diserahkan ke Spring: bentuk
+     * {@code ?level=INFO,WARN} harus tetap berarti dua tingkat walaupun
+     * parameternya kelak dibaca sebagai satu untai.
+     */
+    static Set<LogLevel> tingkatDiminta(List<String> mentah) {
+        Set<LogLevel> hasil = EnumSet.noneOf(LogLevel.class);
+        if (mentah == null) return hasil;
+
+        for (String bagian : mentah) {
+            if (bagian == null) continue;
+
+            for (String teks : bagian.split(",")) {
+                if (teks.isBlank()) continue;
+
+                LogLevel tingkat = LogLevel.kenali(teks);
+
+                if (tingkat == null) {
+                    throw ApiException.salah("Tingkat catatan tidak dikenal: '" + teks.trim() + "'.");
+                }
+
+                hasil.add(tingkat);
+            }
+        }
+
+        return hasil;
     }
 
     /**
@@ -82,6 +131,7 @@ public class LogService {
         }
 
         int ditulis = 0;
+        int dilewati = 0;
 
         for (Object o : baris) {
             if (!(o instanceof Map)) continue;
@@ -92,6 +142,15 @@ public class LogService {
             if (pesan == null || pesan.isBlank()) continue;
 
             LogLevel tingkat = LogLevel.dari(Badan.teks(b, "level"));
+
+            // TRACE dan DEBUG tidak disimpan — lihat LogLevel.rincian. Ditolak
+            // di sini, bukan hanya disembunyikan saat dibaca: jejak per-activity
+            // yang tidak pernah ditampilkan hanya memenuhi tabel dan
+            // memperlambat setiap pencarian.
+            if (tingkat.rincian()) {
+                dilewati++;
+                continue;
+            }
 
             catatan.tulis(tenantId, tingkat, pesan,
                     Badan.teks(b, "robotName"), Badan.teks(b, "machineName"),
@@ -111,6 +170,7 @@ public class LogService {
         Map<String, Object> hasil = new LinkedHashMap<>();
         hasil.put("ok", true);
         hasil.put("written", ditulis);
+        hasil.put("skipped", dilewati);
 
         return hasil;
     }
@@ -138,12 +198,42 @@ public class LogService {
     // Peringatan
     // -----------------------------------------------------------------
 
-    public List<Map<String, Object>> peringatan(UUID tenantId, String unread, Integer batas) {
+    /**
+     * @param severity tingkat yang ingin dilihat — Info, Warning, Error; satu
+     *                 atau lebih. Kosong berarti semua tingkat.
+     */
+    public List<Map<String, Object>> peringatan(UUID tenantId, String unread, List<String> severity,
+                                                Integer batas) {
         // Menerima "1" maupun "true": dasbor lama mengirim "1", dan klien lain
         // yang menulis "true" tidak boleh diam-diam melihat seluruh daftar.
         boolean hanyaBelumDibaca = "1".equals(unread) || "true".equalsIgnoreCase(unread);
 
-        return catatan.peringatan(tenantId, hanyaBelumDibaca, Batas.antara(batas, 50, 500));
+        return catatan.peringatan(tenantId, hanyaBelumDibaca, tingkatPeringatan(severity),
+                Batas.antara(batas, 50, 500));
+    }
+
+    /** Sama seperti {@link #tingkatDiminta}, untuk tingkat peringatan. */
+    static List<String> tingkatPeringatan(List<String> mentah) {
+        Set<Severity> hasil = EnumSet.noneOf(Severity.class);
+        if (mentah == null) return List.of();
+
+        for (String bagian : mentah) {
+            if (bagian == null) continue;
+
+            for (String teks : bagian.split(",")) {
+                if (teks.isBlank()) continue;
+
+                Severity tingkat = Severity.dari(teks);
+
+                if (tingkat == null) {
+                    throw ApiException.salah("Tingkat peringatan tidak dikenal: '" + teks.trim() + "'.");
+                }
+
+                hasil.add(tingkat);
+            }
+        }
+
+        return hasil.stream().map(Severity::nilai).toList();
     }
 
     public Map<String, Object> tandaiDibaca(UUID tenantId, long id) {

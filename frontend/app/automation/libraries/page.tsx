@@ -10,7 +10,7 @@ import { DataTable } from "@/components/DataTable";
 import { Dialog } from "@/components/Dialog";
 
 export default function Gudang() {
-  const { t } = useT();
+  const { t, tp } = useT();
   const [detail, setDetail] = useState<Bucket | null>(null);
 
   const gudang = useQuery({ queryKey: ["buckets"], queryFn: ForgeHubApi.buckets });
@@ -20,8 +20,9 @@ export default function Gudang() {
       <h1 className="text-lg font-semibold text-ink">{t("Gudang")}</h1>
 
       <p className="text-sm text-muted">
-        Berkas yang dipakai bersama oleh proses — masukan, keluaran, lampiran. Klik ganda untuk
-        melihat isinya.
+        {t(
+          "Berkas yang dipakai bersama oleh proses — masukan, keluaran, lampiran. Klik ganda untuk melihat isinya.",
+        )}
       </p>
 
       <Card>
@@ -31,7 +32,7 @@ export default function Gudang() {
           onBuka={setDetail}
           kolom={[
             { judul: "Nama", sel: (g) => <span className="font-medium">{g.name}</span>, urut: (g) => g.name },
-            { judul: "Keterangan", sel: (g) => <span className="text-muted">{g.description ?? "-"}</span> },
+            { judul: "Keterangan", sel: (g) => <span className="text-muted">{g.description ? tp(g.description) : "-"}</span> },
             {
               judul: "Berkas",
               sel: (g) => <span className="tabular-nums">{g.fileCount}</span>,
@@ -83,7 +84,7 @@ function DialogBerkas({ gudang, onTutup }: { gudang: Bucket | null; onTutup: () 
       new Promise<void>((selesai, gagal) => {
         const pembaca = new FileReader();
 
-        pembaca.onerror = () => gagal(new Error("Berkasnya tidak bisa dibaca."));
+        pembaca.onerror = () => gagal(new Error(t("Berkasnya tidak bisa dibaca.")));
 
         pembaca.onload = async () => {
           // Hasilnya berbentuk data URL; yang dikirim hanya bagian sesudah

@@ -56,25 +56,30 @@ public class VaultService {
 
         periksaNilai(tipe, minta.value());
 
-        String tersimpan = tipe.rahasia() ? rahasia.protect(minta.value()) : minta.value();
-        boolean sudahAda = gudang.adaAset(tenantId, minta.name());
+        String tipeLama = gudang.tipeAset(tenantId, minta.name());
 
-        if (sudahAda) {
-            gudang.perbaruiAset(tenantId, minta.name(), tipe.name(), tersimpan,
-                    minta.description(), minta.scope());
-        } else {
-            gudang.buatAset(tenantId, minta.name(), tipe.name(), tersimpan,
-                    minta.description(), minta.scope());
-        }
+        // Nama pengguna hanya milik Credential. Aset yang berganti tipe dari
+        // Credential ke Text tidak boleh membawa nama pengguna yang tidak
+        // lagi ditampilkan di mana pun.
+        String pengguna = tipe == AssetType.Credential ? minta.username() : null;
+
+        tulisAset(tenantId, minta.name(), tipe, pengguna, minta.value(),
+                minta.description(), minta.scope(), tipeLama);
 
         Map<String, Object> hasil = new LinkedHashMap<>();
         hasil.put("ok", true);
-        hasil.put("created", !sudahAda);
+        hasil.put("created", tipeLama == null);
 
         return hasil;
     }
 
-    /** Aset rahasia dibuka di sini SAJA. */
+    /**
+     * Aset rahasia dibuka di sini SAJA.
+     *
+     * <p>Untuk Credential, {@code value} adalah kata sandinya — sama seperti
+     * sebelum kredensial menjadi aset, jadi Get Asset yang sudah membaca aset
+     * Credential tetap menerima hal yang sama — dan {@code username} ikut.
+     */
     public Map<String, Object> nilaiAset(UUID tenantId, String nama) {
         Map<String, Object> baris = gudang.nilaiAset(tenantId, nama);
 
@@ -91,7 +96,41 @@ public class VaultService {
         hasil.put("type", baris.get("type"));
         hasil.put("value", tipe != null && tipe.rahasia() ? rahasia.unprotect(mentah) : mentah);
 
+        if (tipe == AssetType.Credential) hasil.put("username", baris.get("username"));
+
         return hasil;
+    }
+
+    /**
+     * Buat atau perbarui satu aset.
+     *
+     * <p>Rahasia yang DIKOSONGKAN saat menyunting berarti "biarkan yang lama",
+     * bukan "hapus". Layar tidak pernah menerima isi rahasia, jadi isian kata
+     * sandi di dialog sunting selalu mulai kosong; memperlakukannya sebagai
+     * penghapusan berarti setiap orang yang hanya membetulkan keterangan
+     * diam-diam menghapus kata sandinya — dan yang tahu pertama kali adalah
+     * robot yang gagal masuk.
+     *
+     * <p>Hanya kalau tipenya TETAP. Aset yang berganti tipe menerima nilai
+     * yang baru apa adanya: teks polos yang tiba-tiba dianggap tersandi tidak
+     * akan pernah bisa dibuka.
+     */
+    private void tulisAset(UUID tenantId, String nama, AssetType tipe, String pengguna, String nilai,
+                           String keterangan, String cakupan, String tipeLama) {
+
+        String tersimpan = tipe.rahasia() ? rahasia.protect(nilai) : nilai;
+
+        if (tipeLama == null) {
+            gudang.buatAset(tenantId, nama, tipe.name(), pengguna, tersimpan, keterangan, cakupan);
+            return;
+        }
+
+        boolean pertahankan = tipe.rahasia()
+                && (nilai == null || nilai.isEmpty())
+                && tipe == AssetType.dari(tipeLama);
+
+        gudang.perbaruiAset(tenantId, nama, tipe.name(), pengguna, tersimpan, pertahankan,
+                keterangan, cakupan);
     }
 
     public void hapusAset(UUID tenantId, String nama) {
@@ -128,6 +167,10 @@ public class VaultService {
 
     // -----------------------------------------------------------------
     // Kredensial
+    //
+    // Sejak V3 kredensial adalah aset bertipe Credential. Jalur di bawah ini
+    // tetap ada untuk activity Get Credential dan klien lama; semuanya
+    // bekerja pada aset yang sama dengan yang tampil di halaman Aset.
     // -----------------------------------------------------------------
 
     public List<Map<String, Object>> kredensial(UUID tenantId) {
@@ -137,17 +180,18 @@ public class VaultService {
     public void simpanKredensial(UUID tenantId, Permintaan.Kredensial minta) {
         if (minta.name() == null) throw ApiException.salah("Nama kredensial wajib diisi.");
 
-        // Kata sandi kosong menghasilkan null, bukan untai kosong tersandi.
-        // Repository memakai COALESCE, jadi null berarti "biarkan yang lama".
-        String tersandi = rahasia.protect(minta.password());
+        String tipeLama = gudang.tipeAset(tenantId, minta.name());
 
-        if (gudang.adaKredensial(tenantId, minta.name())) {
-            gudang.perbaruiKredensial(tenantId, minta.name(), minta.username(),
-                    tersandi, minta.description());
-        } else {
-            gudang.buatKredensial(tenantId, minta.name(), minta.username(),
-                    tersandi, minta.description());
+        // Dulu kredensial dan aset punya daftar nama sendiri-sendiri; sekarang
+        // satu. Menyimpan kredensial di atas aset Text bernama sama akan
+        // menimpa nilai yang dipakai proses lain tanpa ada yang memintanya.
+        if (tipeLama != null && AssetType.dari(tipeLama) != AssetType.Credential) {
+            throw ApiException.sudahAda(
+                    "Nama '" + minta.name() + "' sudah dipakai aset bertipe " + tipeLama + ".");
         }
+
+        tulisAset(tenantId, minta.name(), AssetType.Credential, minta.username(), minta.password(),
+                minta.description(), "Global", tipeLama);
     }
 
     public Map<String, Object> nilaiKredensial(UUID tenantId, String nama) {

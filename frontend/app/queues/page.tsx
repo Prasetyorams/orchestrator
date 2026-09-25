@@ -10,7 +10,7 @@ import { DataTable } from "@/components/DataTable";
 import { Dialog } from "@/components/Dialog";
 
 export default function Antrean() {
-  const { t } = useT();
+  const { t, tp } = useT();
   const [detail, setDetail] = useState<Queue | null>(null);
 
   const antrean = useQuery({ queryKey: ["queues"], queryFn: ForgeHubApi.queues, refetchInterval: 10_000 });
@@ -20,7 +20,7 @@ export default function Antrean() {
       <h1 className="text-lg font-semibold text-ink">{t("Antrean")}</h1>
 
       <p className="text-sm text-muted">
-        Klik ganda pada barisnya untuk melihat butir-butirnya.
+        {t("Klik ganda pada barisnya untuk melihat butir-butirnya.")}
       </p>
 
       <Card>
@@ -34,7 +34,7 @@ export default function Antrean() {
               sel: (q) => (
                 <div>
                   <p className="font-medium">{q.name}</p>
-                  {q.description ? <p className="text-xs text-muted">{q.description}</p> : null}
+                  {q.description ? <p className="text-xs text-muted">{tp(q.description)}</p> : null}
                 </div>
               ),
               urut: (q) => q.name,
@@ -62,7 +62,7 @@ export default function Antrean() {
             { judul: "Total", sel: (q) => <span className="tabular-nums">{q.totalCount}</span>, urut: (q) => q.totalCount },
             {
               judul: "Percobaan",
-              sel: (q) => <span className="text-muted">maks {q.maxRetries}</span>,
+              sel: (q) => <span className="text-muted">{t("maks {0}", q.maxRetries)}</span>,
               urut: (q) => q.maxRetries,
             },
           ]}
@@ -95,7 +95,7 @@ function DialogButir({ antrean, onTutup }: { antrean: Queue | null; onTutup: () 
         kolom={[
           { judul: "Rujukan", sel: (b) => <span className="font-medium">{b.reference ?? "-"}</span>, urut: (b) => b.reference },
           { judul: "Status", sel: (b) => <Badge value={b.status} />, urut: (b) => b.status },
-          { judul: "Robot", sel: (b) => <span className="text-muted">{b.robotName ?? "-"}</span>, urut: (b) => b.robotName },
+          { judul: "Robot|satu", sel: (b) => <span className="text-muted">{b.robotName ?? "-"}</span>, urut: (b) => b.robotName },
           { judul: "Percobaan", sel: (b) => <span className="tabular-nums">{b.retries}</span>, urut: (b) => b.retries },
           {
             judul: "Isi",

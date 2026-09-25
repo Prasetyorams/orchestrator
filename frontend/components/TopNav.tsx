@@ -9,6 +9,7 @@ import { BAHASA, useT, type Bahasa } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { dateTimeOf } from "@/lib/utils";
 import { ProfileMenu } from "@/components/ProfileMenu";
+import { Badge } from "@/components/ui/primitives";
 
 /** Ke mana tiap jenis hasil pencarian mengarah. */
 const HALAMAN: Record<string, string> = {
@@ -21,7 +22,7 @@ const HALAMAN: Record<string, string> = {
 };
 
 export function TopNav() {
-  const { t, bahasa, setBahasa } = useT();
+  const { t, tp, bahasa, setBahasa } = useT();
   const router = useRouter();
   const klien = useQueryClient();
 
@@ -97,7 +98,8 @@ export function TopNav() {
           type="search"
           value={kata}
           onChange={(e) => setKata(e.target.value)}
-          placeholder={`${t("Cari")} proses, robot, antrean...`}
+          placeholder={t("Cari proses, robot, antrean...")}
+          aria-label={t("Cari")}
           className="w-full rounded-lg border border-line bg-canvas py-2 pl-9 pr-3 text-sm outline-none focus:border-info"
         />
 
@@ -111,9 +113,12 @@ export function TopNav() {
                   onClick={() => buka(h)}
                   className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm hover:bg-slate-50"
                 >
-                  <span className="w-16 shrink-0 text-xs font-medium text-muted">{h.kind}</span>
+                  {/* Jenisnya (Proses, Robot, ...) dari server berbahasa Indonesia,
+                      dan kebetulan sama dengan label menu — jadi kamus yang sama
+                      menerjemahkannya. */}
+                  <span className="w-20 shrink-0 text-xs font-medium text-muted">{t(h.kind)}</span>
                   <span className="truncate font-medium text-ink">{h.label}</span>
-                  <span className="ml-auto truncate text-xs text-muted">{h.detail}</span>
+                  <span className="ml-auto truncate text-xs text-muted">{tp(h.detail)}</span>
                 </button>
               ))
             ) : (
@@ -201,8 +206,11 @@ export function TopNav() {
                       key={a.id}
                       className={cn("border-b border-line/70 px-4 py-2.5 last:border-0", !a.isRead && "bg-blue-50/40")}
                     >
-                      <p className="text-sm font-medium text-ink">{a.title}</p>
-                      {a.message ? <p className="mt-0.5 text-xs text-muted">{a.message}</p> : null}
+                      <p className="flex items-center gap-2 text-sm font-medium text-ink">
+                        <Badge value={a.severity.toUpperCase()} />
+                        <span className="min-w-0">{tp(a.title)}</span>
+                      </p>
+                      {a.message ? <p className="mt-0.5 text-xs text-muted">{tp(a.message)}</p> : null}
                       <p className="mt-1 text-[11px] text-muted">{dateTimeOf(a.createdAt)}</p>
                     </div>
                   ))

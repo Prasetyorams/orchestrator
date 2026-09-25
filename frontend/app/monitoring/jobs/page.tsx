@@ -100,8 +100,8 @@ export default function Pekerjaan() {
             </>
           )}
           kolom={[
-            { judul: "Proses", sel: (j) => <span className="font-medium">{j.processName}</span>, urut: (j) => j.processName },
-            { judul: "Robot", sel: (j) => j.robotName ?? "-", urut: (j) => j.robotName },
+            { judul: "Proses|satu", sel: (j) => <span className="font-medium">{j.processName}</span>, urut: (j) => j.processName },
+            { judul: "Robot|satu", sel: (j) => j.robotName ?? "-", urut: (j) => j.robotName },
             { judul: "Keadaan", sel: (j) => <Badge value={j.state} />, urut: (j) => j.state },
             { judul: "Sumber", sel: (j) => <span className="text-muted">{j.source}</span>, urut: (j) => j.source },
             { judul: "Prioritas", sel: (j) => j.priority, urut: (j) => j.priority },
@@ -132,7 +132,7 @@ export default function Pekerjaan() {
 }
 
 function DialogDetail({ job, onTutup }: { job: Job | null; onTutup: () => void }) {
-  const { t } = useT();
+  const { t, tp } = useT();
 
   // Log pekerjaan ini diambil hanya saat dialognya terbuka. Ini yang diminta:
   // log berada DI DALAM prosesnya, bukan di halaman terpisah yang harus
@@ -148,15 +148,15 @@ function DialogDetail({ job, onTutup }: { job: Job | null; onTutup: () => void }
   return (
     <Dialog judul={`${job.processName} — ${job.state}`} terbuka onTutup={onTutup} lebar="max-w-3xl">
       <dl className="mb-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-        <Medan label={t("Robot")} nilai={job.robotName} />
-        <Medan label={t("Mesin")} nilai={job.machineName} />
+        <Medan label={t("Robot|satu")} nilai={job.robotName} />
+        <Medan label={t("Mesin|satu")} nilai={job.machineName} />
         <Medan label={t("Sumber")} nilai={job.source} />
         <Medan label={t("Prioritas")} nilai={job.priority} />
         <Medan label={t("Dimulai")} nilai={dateTimeOf(job.startedAt)} />
         <Medan label={t("Selesai")} nilai={dateTimeOf(job.endedAt)} />
       </dl>
 
-      {job.info ? <p className="mb-4 rounded-lg bg-slate-50 px-3 py-2 text-sm">{job.info}</p> : null}
+      {job.info ? <p className="mb-4 rounded-lg bg-slate-50 px-3 py-2 text-sm">{tp(job.info)}</p> : null}
 
       {job.inputJson ? <Kode judul="Input" isi={job.inputJson} /> : null}
       {job.outputJson ? <Kode judul="Output" isi={job.outputJson} /> : null}
@@ -171,7 +171,7 @@ function DialogDetail({ job, onTutup }: { job: Job | null; onTutup: () => void }
             <div key={l.id} className="flex gap-3 border-b border-line/70 px-3 py-1.5 text-xs last:border-0">
               <span className="w-32 shrink-0 tabular-nums text-muted">{dateTimeOf(l.loggedAt)}</span>
               <span className="w-14 shrink-0 font-medium">{l.level}</span>
-              <span className="break-all">{l.message}</span>
+              <span className="break-all">{tp(l.message)}</span>
             </div>
           ))
         ) : (
@@ -234,7 +234,7 @@ function DialogJalankan({
   });
 
   function kirim() {
-    if (!nama) return setGalat("Pilih prosesnya dulu.");
+    if (!nama) return setGalat(t("Pilih prosesnya dulu."));
 
     // JSON diperiksa DI SINI. Dikirim apa adanya, yang gagal justru robotnya
     // saat sudah mulai berjalan — dan kegagalan di sana terlihat sebagai
@@ -243,7 +243,7 @@ function DialogJalankan({
       try {
         JSON.parse(masukan);
       } catch {
-        return setGalat("Argumen masukan bukan JSON yang sah.");
+        return setGalat(t("Argumen masukan bukan JSON yang sah."));
       }
     }
 
@@ -269,7 +269,7 @@ function DialogJalankan({
         </>
       }
     >
-      <Isian label={t("Proses")}>
+      <Isian label={t("Proses|satu")}>
         <select value={nama} onChange={(e) => setNama(e.target.value)} className={kelasIsian}>
           <option value="">—</option>
           {proses.map((p) => (
@@ -288,7 +288,7 @@ function DialogJalankan({
         </select>
       </Isian>
 
-      <Isian label="Input JSON" petunjuk='Contoh: {"in_Nama":"Budi"}'>
+      <Isian label="Input JSON" petunjuk={t('Contoh: {"in_Nama":"Budi"}')}>
         <textarea
           rows={4}
           value={masukan}

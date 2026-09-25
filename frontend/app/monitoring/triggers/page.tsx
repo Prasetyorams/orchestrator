@@ -70,14 +70,14 @@ export default function Pemicu() {
           onBuka={setSunting}
           kolom={[
             { judul: "Nama", sel: (p) => <span className="font-medium">{p.name}</span>, urut: (p) => p.name },
-            { judul: "Proses", sel: (p) => p.processName, urut: (p) => p.processName },
+            { judul: "Proses|satu", sel: (p) => p.processName, urut: (p) => p.processName },
             {
               judul: "Jadwal",
               sel: (p) =>
                 p.cron ? (
                   <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">{p.cron}</code>
                 ) : (
-                  <span className="text-muted">tiap {p.intervalMinutes} menit</span>
+                  <span className="text-muted">{t("tiap {0} menit", p.intervalMinutes)}</span>
                 ),
               urut: (p) => p.cron ?? `${p.intervalMinutes}m`,
             },
@@ -188,8 +188,8 @@ function IsiDialog({
   });
 
   function kirim() {
-    if (!nama.trim()) return setGalat("Nama pemicu wajib diisi.");
-    if (!namaProses) return setGalat("Pilih prosesnya dulu.");
+    if (!nama.trim()) return setGalat(t("Nama pemicu wajib diisi."));
+    if (!namaProses) return setGalat(t("Pilih prosesnya dulu."));
 
     simpan.mutate({
       name: nama.trim(),
@@ -203,7 +203,7 @@ function IsiDialog({
 
   return (
     <Dialog
-      judul={awal ? `${t("Sunting")} — ${awal.name}` : `${t("Tambah")} ${t("Pemicu").toLowerCase()}`}
+      judul={awal ? `${t("Sunting")} — ${awal.name}` : t("Tambah pemicu")}
       terbuka
       onTutup={onTutup}
       lebar="max-w-2xl"
@@ -226,7 +226,7 @@ function IsiDialog({
           />
         </Isian>
 
-        <Isian label={t("Proses")}>
+        <Isian label={t("Proses|satu")}>
           <select value={namaProses} onChange={(e) => setNamaProses(e.target.value)} className={kelasIsian}>
             <option value="">—</option>
             {proses.map((p) => (
@@ -244,7 +244,7 @@ function IsiDialog({
           onClick={() => setPakaiCron(false)}
           className={`flex-1 rounded-md px-3 py-1.5 text-sm ${!pakaiCron ? "bg-card font-medium shadow-sm" : "text-muted"}`}
         >
-          Selang waktu
+          {t("Selang waktu")}
         </button>
         <button
           type="button"
@@ -258,8 +258,8 @@ function IsiDialog({
       {pakaiCron ? (
         <>
           <Isian
-            label="Ekspresi cron"
-            petunjuk="Lima ruas: menit jam tanggal bulan hari. Kalau tanggal DAN hari sama-sama diisi, cukup salah satu cocok."
+            label={t("Ekspresi cron")}
+            petunjuk={t("Lima ruas: menit jam tanggal bulan hari. Kalau tanggal DAN hari sama-sama diisi, cukup salah satu cocok.")}
           >
             <input value={cron} onChange={(e) => setCron(e.target.value)} className={`${kelasIsian} font-mono`} />
           </Isian>
@@ -273,13 +273,13 @@ function IsiDialog({
                 title={c.cron}
                 className="rounded-full border border-line px-2.5 py-1 text-xs text-muted transition hover:border-sidebar hover:text-ink"
               >
-                {c.arti}
+                {t(c.arti)}
               </button>
             ))}
           </div>
         </>
       ) : (
-        <Isian label="Jalankan tiap (menit)">
+        <Isian label={t("Jalankan tiap (menit)")}>
           <input
             type="number"
             min={1}
@@ -293,7 +293,7 @@ function IsiDialog({
       <div className="grid gap-x-4 sm:grid-cols-2">
         <Isian
           label={t("Zona Waktu")}
-          petunjuk="Jadwalnya dihitung menurut zona ini, bukan waktu server."
+          petunjuk={t("Jadwalnya dihitung menurut zona ini, bukan waktu server.")}
         >
           <select value={zona} onChange={(e) => setZona(e.target.value)} className={kelasIsian}>
             {ZONA.map((z) => (

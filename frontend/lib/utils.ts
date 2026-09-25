@@ -1,16 +1,22 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { lokalTanggal } from "@/lib/bahasa";
 
 /** Gabungkan kelas Tailwind, yang belakangan menang saat bentrok. */
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/** Waktu ISO menjadi jam yang enak dibaca; tanda hubung kalau kosong. */
+/**
+ * Waktu ISO menjadi jam yang enak dibaca; tanda hubung kalau kosong.
+ *
+ * Formatnya mengikuti bahasa yang dipilih: "25 Sep 2026 14.30" untuk
+ * Indonesia, "25 Sept 2026, 14:30" untuk Inggris.
+ */
 export function timeOf(iso: string | null | undefined) {
   if (!iso) return "-";
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "-" : d.toLocaleTimeString("id-ID", { hour12: false });
+  return Number.isNaN(d.getTime()) ? "-" : d.toLocaleTimeString(lokalTanggal(), { hour12: false });
 }
 
 export function dateTimeOf(iso: string | null | undefined) {
@@ -18,7 +24,7 @@ export function dateTimeOf(iso: string | null | undefined) {
   const d = new Date(iso);
   return Number.isNaN(d.getTime())
     ? "-"
-    : d.toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
+    : d.toLocaleString(lokalTanggal(), { dateStyle: "medium", timeStyle: "short" });
 }
 
 /** Bita menjadi satuan yang enak dibaca. */

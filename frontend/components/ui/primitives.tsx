@@ -22,7 +22,7 @@ export function Card({ className, children }: { className?: string; children: Re
 
 export function CardHeader({ title, action }: { title: string; action?: ReactNode }) {
   return (
-    <div className="flex items-center justify-between border-b border-line px-5 py-3">
+    <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
       <h2 className="text-sm font-semibold text-ink">{title}</h2>
       {action}
     </div>
@@ -38,11 +38,16 @@ export function StatCard({
   value,
   hint,
   tone = "default",
+  action,
+  className,
 }: {
   label: string;
   value: number | string;
   hint?: string;
   tone?: "default" | "ok" | "warn" | "danger" | "info";
+  /** Kendali kecil di kanan label, misalnya pilihan rentang waktu. */
+  action?: ReactNode;
+  className?: string;
 }) {
   const toneClass = {
     default: "text-ink",
@@ -53,8 +58,11 @@ export function StatCard({
   }[tone];
 
   return (
-    <Card className="p-5">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted">{label}</p>
+    <Card className={cn("p-5", className)}>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted">{label}</p>
+        {action}
+      </div>
       <p className={cn("mt-2 text-3xl font-semibold tabular-nums", toneClass)}>{value}</p>
       {hint ? <p className="mt-1 text-xs text-muted">{hint}</p> : null}
     </Card>
@@ -66,13 +74,17 @@ const badgeTone: Record<string, string> = {
   PENDING: "bg-amber-50 text-warn ring-amber-200",
   SUCCESSFUL: "bg-emerald-50 text-ok ring-emerald-200",
   FAULTED: "bg-red-50 text-danger ring-red-200",
+  STOPPING: "bg-amber-50 text-warn ring-amber-200",
   STOPPED: "bg-slate-100 text-slate-600 ring-slate-200",
   AVAILABLE: "bg-emerald-50 text-ok ring-emerald-200",
   BUSY: "bg-blue-50 text-info ring-blue-200",
   OFFLINE: "bg-slate-100 text-slate-600 ring-slate-200",
+  FATAL: "bg-red-100 text-danger ring-red-300",
   ERROR: "bg-red-50 text-danger ring-red-200",
+  // WARN dan WARNING satu tingkat dengan dua ejaan; JakRunner mengirim WARN.
+  WARN: "bg-amber-50 text-warn ring-amber-200",
   WARNING: "bg-amber-50 text-warn ring-amber-200",
-  INFO: "bg-slate-100 text-slate-600 ring-slate-200",
+  INFO: "bg-blue-50 text-info ring-blue-200",
 };
 
 export function Badge({ value }: { value: string }) {
@@ -125,6 +137,55 @@ export function Button({
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * Tombol berisi ikon saja.
+ *
+ * Label WAJIB: dipakai sebagai title (petunjuk saat kursor diam di atasnya)
+ * dan aria-label (untuk pembaca layar). Ikon tanpa label adalah tombol yang
+ * artinya harus ditebak.
+ *
+ * Petunjuknya dipasang di pembungkus, bukan di tombolnya: tombol yang
+ * dinonaktifkan tidak menerima kejadian tetikus di sebagian peramban, dan
+ * justru saat nonaktif itulah orang paling butuh tahu alasannya.
+ */
+export function IconButton({
+  label,
+  onClick,
+  disabled,
+  tone = "default",
+  children,
+}: {
+  label: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  tone?: "default" | "ok" | "danger";
+  children: ReactNode;
+}) {
+  const toneClass = {
+    default: "text-muted hover:bg-slate-100 hover:text-ink",
+    ok: "text-ok hover:bg-emerald-50",
+    danger: "text-muted hover:bg-red-50 hover:text-danger",
+  }[tone];
+
+  return (
+    <span title={label} className="inline-flex">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={label}
+        className={cn(
+          "inline-flex h-8 w-8 items-center justify-center rounded-lg transition",
+          "disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent",
+          toneClass,
+        )}
+      >
+        {children}
+      </button>
+    </span>
   );
 }
 

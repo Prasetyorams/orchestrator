@@ -8,7 +8,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/primitives";
 import { DataTable } from "@/components/DataTable";
 
 export default function Setelan() {
-  const { t } = useT();
+  const { t, tp } = useT();
 
   const s = useQuery({ queryKey: ["settings"], queryFn: ForgeHubApi.settings });
   const lisensi = useQuery({ queryKey: ["licensing"], queryFn: ForgeHubApi.licensing });
@@ -19,21 +19,21 @@ export default function Setelan() {
       <h1 className="text-lg font-semibold text-ink">{t("Setelan")}</h1>
 
       <Card>
-        <CardHeader title="Layanan" />
+        <CardHeader title={t("Layanan")} />
         <CardBody>
           <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <Medan label="Penyewa" nilai={s.data?.tenant} />
-            <Medan label="Basis data" nilai={s.data?.database} />
-            <Medan label="Zona tampilan" nilai={s.data?.displayTimezone} />
-            <Medan label="Waktu server" nilai={dateTimeOf(s.data?.serverTime)} />
-            <Medan label="Robot dianggap putus setelah" nilai={`${s.data?.robotOfflineAfterSeconds ?? "-"} detik`} />
-            <Medan label="Masa berlaku token" nilai={`${s.data?.tokenLifetimeHours ?? "-"} jam`} />
+            <Medan label={t("Penyewa aktif")} nilai={s.data?.tenant} />
+            <Medan label={t("Basis data")} nilai={s.data?.database} />
+            <Medan label={t("Zona tampilan")} nilai={s.data?.displayTimezone} />
+            <Medan label={t("Waktu server")} nilai={dateTimeOf(s.data?.serverTime)} />
+            <Medan label={t("Robot dianggap putus setelah")} nilai={t("{0} detik", s.data?.robotOfflineAfterSeconds ?? "-")} />
+            <Medan label={t("Masa berlaku token")} nilai={t("{0} jam", s.data?.tokenLifetimeHours ?? "-")} />
           </dl>
         </CardBody>
       </Card>
 
       <Card>
-        <CardHeader title="Isi basis data" />
+        <CardHeader title={t("Isi basis data")} />
         <CardBody>
           <dl className="grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
             <Medan label={t("Pengguna")} nilai={s.data?.counts.users} />
@@ -57,7 +57,7 @@ export default function Setelan() {
             {
               judul: "Total",
               sel: (l) => (
-                <span className="tabular-nums text-muted">{l.total === 0 ? "tanpa batas" : l.total}</span>
+                <span className="tabular-nums text-muted">{l.total === 0 ? t("tanpa batas") : l.total}</span>
               ),
             },
             { judul: "Berlaku sampai", sel: (l) => <span className="text-muted">{l.expiresAt ? dateTimeOf(l.expiresAt) : "-"}</span> },
@@ -73,7 +73,7 @@ export default function Setelan() {
           perHalaman={0}
           kolom={[
             { judul: "Nama", sel: (p) => <span className="font-medium">{p.name}</span> },
-            { judul: "Keterangan", sel: (p) => <span className="text-muted">{p.description ?? "-"}</span> },
+            { judul: "Keterangan", sel: (p) => <span className="text-muted">{p.description ? tp(p.description) : "-"}</span> },
             {
               judul: "Izin",
               sel: (p) => <code className="text-xs text-muted">{p.permissions ?? "-"}</code>,

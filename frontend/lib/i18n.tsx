@@ -5,329 +5,38 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from "react";
+import {
+  bahasaDikenal,
+  setBahasaAktif,
+  terjemahkan,
+  terjemahkanPesan,
+  type Bahasa,
+} from "@/lib/bahasa";
 
-/**
- * Bahasa antarmuka: Indonesia, Inggris, Jawa.
- *
- * KUNCINYA adalah teks Indonesianya sendiri, sama seperti di Studio dan
- * JakRunner. Teks yang belum diterjemahkan karena itu jatuh kembali ke bahasa
- * Indonesia yang BENAR — bukan menjadi kode seperti "nav.home" yang bocor ke
- * layar. Dan sumbernya tetap bisa dibaca tanpa membuka kamusnya.
- *
- * Kamus yang belum lengkap tidak pernah merusak antarmuka; ia hanya membuat
- * sebagian tetap berbahasa Indonesia.
- */
-export type Bahasa = "id" | "en" | "jv";
+// Diekspor ulang dari sini supaya komponen cukup mengimpor satu tempat.
+export { BAHASA, type Bahasa } from "@/lib/bahasa";
 
-export const BAHASA: { kode: Bahasa; nama: string }[] = [
-  { kode: "id", nama: "Indonesia" },
-  { kode: "en", nama: "English" },
-  { kode: "jv", nama: "Jawa" },
-];
-
-const EN: Record<string, string> = {
-  // navigasi
-  Beranda: "Home",
-  Pemantauan: "Monitoring",
-  Pekerjaan: "Jobs",
-  Catatan: "Logs",
-  Pemicu: "Triggers",
-  Otomasi: "Automation",
-  Proses: "Processes",
-  Paket: "Packages",
-  Antrean: "Queues",
-  Aset: "Assets",
-  Kredensial: "Credentials",
-  Robot: "Robots",
-  Mesin: "Machines",
-  Lingkungan: "Environments",
-  Gudang: "Storage",
-  Penyewa: "Tenants",
-  Pengguna: "Users",
-  Peran: "Roles",
-  Lisensi: "Licensing",
-  Setelan: "Settings",
-
-  // kartu dasbor
-  "Robot Aktif": "Active robots",
-  "Pekerjaan Berjalan": "Running jobs",
-  "Berhasil Hari Ini": "Succeeded today",
-  "Gagal Hari Ini": "Failed today",
-  "Tingkat Keberhasilan": "Success rate",
-  "Sedang Berjalan": "In progress",
-  "Pemicu Berikutnya": "Upcoming triggers",
-  "Peringatan Terbaru": "Recent alerts",
-  "Ringkasan Antrean": "Queue summary",
-  "Riwayat 14 Hari": "Last 14 days",
-
-  // kolom
-  Nama: "Name",
-  Status: "State",
-  Keadaan: "State",
-  Prioritas: "Priority",
-  Sumber: "Source",
-  Kemajuan: "Progress",
-  Dibuat: "Created",
-  Dimulai: "Started",
-  Selesai: "Ended",
-  Keterangan: "Description",
-  Versi: "Version",
-  Ukuran: "Size",
-  Diterbitkan: "Published",
-  Berkas: "Files",
-  Tingkat: "Level",
-  Pesan: "Message",
-  Waktu: "Time",
-  Jadwal: "Schedule",
-  "Jalan Berikutnya": "Next run",
-  "Jalan Terakhir": "Last run",
-  "Zona Waktu": "Time zone",
-  Percobaan: "Retries",
-  Rujukan: "Reference",
-  Tipe: "Type",
-  Denyut: "Heartbeat",
-  Memori: "Memory",
-
-  // tombol dan aksi
-  Muat: "Refresh",
-  "Muat ulang": "Refresh",
-  Jalankan: "Run",
-  Hentikan: "Stop",
-  Hapus: "Delete",
-  Simpan: "Save",
-  Batal: "Cancel",
-  Tutup: "Close",
-  Tambah: "Add",
-  Sunting: "Edit",
-  Unduh: "Download",
-  Unggah: "Upload",
-  Cari: "Search",
-  Detail: "Details",
-  Nyalakan: "Enable",
-  Matikan: "Disable",
-  Keluar: "Sign out",
-  Masuk: "Sign in",
-  "Tandai semua dibaca": "Mark all read",
-
-  // pesan
-  "Belum ada data.": "Nothing here yet.",
-  "Memuat...": "Loading...",
-  "Tidak ada yang cocok.": "No matches.",
-  "Yakin menghapus": "Delete",
-  Halaman: "Page",
-  dari: "of",
-  dipilih: "selected",
-  baris: "rows",
-  "Nama pengguna": "Username",
-  "Kata sandi": "Password",
-  Bahasa: "Language",
-
-  // profil
-  "Menu profil": "Profile menu",
-  "Ubah profil": "Edit profile",
-  "Ubah kata sandi": "Change password",
-  "Nama tampilan": "Display name",
-  Surel: "Email",
-  "Belum ada surel": "No email yet",
-  "Kosongkan untuk menghapus.": "Leave empty to remove it.",
-  "Nama pengguna dipakai untuk masuk dan hanya bisa diubah Administrator.":
-    "The username is used to sign in and can only be changed by an Administrator.",
-  "Kata sandi saat ini": "Current password",
-  "Kata sandi baru": "New password",
-  "Ulangi kata sandi baru": "Confirm new password",
-  "Minimal 8 karakter.": "At least 8 characters.",
-  "Nama tampilan wajib diisi.": "Display name is required.",
-  "Semua isian wajib diisi.": "All fields are required.",
-  "Kata sandi baru minimal 8 karakter.": "The new password must be at least 8 characters.",
-  "Ulangan kata sandi baru tidak sama.": "The new passwords don't match.",
-  "Kata sandi baru harus berbeda dari yang lama.": "The new password must differ from the current one.",
-  "Kata sandi berhasil diganti.": "Your password has been changed.",
-  "Menyimpan...": "Saving...",
-
-  // paket
-  "Versi Terbaru": "Latest version",
-  "Jumlah Versi": "Versions",
-  "Diterbitkan Oleh": "Published by",
-  "Titik Masuk": "Entry point",
-  "Riwayat versi": "Version history",
-  Terbaru: "Latest",
-  "Satu baris per paket, dengan versi tertingginya. Klik ganda untuk melihat semua versinya.":
-    "One row per package, showing its highest version. Double-click to see every version.",
-  "Belum ada paket yang diterbitkan. Terbitkan dari Studio: tab Design → grup ForgeHub → Terbitkan.":
-    "No packages published yet. Publish from Studio: Design tab → ForgeHub group → Terbitkan.",
-
-  // keadaan kosong
-  "Tidak ada pekerjaan yang sedang berjalan.": "No jobs are running.",
-  "Tidak ada pemicu yang aktif.": "No triggers are enabled.",
-  "Belum ada robot yang mendaftar.": "No robot has registered yet.",
-
-  // potongan yang dirangkai
-  terdaftar: "registered",
-  terputus: "disconnected",
-  menunggu: "waiting",
-  "pekerjaan hari ini": "jobs today",
-  berhasil: "succeeded",
-  gagal: "failed",
-  "CPU / Memori": "CPU / memory",
-  "Semua keadaan": "All states",
-  "Semua tingkat": "All levels",
-  "Semua proses": "All processes",
+type Isi = {
+  bahasa: Bahasa;
+  setBahasa: (b: Bahasa) => void;
+  /** Teks antarmuka; {0}, {1}, ... diisi dari nilai sesudahnya. */
+  t: (teks: string, ...nilai: (string | number)[]) => string;
+  /** Teks dari server: galat, peringatan, keterangan pekerjaan, catatan. */
+  tp: (teks: string | null | undefined) => string;
 };
 
-const JV: Record<string, string> = {
-  Beranda: "Ngarep",
-  Pemantauan: "Ngawasi",
-  Pekerjaan: "Pagawéan",
-  Catatan: "Cathetan",
-  Pemicu: "Pamicu",
-  Otomasi: "Otomatisasi",
-  Proses: "Proses",
-  Paket: "Pakèt",
-  Antrean: "Antrèan",
-  Aset: "Asèt",
-  Kredensial: "Kredensial",
-  Robot: "Robot",
-  Mesin: "Mesin",
-  Lingkungan: "Lingkungan",
-  Gudang: "Gudhang",
-  Penyewa: "Panyéwa",
-  Pengguna: "Pangguna",
-  Peran: "Peran",
-  Lisensi: "Lisènsi",
-  Setelan: "Setelan",
-
-  "Robot Aktif": "Robot urip",
-  "Pekerjaan Berjalan": "Pagawéan mlaku",
-  "Berhasil Hari Ini": "Kasil dina iki",
-  "Gagal Hari Ini": "Gagal dina iki",
-  "Tingkat Keberhasilan": "Tingkat kasil",
-  "Sedang Berjalan": "Lagi mlaku",
-  "Pemicu Berikutnya": "Pamicu sabanjuré",
-  "Peringatan Terbaru": "Pènget anyar",
-  "Ringkasan Antrean": "Ringkesan antrèan",
-  "Riwayat 14 Hari": "Riwayat 14 dina",
-
-  Nama: "Jeneng",
-  Status: "Kahanan",
-  Keadaan: "Kahanan",
-  Prioritas: "Prioritas",
-  Sumber: "Sumber",
-  Kemajuan: "Kemajuan",
-  Dibuat: "Digawé",
-  Dimulai: "Diwiwiti",
-  Selesai: "Rampung",
-  Keterangan: "Katrangan",
-  Versi: "Vèrsi",
-  Ukuran: "Ukuran",
-  Diterbitkan: "Diterbitaké",
-  Berkas: "Berkas",
-  Tingkat: "Tingkat",
-  Pesan: "Pesen",
-  Waktu: "Wektu",
-  Jadwal: "Jadwal",
-  "Jalan Berikutnya": "Mlaku sabanjuré",
-  "Jalan Terakhir": "Mlaku pungkasan",
-  "Zona Waktu": "Zona wektu",
-  Percobaan: "Nyoba",
-  Rujukan: "Rujukan",
-  Tipe: "Jinis",
-  Denyut: "Denyut",
-  Memori: "Mèmori",
-
-  Muat: "Muat manèh",
-  "Muat ulang": "Muat manèh",
-  Jalankan: "Lakokna",
-  Hentikan: "Mandhegna",
-  Hapus: "Busak",
-  Simpan: "Simpen",
-  Batal: "Batal",
-  Tutup: "Tutup",
-  Tambah: "Tambah",
-  Sunting: "Sunting",
-  Unduh: "Undhuh",
-  Unggah: "Unggah",
-  Cari: "Golèk",
-  Detail: "Rincian",
-  Nyalakan: "Uripna",
-  Matikan: "Patènana",
-  Keluar: "Metu",
-  Masuk: "Mlebu",
-  "Tandai semua dibaca": "Tandhani kabèh wis diwaca",
-
-  "Belum ada data.": "Durung ana data.",
-  "Memuat...": "Ngemot...",
-  "Tidak ada yang cocok.": "Ora ana sing cocog.",
-  "Yakin menghapus": "Busak",
-  Halaman: "Kaca",
-  dari: "saka",
-  dipilih: "dipilih",
-  baris: "baris",
-  "Nama pengguna": "Jeneng pangguna",
-  "Kata sandi": "Tembung sandi",
-  Bahasa: "Basa",
-
-  // profil
-  "Menu profil": "Menu profil",
-  "Ubah profil": "Owahi profil",
-  "Ubah kata sandi": "Owahi tembung sandi",
-  "Nama tampilan": "Jeneng tampilan",
-  Surel: "Email",
-  "Belum ada surel": "Durung ana email",
-  "Kosongkan untuk menghapus.": "Kosongna yèn arep dibusak.",
-  "Nama pengguna dipakai untuk masuk dan hanya bisa diubah Administrator.":
-    "Jeneng pangguna dienggo mlebu lan mung bisa diowahi Administrator.",
-  "Kata sandi saat ini": "Tembung sandi saiki",
-  "Kata sandi baru": "Tembung sandi anyar",
-  "Ulangi kata sandi baru": "Baleni tembung sandi anyar",
-  "Minimal 8 karakter.": "Paling sethithik 8 karakter.",
-  "Nama tampilan wajib diisi.": "Jeneng tampilan kudu diisi.",
-  "Semua isian wajib diisi.": "Kabèh isian kudu diisi.",
-  "Kata sandi baru minimal 8 karakter.": "Tembung sandi anyar paling sethithik 8 karakter.",
-  "Ulangan kata sandi baru tidak sama.": "Tembung sandi anyar sing dibaleni ora padha.",
-  "Kata sandi baru harus berbeda dari yang lama.": "Tembung sandi anyar kudu béda karo sing lawas.",
-  "Kata sandi berhasil diganti.": "Tembung sandi kasil diganti.",
-  "Menyimpan...": "Nyimpen...",
-
-  // paket
-  "Versi Terbaru": "Vèrsi paling anyar",
-  "Jumlah Versi": "Cacahé vèrsi",
-  "Diterbitkan Oleh": "Diterbitaké déning",
-  "Titik Masuk": "Titik mlebu",
-  "Riwayat versi": "Riwayat vèrsi",
-  Terbaru: "Paling anyar",
-  "Satu baris per paket, dengan versi tertingginya. Klik ganda untuk melihat semua versinya.":
-    "Siji baris saben pakèt, karo vèrsi paling dhuwuré. Klik kaping pindho kanggo ndeleng kabèh vèrsiné.",
-  "Belum ada paket yang diterbitkan. Terbitkan dari Studio: tab Design → grup ForgeHub → Terbitkan.":
-    "Durung ana pakèt sing diterbitaké. Terbitaké saka Studio: tab Design → grup ForgeHub → Terbitkan.",
-
-  // keadaan kosong
-  "Tidak ada pekerjaan yang sedang berjalan.": "Ora ana pagawéan sing mlaku.",
-  "Tidak ada pemicu yang aktif.": "Ora ana pamicu sing urip.",
-  "Belum ada robot yang mendaftar.": "Durung ana robot sing ndhaftar.",
-
-  // potongan yang dirangkai
-  terdaftar: "kadhaftar",
-  terputus: "pedhot",
-  menunggu: "ngentèni",
-  "pekerjaan hari ini": "pagawéan dina iki",
-  berhasil: "kasil",
-  gagal: "gagal",
-  "CPU / Memori": "CPU / mèmori",
-  "Semua keadaan": "Kabèh kahanan",
-  "Semua tingkat": "Kabèh tingkat",
-  "Semua proses": "Kabèh proses",
-};
-
-const KAMUS: Record<Bahasa, Record<string, string>> = { id: {}, en: EN, jv: JV };
+const Konteks = createContext<Isi>({
+  bahasa: "id",
+  setBahasa: () => {},
+  t: (s, ...nilai) => terjemahkan("id", s, nilai),
+  tp: (s) => s ?? "",
+});
 
 const KUNCI = "forgehub.bahasa";
-
-type Isi = { bahasa: Bahasa; setBahasa: (b: Bahasa) => void; t: (teks: string) => string };
-
-const Konteks = createContext<Isi>({ bahasa: "id", setBahasa: () => {}, t: (s) => s });
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   // Dimulai dari "id" di server DAN di render pertama peramban.
@@ -337,15 +46,26 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   // sebagai hydration mismatch. Jadi pilihannya dipasang sesudah pemasangan.
   const [bahasa, setBahasaState] = useState<Bahasa>("id");
 
+  // Diset SAAT render, bukan di efek: anak-anak yang dirender dalam putaran
+  // yang sama — tabel dengan tanggalnya — harus sudah memakai bahasa baru,
+  // bukan tertinggal satu putaran di bahasa lama.
+  setBahasaAktif(bahasa);
+
   useEffect(() => {
     try {
-      const tersimpan = window.localStorage.getItem(KUNCI) as Bahasa | null;
-      if (tersimpan && tersimpan in KAMUS) setBahasaState(tersimpan);
+      const tersimpan = window.localStorage.getItem(KUNCI);
+      if (bahasaDikenal(tersimpan)) setBahasaState(tersimpan);
     } catch {
       // Peramban yang melarang penyimpanan tetap boleh memakai ForgeHub;
       // yang hilang cuma ingatan pilihan bahasanya.
     }
   }, []);
+
+  // Pembaca layar dan terjemahan otomatis peramban membaca lang di <html>;
+  // tanpa ini keduanya mengira halaman berbahasa Inggris masih Indonesia.
+  useEffect(() => {
+    document.documentElement.lang = bahasa;
+  }, [bahasa]);
 
   const setBahasa = useCallback((b: Bahasa) => {
     setBahasaState(b);
@@ -356,9 +76,16 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const t = useCallback((teks: string) => KAMUS[bahasa][teks] ?? teks, [bahasa]);
+  const t = useCallback(
+    (teks: string, ...nilai: (string | number)[]) => terjemahkan(bahasa, teks, nilai),
+    [bahasa],
+  );
 
-  return <Konteks.Provider value={{ bahasa, setBahasa, t }}>{children}</Konteks.Provider>;
+  const tp = useCallback((teks: string | null | undefined) => terjemahkanPesan(bahasa, teks), [bahasa]);
+
+  const isi = useMemo(() => ({ bahasa, setBahasa, t, tp }), [bahasa, setBahasa, t, tp]);
+
+  return <Konteks.Provider value={isi}>{children}</Konteks.Provider>;
 }
 
 export function useT() {

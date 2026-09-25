@@ -28,6 +28,14 @@ public class CatalogRepository {
     // Proses
     // -----------------------------------------------------------------
 
+    /**
+     * Daftar proses, beserta pekerjaannya yang BELUM selesai.
+     *
+     * <p>active_jobs dan active_state yang membuat tombol Jalankan di halaman
+     * Proses mati selama prosesnya masih berjalan, lalu hidup lagi begitu
+     * selesai. Keadaannya dipilih yang paling jauh: RUNNING mengalahkan
+     * STOPPING, STOPPING mengalahkan PENDING.
+     */
     public List<Map<String, Object>> proses(UUID tenantId) {
         return db.rows("""
                 SELECT p.id, p.name, p.package_name, p.package_version, p.environment,
@@ -35,7 +43,15 @@ public class CatalogRepository {
                        (SELECT count(*) FROM jobs j
                          WHERE j.tenant_id = p.tenant_id AND j.process_name = p.name) AS job_count,
                        (SELECT max(j.created_at) FROM jobs j
-                         WHERE j.tenant_id = p.tenant_id AND j.process_name = p.name) AS last_run_at
+                         WHERE j.tenant_id = p.tenant_id AND j.process_name = p.name) AS last_run_at,
+                       (SELECT count(*) FROM jobs j
+                         WHERE j.tenant_id = p.tenant_id AND j.process_name = p.name
+                           AND j.state IN ('PENDING', 'RUNNING', 'STOPPING')) AS active_jobs,
+                       (SELECT j.state FROM jobs j
+                         WHERE j.tenant_id = p.tenant_id AND j.process_name = p.name
+                           AND j.state IN ('PENDING', 'RUNNING', 'STOPPING')
+                         ORDER BY CASE j.state WHEN 'RUNNING' THEN 0 WHEN 'STOPPING' THEN 1 ELSE 2 END
+                         LIMIT 1) AS active_state
                   FROM processes p
                  WHERE p.tenant_id = ?
                  ORDER BY p.name

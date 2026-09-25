@@ -21,14 +21,16 @@ public class DashboardController {
         this.service = service;
     }
 
+    /** Angka keempat periode — hari, minggu, bulan, tahun ini — ada di {@code periods}. */
     @GetMapping("/dashboard")
     public Map<String, Object> dasbor() {
         return service.dasbor(CurrentUser.get().tenantId());
     }
 
+    /** Tanpa {@code period}: empat belas hari terakhir, bentuk lamanya. */
     @GetMapping("/dashboard/history")
-    public List<Map<String, Object>> riwayat() {
-        return service.riwayat(CurrentUser.get().tenantId());
+    public List<Map<String, Object>> riwayat(@RequestParam(required = false) String period) {
+        return service.riwayat(CurrentUser.get().tenantId(), period);
     }
 
     @GetMapping("/search")

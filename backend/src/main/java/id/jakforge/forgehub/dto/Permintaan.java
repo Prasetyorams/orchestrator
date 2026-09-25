@@ -127,12 +127,15 @@ public final class Permintaan {
         }
     }
 
-    public record Aset(String name, String type, String value, String description, String scope) {
+    /** {@code username} hanya berarti untuk aset bertipe Credential; tipe lain mengabaikannya. */
+    public record Aset(String name, String type, String username, String value, String description,
+                       String scope) {
 
         public static Aset dari(Map<String, Object> body) {
             return new Aset(
                     Badan.nama(body, "name"),
                     Badan.teks(body, "type", "Text"),
+                    Badan.teks(body, "username"),
                     Badan.teks(body, "value"),
                     Badan.teks(body, "description"),
                     Badan.teks(body, "scope", "Global"));

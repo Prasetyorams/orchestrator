@@ -5,6 +5,8 @@ import id.jakforge.forgehub.model.Severity;
 import org.springframework.stereotype.Repository;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -29,7 +31,12 @@ public class LogRepository {
     // Catatan
     // -----------------------------------------------------------------
 
-    public List<Map<String, Object>> cari(UUID tenantId, String level, String robot,
+    /**
+     * @param tingkat nama tingkat yang boleh tampil, persis seperti tersimpan.
+     *                Kosong berarti semua tingkat — selain rincian, yang
+     *                SELALU disaring.
+     */
+    public List<Map<String, Object>> cari(UUID tenantId, Collection<String> tingkat, String robot,
                                           String process, UUID jobId, int batas) {
         List<String> where = new ArrayList<>();
         List<Object> args = new ArrayList<>();
@@ -37,9 +44,17 @@ public class LogRepository {
         where.add("tenant_id = ?");
         args.add(tenantId);
 
-        if (level != null && !level.isBlank()) {
-            where.add("level = ?");
-            args.add(level);
+        // Baris TRACE/DEBUG tidak lagi diterima, tapi yang tersimpan SEBELUM
+        // aturan itu — termasuk hasil pindahan dari ForgeHub .NET — masih ada
+        // di tabel. Disaring di sini supaya ketiga tampilan log (Catatan,
+        // detail proses, detail pekerjaan) sama-sama tidak menampilkannya.
+        List<String> rincian = LogLevel.namaRincian();
+        where.add("level NOT IN (" + tandaTanya(rincian.size()) + ")");
+        args.addAll(rincian);
+
+        if (tingkat != null && !tingkat.isEmpty()) {
+            where.add("level IN (" + tandaTanya(tingkat.size()) + ")");
+            args.addAll(tingkat);
         }
 
         if (robot != null && !robot.isBlank()) {
@@ -103,13 +118,29 @@ public class LogRepository {
     // -----------------------------------------------------------------
 
     public List<Map<String, Object>> peringatan(UUID tenantId, boolean hanyaBelumDibaca, int batas) {
+        return peringatan(tenantId, hanyaBelumDibaca, List.of(), batas);
+    }
+
+    /** @param tingkat nilai severity yang boleh tampil; kosong berarti semua. */
+    public List<Map<String, Object>> peringatan(UUID tenantId, boolean hanyaBelumDibaca,
+                                                Collection<String> tingkat, int batas) {
+        List<Object> args = new ArrayList<>(List.of(tenantId, hanyaBelumDibaca));
+        String saringTingkat = "";
+
+        if (!tingkat.isEmpty()) {
+            saringTingkat = " AND severity IN (" + tandaTanya(tingkat.size()) + ")";
+            args.addAll(tingkat);
+        }
+
+        args.add(batas);
+
         return db.rows("""
                 SELECT id, severity, title, message, source, is_read, created_at
                   FROM alerts
-                 WHERE tenant_id = ? AND (NOT ? OR NOT is_read)
+                 WHERE tenant_id = ? AND (NOT ? OR NOT is_read)%s
                  ORDER BY id DESC
                  LIMIT ?
-                """, tenantId, hanyaBelumDibaca, batas);
+                """.formatted(saringTingkat), args.toArray());
     }
 
     public void catatPeringatan(UUID tenantId, Severity tingkat, String judul,
@@ -130,5 +161,10 @@ public class LogRepository {
 
     public long belumDibaca(UUID tenantId) {
         return db.count("SELECT count(*) FROM alerts WHERE tenant_id = ? AND NOT is_read", tenantId);
+    }
+
+    /** "?, ?, ?" — nilainya tetap dikirim sebagai parameter, tidak pernah ditempel ke SQL. */
+    private static String tandaTanya(int jumlah) {
+        return String.join(", ", Collections.nCopies(jumlah, "?"));
     }
 }

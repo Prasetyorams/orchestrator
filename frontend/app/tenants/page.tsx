@@ -147,7 +147,7 @@ function DialogPengguna({
 
   return (
     <Dialog
-      judul={awal ? `${t("Sunting")} — ${awal.username}` : `${t("Tambah")} ${t("Pengguna").toLowerCase()}`}
+      judul={awal ? `${t("Sunting")} — ${awal.username}` : t("Tambah pengguna")}
       terbuka
       onTutup={onTutup}
       aksi={
@@ -157,9 +157,9 @@ function DialogPengguna({
             variant="primary"
             disabled={simpan.isPending}
             onClick={() => {
-              if (!username.trim()) return setGalat("Nama pengguna wajib diisi.");
+              if (!username.trim()) return setGalat(t("Nama pengguna wajib diisi."));
               if (!awal && sandi.length < 6) {
-                return setGalat("Pengguna baru butuh kata sandi minimal 6 karakter.");
+                return setGalat(t("Pengguna baru butuh kata sandi minimal 6 karakter."));
               }
 
               // Kata sandi kosong TIDAK dikirim. Server memakai syarat "hanya
@@ -193,13 +193,13 @@ function DialogPengguna({
         <input value={namaTampil} onChange={(e) => setNamaTampil(e.target.value)} className={kelasIsian} />
       </Isian>
 
-      <Isian label="Surel">
+      <Isian label={t("Surel")}>
         <input type="email" value={surel} onChange={(e) => setSurel(e.target.value)} className={kelasIsian} />
       </Isian>
 
       <Isian
         label={t("Kata sandi")}
-        petunjuk={awal ? "Kosongkan kalau tidak ingin menggantinya." : "Minimal 6 karakter."}
+        petunjuk={awal ? t("Kosongkan kalau tidak ingin menggantinya.") : t("Minimal 6 karakter.")}
       >
         <input type="password" value={sandi} onChange={(e) => setSandi(e.target.value)} className={kelasIsian} />
       </Isian>
@@ -219,7 +219,7 @@ function DialogPengguna({
           onChange={(e) => setAktif(e.target.checked)}
           className="h-4 w-4 rounded border-line"
         />
-        Aktif
+        {t("Aktif")}
       </label>
 
       {galat ? <p className="mt-3 text-sm text-danger">{galat}</p> : null}

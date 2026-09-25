@@ -31,10 +31,15 @@ public class VaultRepository {
     // Aset
     // -----------------------------------------------------------------
 
-    /** Nilai aset rahasia TIDAK ikut; yang muncul hanya penanda bahwa isinya ada. */
+    /**
+     * Nilai aset rahasia TIDAK ikut; yang muncul hanya penanda bahwa isinya ada.
+     *
+     * <p>Nama pengguna aset Credential ikut: itu bukan rahasia, dan tanpa itu
+     * daftar kredensial tidak bisa dibedakan satu sama lain.
+     */
     public List<Map<String, Object>> aset(UUID tenantId) {
         return db.rows("""
-                SELECT id, name, type, scope, description, created_at, updated_at,
+                SELECT id, name, type, scope, username, description, created_at, updated_at,
                        CASE WHEN type IN ('Credential', 'Secret') THEN NULL ELSE value_text END AS value_text,
                        CASE WHEN value_text IS NULL OR value_text = '' THEN FALSE ELSE TRUE END AS has_value
                   FROM assets
@@ -44,29 +49,38 @@ public class VaultRepository {
     }
 
     public Map<String, Object> nilaiAset(UUID tenantId, String nama) {
-        return db.row("SELECT type, value_text FROM assets WHERE tenant_id = ? AND name = ?", tenantId, nama);
+        return db.row("SELECT type, username, value_text FROM assets WHERE tenant_id = ? AND name = ?",
+                tenantId, nama);
     }
 
-    public boolean adaAset(UUID tenantId, String nama) {
-        return db.exists("SELECT count(*) FROM assets WHERE tenant_id = ? AND name = ?", tenantId, nama);
+    /** Tipe aset bernama itu, atau null kalau belum ada. */
+    public String tipeAset(UUID tenantId, String nama) {
+        return (String) db.scalar("SELECT type FROM assets WHERE tenant_id = ? AND name = ?", tenantId, nama);
     }
 
-    public void perbaruiAset(UUID tenantId, String nama, String tipe, String nilai,
-                             String keterangan, String cakupan) {
+    /**
+     * @param pertahankanNilai biarkan value_text yang lama — untuk rahasia yang
+     *                         tidak diisi ulang saat disunting. Lihat
+     *                         {@code VaultService.tulisAset}.
+     */
+    public void perbaruiAset(UUID tenantId, String nama, String tipe, String pengguna, String nilai,
+                             boolean pertahankanNilai, String keterangan, String cakupan) {
         db.exec("""
                 UPDATE assets
-                   SET type = ?, value_text = ?, description = ?, scope = ?, updated_at = now()
+                   SET type = ?, username = ?,
+                       value_text = CASE WHEN ? THEN value_text ELSE ? END,
+                       description = ?, scope = ?, updated_at = now()
                  WHERE tenant_id = ? AND name = ?
-                """, tipe, nilai, keterangan, cakupan, tenantId, nama);
+                """, tipe, pengguna, pertahankanNilai, nilai, keterangan, cakupan, tenantId, nama);
     }
 
-    public void buatAset(UUID tenantId, String nama, String tipe, String nilai,
+    public void buatAset(UUID tenantId, String nama, String tipe, String pengguna, String nilai,
                          String keterangan, String cakupan) {
         db.exec("""
-                INSERT INTO assets (id, tenant_id, name, type, value_text, description, scope,
+                INSERT INTO assets (id, tenant_id, name, type, username, value_text, description, scope,
                                     created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, now(), now())
-                """, Db.newId(), tenantId, nama, tipe, nilai, keterangan, cakupan);
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, now(), now())
+                """, Db.newId(), tenantId, nama, tipe, pengguna, nilai, keterangan, cakupan);
     }
 
     public int hapusAset(UUID tenantId, String nama) {
@@ -75,52 +89,35 @@ public class VaultRepository {
 
 
     // -----------------------------------------------------------------
-    // Kredensial
+    // Kredensial — aset bertipe Credential
+    //
+    // Sejak V3 tidak ada lagi tabel kredensial tersendiri. Yang tersisa di
+    // sini adalah pandangan ke aset bertipe Credential, untuk endpoint
+    // /api/credentials yang masih dipanggil activity Get Credential.
     // -----------------------------------------------------------------
 
-    /** Kolom password_enc sengaja tidak ikut dipilih. */
+    /** Kata sandinya (value_text) sengaja tidak ikut dipilih. */
     public List<Map<String, Object>> kredensial(UUID tenantId) {
         return db.rows("""
                 SELECT id, name, username, description, created_at
-                  FROM credentials
-                 WHERE tenant_id = ?
+                  FROM assets
+                 WHERE tenant_id = ? AND type = 'Credential'
                  ORDER BY name
                 """, tenantId);
     }
 
     public Map<String, Object> nilaiKredensial(UUID tenantId, String nama) {
-        return db.row("SELECT username, password_enc FROM credentials WHERE tenant_id = ? AND name = ?",
-                tenantId, nama);
+        return db.row("""
+                SELECT username, value_text AS password_enc
+                  FROM assets
+                 WHERE tenant_id = ? AND name = ? AND type = 'Credential'
+                """, tenantId, nama);
     }
 
-    public boolean adaKredensial(UUID tenantId, String nama) {
-        return db.exists("SELECT count(*) FROM credentials WHERE tenant_id = ? AND name = ?", tenantId, nama);
-    }
-
-    /**
-     * COALESCE pada password_enc: menyunting keterangan tanpa mengisi ulang
-     * kata sandinya tidak boleh MENGHAPUS kata sandi yang ada. Yang bersangkutan
-     * baru tahu saat robot berikutnya gagal masuk.
-     */
-    public void perbaruiKredensial(UUID tenantId, String nama, String pengguna,
-                                   String sandiTersandi, String keterangan) {
-        db.exec("""
-                UPDATE credentials
-                   SET username = ?, password_enc = COALESCE(?, password_enc), description = ?
-                 WHERE tenant_id = ? AND name = ?
-                """, pengguna, sandiTersandi, keterangan, tenantId, nama);
-    }
-
-    public void buatKredensial(UUID tenantId, String nama, String pengguna,
-                               String sandiTersandi, String keterangan) {
-        db.exec("""
-                INSERT INTO credentials (id, tenant_id, name, username, password_enc, description, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, now())
-                """, Db.newId(), tenantId, nama, pengguna, sandiTersandi, keterangan);
-    }
-
+    /** Hanya aset bertipe Credential: menghapus lewat jalur kredensial tidak boleh mengenai aset lain. */
     public int hapusKredensial(UUID tenantId, String nama) {
-        return db.exec("DELETE FROM credentials WHERE tenant_id = ? AND name = ?", tenantId, nama);
+        return db.exec("DELETE FROM assets WHERE tenant_id = ? AND name = ? AND type = 'Credential'",
+                tenantId, nama);
     }
 
     // -----------------------------------------------------------------

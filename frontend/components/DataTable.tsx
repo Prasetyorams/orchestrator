@@ -166,7 +166,7 @@ export function DataTable<T>({
                     type="checkbox"
                     checked={semuaTerpilih}
                     onChange={alihkanHalaman}
-                    aria-label="Pilih semua di halaman ini"
+                    aria-label={t("Pilih semua di halaman ini")}
                     className="h-4 w-4 rounded border-line"
                   />
                 </th>
@@ -217,7 +217,7 @@ export function DataTable<T>({
                         type="checkbox"
                         checked={terpilih.has(k)}
                         onChange={() => alihkanSatu(k)}
-                        aria-label="Pilih baris"
+                        aria-label={t("Pilih baris")}
                         className="h-4 w-4 rounded border-line"
                       />
                     </td>

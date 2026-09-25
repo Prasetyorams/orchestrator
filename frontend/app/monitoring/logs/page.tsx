@@ -1,20 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ForgeHubApi } from "@/lib/api";
 import { useT } from "@/lib/i18n";
-import { dateTimeOf } from "@/lib/utils";
+import { cn, dateTimeOf } from "@/lib/utils";
 import { Badge, Button, Card } from "@/components/ui/primitives";
 import { DataTable } from "@/components/DataTable";
 import { kelasIsian } from "@/components/Dialog";
+import { PilihTingkat } from "@/components/PilihTingkat";
 
-const TINGKAT = ["", "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"];
+// Tanpa TRACE dan DEBUG: ForgeHub tidak menyimpan maupun menampilkan tingkat
+// rincian (lihat LogLevel.rincian di backend), jadi pilihan itu selalu kosong.
+// WARN juga membawa baris WARNING — satu tingkat dengan dua ejaan.
+const TINGKAT = ["INFO", "WARN", "ERROR", "FATAL"];
 
 export default function Catatan() {
-  const { t } = useT();
+  const { t, tp } = useT();
 
-  const [tingkat, setTingkat] = useState("");
+  const [tingkat, setTingkat] = useState<string[]>([]);
   const [proses, setProses] = useState("");
   const [ikuti, setIkuti] = useState(true);
 
@@ -24,7 +28,7 @@ export default function Catatan() {
     queryKey: ["logs", tingkat, proses],
     queryFn: () =>
       ForgeHubApi.logs({
-        level: tingkat || undefined,
+        level: tingkat,
         process: proses || undefined,
         limit: 500,
       }),
@@ -32,6 +36,8 @@ export default function Catatan() {
     // baris terbaru tiap tiga detik membuat orang yang sedang membaca satu
     // baris kehilangan tempatnya.
     refetchInterval: ikuti ? 3_000 : false,
+    // Mengganti saringan tidak mengosongkan tabel lebih dulu.
+    placeholderData: keepPreviousData,
   });
 
   return (
@@ -39,15 +45,14 @@ export default function Catatan() {
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-lg font-semibold text-ink">{t("Catatan")}</h1>
 
-        <select value={tingkat} onChange={(e) => setTingkat(e.target.value)} className={`${kelasIsian} w-36`}>
-          {TINGKAT.map((x) => (
-            <option key={x} value={x}>
-              {x || t("Semua tingkat")}
-            </option>
-          ))}
-        </select>
+        <PilihTingkat pilihan={TINGKAT} terpilih={tingkat} onUbah={setTingkat} />
 
-        <select value={proses} onChange={(e) => setProses(e.target.value)} className={`${kelasIsian} w-48`}>
+        <select
+          value={proses}
+          onChange={(e) => setProses(e.target.value)}
+          className={`${kelasIsian} w-48`}
+          aria-label={t("Proses|satu")}
+        >
           <option value="">{t("Semua proses")}</option>
           {(daftarProses.data ?? []).map((p) => (
             <option key={p.name} value={p.name}>
@@ -63,7 +68,7 @@ export default function Catatan() {
             onChange={(e) => setIkuti(e.target.checked)}
             className="h-4 w-4 rounded border-line"
           />
-          Ikuti otomatis
+          {t("Ikuti otomatis")}
         </label>
 
         <Button className="ml-auto" onClick={() => log.refetch()}>
@@ -72,11 +77,12 @@ export default function Catatan() {
       </div>
 
       <p className="text-sm text-muted">
-        Paling banyak 500 baris terbaru. Untuk catatan satu proses atau satu pekerjaan, buka
-        detailnya dari halaman Proses atau Pekerjaan.
+        {t(
+          "Paling banyak 500 baris terbaru. Untuk catatan satu proses atau satu pekerjaan, buka detailnya dari halaman Proses atau Pekerjaan.",
+        )}
       </p>
 
-      <Card>
+      <Card className={cn("transition-opacity", log.isPlaceholderData && "opacity-60")}>
         <DataTable
           data={log.data ?? []}
           kunci={(l) => String(l.id)}
@@ -84,9 +90,9 @@ export default function Catatan() {
           kolom={[
             { judul: "Waktu", sel: (l) => <span className="tabular-nums text-muted">{dateTimeOf(l.loggedAt)}</span>, urut: (l) => l.id },
             { judul: "Tingkat", sel: (l) => <Badge value={l.level} />, urut: (l) => l.level },
-            { judul: "Robot", sel: (l) => <span className="text-muted">{l.robotName ?? "-"}</span>, urut: (l) => l.robotName },
-            { judul: "Proses", sel: (l) => <span className="text-muted">{l.processName ?? "-"}</span>, urut: (l) => l.processName },
-            { judul: "Pesan", sel: (l) => <span className="break-all">{l.message}</span> },
+            { judul: "Robot|satu", sel: (l) => <span className="text-muted">{l.robotName ?? "-"}</span>, urut: (l) => l.robotName },
+            { judul: "Proses|satu", sel: (l) => <span className="text-muted">{l.processName ?? "-"}</span>, urut: (l) => l.processName },
+            { judul: "Pesan", sel: (l) => <span className="break-all">{tp(l.message)}</span> },
           ]}
         />
       </Card>

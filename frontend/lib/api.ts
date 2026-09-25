@@ -1,4 +1,5 @@
 import axios, { AxiosError } from "axios";
+import { bahasaAktif, terjemahkan, terjemahkanPesan } from "@/lib/bahasa";
 
 /**
  * Klien HTTP ke backend ForgeHub.
@@ -51,10 +52,19 @@ api.interceptors.response.use(
   },
 );
 
-/** Pesan galat dari server, atau pesan bawaan kalau bentuknya tidak dikenal. */
+/**
+ * Pesan galat dari server, atau pesan bawaan kalau bentuknya tidak dikenal —
+ * dalam bahasa yang sedang dipilih.
+ *
+ * Server selalu menjawab dalam bahasa Indonesia (Studio dan JakRunner membaca
+ * pesan yang sama), jadi terjemahannya terjadi di sini, satu tempat untuk
+ * seluruh halaman.
+ */
 export function errorText(e: unknown, bawaan = "Terjadi kesalahan."): string {
   const err = e as AxiosError<{ error?: string }>;
-  return err?.response?.data?.error ?? err?.message ?? bawaan;
+  const pesan = err?.response?.data?.error ?? err?.message;
+
+  return pesan ? terjemahkanPesan(bahasaAktif(), pesan) : terjemahkan(bahasaAktif(), bawaan);
 }
 
 // ---------------------------------------------------------------------
@@ -123,6 +133,10 @@ export type Process = {
   jobCount: number;
   lastRunAt: string | null;
   createdAt: string;
+  /** Pekerjaan yang belum selesai: PENDING, RUNNING, atau STOPPING. */
+  activeJobs: number;
+  /** Keadaan terjauh di antara pekerjaan itu; null kalau tidak ada. */
+  activeState: JobState | null;
 };
 
 export type Package = {
@@ -182,24 +196,24 @@ export type QueueItem = {
   endedAt: string | null;
 };
 
+/**
+ * Aset, termasuk kredensial: sejak V3 kredensial adalah aset bertipe
+ * Credential, dengan nama pengguna di `username` dan kata sandi yang tidak
+ * pernah dikirim ke peramban.
+ */
 export type Asset = {
   id: string;
   name: string;
   type: string;
   scope: string;
+  /** Hanya untuk tipe Credential. */
+  username: string | null;
+  /** Selalu null untuk Credential dan Secret; lihat `hasValue`. */
   valueText: string | null;
   hasValue: boolean;
   description: string | null;
   createdAt: string;
   updatedAt: string | null;
-};
-
-export type Credential = {
-  id: string;
-  name: string;
-  username: string | null;
-  description: string | null;
-  createdAt: string;
 };
 
 export type Bucket = {
@@ -287,6 +301,21 @@ export type Settings = {
   counts: { users: number; robots: number; processes: number; jobs: number; logs: number };
 };
 
+/** Rentang waktu di dasbor: hari, minggu, bulan, atau tahun INI — rentang kalender. */
+export type Periode = "today" | "week" | "month" | "year";
+
+/** Angka pekerjaan sepanjang satu periode. */
+export type AngkaPeriode = {
+  /** Hari pertama periodenya, YYYY-MM-DD di zona tampilan server. */
+  start: string;
+  successful: number;
+  faulted: number;
+  /** Pekerjaan yang DIBUAT sepanjang periode, apa pun keadaannya. */
+  total: number;
+  /** Dari pekerjaan yang sudah selesai saja; 100 kalau belum ada yang selesai. */
+  successRate: number;
+};
+
 export type Dashboard = {
   robots: { total: number; available: number; busy: number; disconnected: number };
   jobs: {
@@ -296,6 +325,11 @@ export type Dashboard = {
     faultedToday: number;
     totalToday: number;
   };
+  /**
+   * Keempat periode sekaligus: setiap kartu di dasbor memilih rentangnya
+   * sendiri, dan berganti pilihan tidak perlu menunggu permintaan baru.
+   */
+  periods: Record<Periode, AngkaPeriode>;
   queues: { total: number; newItems: number; inProgress: number; failed: number };
   library: {
     processes: number;
@@ -320,7 +354,12 @@ export type Dashboard = {
   serverTime: string;
 };
 
-export type HistoryDay = { day: string; successful: number; faulted: number };
+/**
+ * Satu batang grafik. `bucket` adalah awal batangnya dalam waktu setempat
+ * server, "YYYY-MM-DDTHH:mm" — jam untuk hari ini, hari untuk minggu dan
+ * bulan, bulan untuk tahun.
+ */
+export type HistoryDay = { bucket: string; day: string; successful: number; faulted: number };
 
 export type SearchHit = { kind: string; label: string; detail: string; page: string };
 
@@ -368,7 +407,7 @@ export const ForgeHubApi = {
 
   // --- dasbor ---
   dashboard: () => get<Dashboard>("/api/dashboard"),
-  history: () => get<HistoryDay[]>("/api/dashboard/history"),
+  history: (period: Periode) => get<HistoryDay[]>("/api/dashboard/history", { period }),
   search: (q: string) => get<SearchHit[]>("/api/search", { q }),
 
   // --- pekerjaan ---
@@ -437,22 +476,24 @@ export const ForgeHubApi = {
     get<QueueItem[]>(`/api/queues/${seg(name)}/items`, params),
   deleteQueueItem: (id: string) => del<{ ok: boolean }>(`/api/queues/items/${seg(id)}`),
 
-  // --- aset dan kredensial ---
+  // --- aset (termasuk kredensial) ---
+  //
+  // /api/credentials sengaja tidak dipakai lagi dari sini. Endpoint itu tetap
+  // ada di server untuk activity Get Credential, tapi yang dilayaninya sama
+  // persis dengan aset bertipe Credential di bawah.
   assets: () => get<Asset[]>("/api/assets"),
-  saveAsset: (body: { name: string; type?: string; value?: string; description?: string }) =>
-    post<{ ok: boolean; created: boolean }>("/api/assets", body),
+  saveAsset: (body: {
+    name: string;
+    type?: string;
+    /** Hanya untuk Credential. */
+    username?: string;
+    /** Untuk Credential: kata sandinya. Kosong pada Credential/Secret yang disunting berarti "biarkan". */
+    value?: string;
+    description?: string;
+  }) => post<{ ok: boolean; created: boolean }>("/api/assets", body),
   assetValue: (name: string) =>
     get<{ name: string; type: string; value: string | null }>(`/api/assets/${seg(name)}/value`),
   deleteAsset: (name: string) => del<{ ok: boolean }>(`/api/assets/${seg(name)}`),
-
-  credentials: () => get<Credential[]>("/api/credentials"),
-  saveCredential: (body: {
-    name: string;
-    username?: string;
-    password?: string;
-    description?: string;
-  }) => post<{ ok: boolean }>("/api/credentials", body),
-  deleteCredential: (name: string) => del<{ ok: boolean }>(`/api/credentials/${seg(name)}`),
 
   // --- gudang berkas ---
   buckets: () => get<Bucket[]>("/api/buckets"),
@@ -468,13 +509,30 @@ export const ForgeHubApi = {
     `${api.defaults.baseURL}/api/buckets/${seg(name)}/files/${seg(id)}/content`,
 
   // --- catatan dan peringatan ---
-  logs: (params?: { level?: string; robot?: string; process?: string; jobId?: string; limit?: number }) =>
-    get<LogLine[]>("/api/logs", params),
+  //
+  // Tingkat boleh lebih dari satu dan dikirim dipisah koma ("WARN,ERROR").
+  // Bukan larik: axios mengubah larik menjadi level[]=..., dan nama berkurung
+  // itu tidak dikenali server sebagai parameter "level".
+  logs: (params?: {
+    level?: string[];
+    robot?: string;
+    process?: string;
+    jobId?: string;
+    limit?: number;
+  }) =>
+    get<LogLine[]>("/api/logs", {
+      ...params,
+      level: params?.level?.length ? params.level.join(",") : undefined,
+    }),
   clearLogs: (olderThanDays: number) =>
     api.delete<{ ok: boolean; deleted: number }>("/api/logs", { params: { olderThanDays } })
       .then((r) => r.data),
 
-  alerts: (params?: { unread?: string; limit?: number }) => get<Alert[]>("/api/alerts", params),
+  alerts: (params?: { unread?: string; severity?: string[]; limit?: number }) =>
+    get<Alert[]>("/api/alerts", {
+      ...params,
+      severity: params?.severity?.length ? params.severity.join(",") : undefined,
+    }),
   readAlert: (id: number) => post<{ ok: boolean }>(`/api/alerts/${id}/read`),
   readAllAlerts: () => post<{ ok: boolean; changed: number }>("/api/alerts/read-all"),
 

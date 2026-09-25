@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Tanda ForgeHub: "FH" putih di atas biru, sama dengan logo di sidebar.
+       Hurufnya berupa kotak, bukan <text>: huruf dari fon bergantung pada fon
+       yang terpasang di tiap komputer, dan favicon yang berubah bentuk di
+       mesin lain terlihat seperti situs yang berbeda.
+       favicon.ico dan apple-icon.png dibangkitkan dari bentuk yang sama oleh
+       tools/buat-ikon.mjs. -->
+  <rect width="64" height="64" rx="14" fill="#2A6FDB"/>
+  <g fill="#FFFFFF">
+    <rect x="12" y="17" width="6" height="30"/>
+    <rect x="12" y="17" width="17" height="6"/>
+    <rect x="12" y="29" width="14" height="6"/>
+    <rect x="34" y="17" width="6" height="30"/>
+    <rect x="46" y="17" width="6" height="30"/>
+    <rect x="34" y="29" width="18" height="6"/>
+  </g>
+</svg>

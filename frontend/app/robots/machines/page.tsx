@@ -9,7 +9,7 @@ import { Badge, Button, Card, CardHeader } from "@/components/ui/primitives";
 import { DataTable } from "@/components/DataTable";
 
 export default function RobotDanMesin() {
-  const { t } = useT();
+  const { t, tp } = useT();
   const klien = useQueryClient();
   const [galat, setGalat] = useState("");
 
@@ -35,8 +35,9 @@ export default function RobotDanMesin() {
       {galat ? <p className="rounded-lg bg-red-50 px-4 py-2 text-sm text-danger">{galat}</p> : null}
 
       <p className="text-sm text-muted">
-        Robot mendaftarkan dirinya sendiri saat JakRunner berdenyut pertama kali; tidak perlu
-        dibuat lebih dulu di sini.
+        {t(
+          "Robot mendaftarkan dirinya sendiri saat JakRunner berdenyut pertama kali; tidak perlu dibuat lebih dulu di sini.",
+        )}
       </p>
 
       <Card>
@@ -47,9 +48,9 @@ export default function RobotDanMesin() {
           kosong="Belum ada robot yang mendaftar."
           kolom={[
             { judul: "Nama", sel: (r) => <span className="font-medium">{r.name}</span>, urut: (r) => r.name },
-            { judul: "Mesin", sel: (r) => <span className="text-muted">{r.machineName ?? "-"}</span>, urut: (r) => r.machineName },
+            { judul: "Mesin|satu", sel: (r) => <span className="text-muted">{r.machineName ?? "-"}</span>, urut: (r) => r.machineName },
             { judul: "Tipe", sel: (r) => r.type, urut: (r) => r.type },
-            { judul: "Lingkungan", sel: (r) => r.environment ?? "-", urut: (r) => r.environment },
+            { judul: "Lingkungan|satu", sel: (r) => r.environment ?? "-", urut: (r) => r.environment },
             {
               judul: "CPU",
               sel: (r) => <span className="tabular-nums">{r.cpuPercent.toFixed(1)}%</span>,
@@ -98,7 +99,7 @@ export default function RobotDanMesin() {
               sel: (m) => <span className="tabular-nums">{m.robotCount}</span>,
               urut: (m) => m.robotCount,
             },
-            { judul: "Keterangan", sel: (m) => <span className="text-muted">{m.description ?? "-"}</span> },
+            { judul: "Keterangan", sel: (m) => <span className="text-muted">{m.description ? tp(m.description) : "-"}</span> },
             {
               judul: "",
               sel: (m) => (

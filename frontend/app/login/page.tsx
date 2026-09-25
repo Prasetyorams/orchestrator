@@ -3,10 +3,12 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ForgeHubApi, setToken } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { Button, Card, CardBody } from "@/components/ui/primitives";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { t } = useT();
 
   const [username, setUsername] = useState("FH_Admin");
   const [password, setPassword] = useState("");
@@ -25,7 +27,7 @@ export default function LoginPage() {
     } catch {
       // Pesannya sengaja tidak membedakan "pengguna tidak ada" dari "sandi
       // salah" — sama seperti di backend, dan karena alasan yang sama.
-      setError("Nama pengguna atau kata sandi salah.");
+      setError(t("Nama pengguna atau kata sandi salah."));
     } finally {
       setBusy(false);
     }
@@ -48,7 +50,7 @@ export default function LoginPage() {
           <form onSubmit={submit} className="space-y-3.5">
             <div>
               <label htmlFor="username" className="mb-1 block text-xs font-medium text-muted">
-                Nama pengguna
+                {t("Nama pengguna")}
               </label>
               <input
                 id="username"
@@ -61,7 +63,7 @@ export default function LoginPage() {
 
             <div>
               <label htmlFor="password" className="mb-1 block text-xs font-medium text-muted">
-                Kata sandi
+                {t("Kata sandi")}
               </label>
               <input
                 id="password"
@@ -76,7 +78,7 @@ export default function LoginPage() {
             {error ? <p className="text-xs text-danger">{error}</p> : null}
 
             <Button type="submit" variant="primary" disabled={busy} className="w-full">
-              {busy ? "Memeriksa..." : "Masuk"}
+              {busy ? t("Memeriksa...") : t("Masuk")}
             </Button>
           </form>
         </CardBody>

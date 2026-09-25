@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Play, Trash2 } from "lucide-react";
 import { ForgeHubApi, errorText, type Process } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { dateTimeOf } from "@/lib/utils";
-import { Badge, Button, Card } from "@/components/ui/primitives";
+import { Badge, Card, IconButton } from "@/components/ui/primitives";
 import { DataTable } from "@/components/DataTable";
 import { Dialog } from "@/components/Dialog";
 
@@ -16,7 +17,14 @@ export default function Proses() {
   const [detail, setDetail] = useState<Process | null>(null);
   const [galat, setGalat] = useState("");
 
-  const proses = useQuery({ queryKey: ["processes"], queryFn: ForgeHubApi.processes });
+  const proses = useQuery({
+    queryKey: ["processes"],
+    queryFn: ForgeHubApi.processes,
+    // Tombol Jalankan harus hidup lagi SENDIRI begitu pekerjaannya selesai,
+    // tanpa orang menekan muat ulang. Selama ada yang berjalan, daftar
+    // disegarkan tiap 3 detik; selebihnya cukup tiap 15 detik.
+    refetchInterval: (q) => ((q.state.data ?? []).some((p) => p.activeJobs > 0) ? 3_000 : 15_000),
+  });
 
   const hapus = useMutation({
     mutationFn: ForgeHubApi.deleteProcess,
@@ -26,11 +34,24 @@ export default function Proses() {
 
   const jalankan = useMutation({
     mutationFn: (nama: string) => ForgeHubApi.startJob({ processName: nama, source: "Dashboard" }),
-    onSuccess: () => {
-      klien.invalidateQueries({ queryKey: ["jobs"] });
-      klien.invalidateQueries({ queryKey: ["processes"] });
+    onMutate: (nama) => {
+      setGalat("");
+
+      // Tombolnya langsung mati, tidak menunggu penyegaran berikutnya. Tanpa
+      // ini ada jeda beberapa detik saat tombol masih hidup, dan klik kedua
+      // di jeda itu menjadwalkan pekerjaan kedua.
+      klien.setQueryData<Process[]>(["processes"], (lama) =>
+        lama?.map((p) =>
+          p.name === nama ? { ...p, activeJobs: p.activeJobs + 1, activeState: p.activeState ?? "PENDING" } : p,
+        ),
+      );
     },
     onError: (e) => setGalat(errorText(e)),
+    onSettled: () => {
+      klien.invalidateQueries({ queryKey: ["jobs"] });
+      klien.invalidateQueries({ queryKey: ["processes"] });
+      klien.invalidateQueries({ queryKey: ["dashboard"] });
+    },
   });
 
   return (
@@ -40,7 +61,7 @@ export default function Proses() {
       {galat ? <p className="rounded-lg bg-red-50 px-4 py-2 text-sm text-danger">{galat}</p> : null}
 
       <p className="text-sm text-muted">
-        Klik ganda pada barisnya untuk melihat riwayat jalan dan catatannya.
+        {t("Klik ganda pada barisnya untuk melihat riwayat jalan dan catatannya.")}
       </p>
 
       <Card>
@@ -51,7 +72,7 @@ export default function Proses() {
           kolom={[
             { judul: "Nama", sel: (p) => <span className="font-medium">{p.name}</span>, urut: (p) => p.name },
             {
-              judul: "Paket",
+              judul: "Paket|satu",
               sel: (p) =>
                 p.packageName ? (
                   <span className="text-muted">
@@ -62,7 +83,12 @@ export default function Proses() {
                 ),
               urut: (p) => p.packageVersion,
             },
-            { judul: "Lingkungan", sel: (p) => p.environment ?? "-", urut: (p) => p.environment },
+            { judul: "Lingkungan|satu", sel: (p) => p.environment ?? "-", urut: (p) => p.environment },
+            {
+              judul: "Keadaan",
+              sel: (p) => (p.activeState ? <Badge value={p.activeState} /> : <span className="text-muted">-</span>),
+              urut: (p) => p.activeState,
+            },
             {
               judul: "Pekerjaan",
               sel: (p) => <span className="tabular-nums">{p.jobCount}</span>,
@@ -75,21 +101,37 @@ export default function Proses() {
             },
             {
               judul: "",
-              sel: (p) => (
-                <div className="flex justify-end gap-1.5">
-                  <Button variant="ghost" onClick={() => jalankan.mutate(p.name)}>
-                    {t("Jalankan")}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      if (window.confirm(`${t("Yakin menghapus")} "${p.name}"?`)) hapus.mutate(p.name);
-                    }}
-                  >
-                    {t("Hapus")}
-                  </Button>
-                </div>
-              ),
+              sel: (p) => {
+                // Mati selama proses ini masih punya pekerjaan yang belum
+                // selesai — menunggu robot, berjalan, atau sedang dihentikan.
+                const berjalan = p.activeJobs > 0 || (jalankan.isPending && jalankan.variables === p.name);
+
+                return (
+                  <div className="flex justify-end gap-0.5">
+                    <IconButton
+                      label={
+                        berjalan
+                          ? t("Sedang berjalan ({0}). Bisa dijalankan lagi setelah selesai.", p.activeState ?? "PENDING")
+                          : t("Jalankan")
+                      }
+                      tone="ok"
+                      disabled={berjalan}
+                      onClick={() => jalankan.mutate(p.name)}
+                    >
+                      <Play size={16} fill="currentColor" />
+                    </IconButton>
+                    <IconButton
+                      label={t("Hapus")}
+                      tone="danger"
+                      onClick={() => {
+                        if (window.confirm(`${t("Yakin menghapus")} "${p.name}"?`)) hapus.mutate(p.name);
+                      }}
+                    >
+                      <Trash2 size={16} />
+                    </IconButton>
+                  </div>
+                );
+              },
             },
           ]}
         />
@@ -109,7 +151,7 @@ export default function Proses() {
  * dulu untuk sampai ke sini.
  */
 function DialogProses({ proses, onTutup }: { proses: Process | null; onTutup: () => void }) {
-  const { t } = useT();
+  const { t, tp } = useT();
   const [tab, setTab] = useState<"jalan" | "catatan">("jalan");
 
   const jobs = useQuery({
@@ -153,11 +195,11 @@ function DialogProses({ proses, onTutup }: { proses: Process | null; onTutup: ()
             perHalaman={0}
             kolom={[
               { judul: "Keadaan", sel: (j) => <Badge value={j.state} /> },
-              { judul: "Robot", sel: (j) => j.robotName ?? "-" },
+              { judul: "Robot|satu", sel: (j) => j.robotName ?? "-" },
               { judul: "Sumber", sel: (j) => <span className="text-muted">{j.source}</span> },
               { judul: "Dimulai", sel: (j) => <span className="text-muted">{dateTimeOf(j.startedAt)}</span> },
               { judul: "Selesai", sel: (j) => <span className="text-muted">{dateTimeOf(j.endedAt)}</span> },
-              { judul: "Info", sel: (j) => <span className="text-muted">{j.info ?? "-"}</span> },
+              { judul: "Info", sel: (j) => <span className="text-muted">{j.info ? tp(j.info) : "-"}</span> },
             ]}
           />
         </div>
@@ -169,7 +211,7 @@ function DialogProses({ proses, onTutup }: { proses: Process | null; onTutup: ()
                 <span className="w-32 shrink-0 tabular-nums text-muted">{dateTimeOf(l.loggedAt)}</span>
                 <span className="w-14 shrink-0 font-medium">{l.level}</span>
                 <span className="w-28 shrink-0 truncate text-muted">{l.robotName ?? "-"}</span>
-                <span className="break-all">{l.message}</span>
+                <span className="break-all">{tp(l.message)}</span>
               </div>
             ))
           ) : (

@@ -10,7 +10,6 @@ import {
   Database,
   FolderOpen,
   Gauge,
-  KeyRound,
   Layers,
   ListChecks,
   ScrollText,
@@ -59,7 +58,8 @@ const KELOMPOK: Kelompok[] = [
     items: [
       { label: "Robot", href: "/robots/machines", icon: Bot },
       { label: "Lingkungan", href: "/robots/environments", icon: Layers },
-      { label: "Kredensial", href: "/robots/credentials", icon: KeyRound },
+      // Kredensial tidak lagi punya menu sendiri: sejak V3 kredensial adalah
+      // aset bertipe Credential, dan tempatnya di halaman Aset.
     ],
   },
   {

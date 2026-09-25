@@ -5,6 +5,11 @@ public enum AssetType {
     Text,
     Integer,
     Bool,
+    /**
+     * Nama pengguna dan kata sandi. Nama penggunanya di kolom username, kata
+     * sandinya — tersandi — di value_text. Sejak V3 inilah bentuk seluruh
+     * kredensial; tabel credentials yang terpisah sudah tidak dipakai.
+     */
     Credential,
     Secret;
 
