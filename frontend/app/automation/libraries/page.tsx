@@ -4,17 +4,10 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ForgeHubApi, errorText, unduh, type Bucket } from "@/lib/api";
 import { useT } from "@/lib/i18n";
-import { dateTimeOf } from "@/lib/utils";
+import { dateTimeOf, ukuranBerkas } from "@/lib/utils";
 import { Button, Card } from "@/components/ui/primitives";
 import { DataTable } from "@/components/DataTable";
 import { Dialog } from "@/components/Dialog";
-
-/** Bita menjadi satuan yang enak dibaca. */
-function ukuran(b: number) {
-  if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-  return `${(b / 1024 / 1024).toFixed(1)} MB`;
-}
 
 export default function Gudang() {
   const { t } = useT();
@@ -46,7 +39,7 @@ export default function Gudang() {
             },
             {
               judul: "Ukuran",
-              sel: (g) => <span className="tabular-nums text-muted">{ukuran(g.totalBytes)}</span>,
+              sel: (g) => <span className="tabular-nums text-muted">{ukuranBerkas(g.totalBytes)}</span>,
               urut: (g) => g.totalBytes,
             },
             {
@@ -151,7 +144,7 @@ function DialogBerkas({ gudang, onTutup }: { gudang: Bucket | null; onTutup: () 
           { judul: "Nama", sel: (b) => <span className="font-medium">{b.fileName}</span>, urut: (b) => b.fileName },
           {
             judul: "Ukuran",
-            sel: (b) => <span className="tabular-nums text-muted">{ukuran(b.sizeBytes)}</span>,
+            sel: (b) => <span className="tabular-nums text-muted">{ukuranBerkas(b.sizeBytes)}</span>,
             urut: (b) => b.sizeBytes,
           },
           {

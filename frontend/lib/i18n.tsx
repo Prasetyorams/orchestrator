@@ -147,6 +147,18 @@ const EN: Record<string, string> = {
   "Kata sandi berhasil diganti.": "Your password has been changed.",
   "Menyimpan...": "Saving...",
 
+  // paket
+  "Versi Terbaru": "Latest version",
+  "Jumlah Versi": "Versions",
+  "Diterbitkan Oleh": "Published by",
+  "Titik Masuk": "Entry point",
+  "Riwayat versi": "Version history",
+  Terbaru: "Latest",
+  "Satu baris per paket, dengan versi tertingginya. Klik ganda untuk melihat semua versinya.":
+    "One row per package, showing its highest version. Double-click to see every version.",
+  "Belum ada paket yang diterbitkan. Terbitkan dari Studio: tab Design → grup ForgeHub → Terbitkan.":
+    "No packages published yet. Publish from Studio: Design tab → ForgeHub group → Terbitkan.",
+
   // keadaan kosong
   "Tidak ada pekerjaan yang sedang berjalan.": "No jobs are running.",
   "Tidak ada pemicu yang aktif.": "No triggers are enabled.",
@@ -278,6 +290,18 @@ const JV: Record<string, string> = {
   "Kata sandi baru harus berbeda dari yang lama.": "Tembung sandi anyar kudu béda karo sing lawas.",
   "Kata sandi berhasil diganti.": "Tembung sandi kasil diganti.",
   "Menyimpan...": "Nyimpen...",
+
+  // paket
+  "Versi Terbaru": "Vèrsi paling anyar",
+  "Jumlah Versi": "Cacahé vèrsi",
+  "Diterbitkan Oleh": "Diterbitaké déning",
+  "Titik Masuk": "Titik mlebu",
+  "Riwayat versi": "Riwayat vèrsi",
+  Terbaru: "Paling anyar",
+  "Satu baris per paket, dengan versi tertingginya. Klik ganda untuk melihat semua versinya.":
+    "Siji baris saben pakèt, karo vèrsi paling dhuwuré. Klik kaping pindho kanggo ndeleng kabèh vèrsiné.",
+  "Belum ada paket yang diterbitkan. Terbitkan dari Studio: tab Design → grup ForgeHub → Terbitkan.":
+    "Durung ana pakèt sing diterbitaké. Terbitaké saka Studio: tab Design → grup ForgeHub → Terbitkan.",
 
   // keadaan kosong
   "Tidak ada pekerjaan yang sedang berjalan.": "Ora ana pagawéan sing mlaku.",
