@@ -23,3 +23,14 @@ signing.key
 # Cache inkremental TypeScript: dihasilkan ulang tiap kali diperiksa.
 *.tsbuildinfo
 /.metadata/
+
+# Aturan yang dulu diwarisi dari .gitignore akar repo Studio, dan sejak
+# ForgeHub berdiri sendiri harus ditulis di sini. Tanpa bin/ dan obj/,
+# hasil build server/ dan tools/PindahKePostgres muncul sebagai berkas baru
+# yang siap ter-commit.
+[Bb]in/
+[Oo]bj/
+.vs/
+*.user
+.idea/
+*.log

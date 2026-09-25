@@ -47,6 +47,28 @@ sebagai paket, dan prosesnya langsung siap dijalankan robot.
 
 ---
 
+## Repo ini dan repo Studio
+
+ForgeHub dulu tinggal di folder `ForgeHub/` di dalam repo Studio. Sejak
+25 September 2026 ia berdiri sendiri di repo ini, lengkap dengan riwayatnya,
+supaya mengembangkan orchestrator tidak mengganggu Studio dan sebaliknya.
+
+Keduanya hanya bersambung lewat API HTTP. Pemanggilnya tetap di repo Studio:
+
+| Klien | Berkas di repo Studio |
+|---|---|
+| Studio (Terbitkan, Sambungkan) | `OpenRPA/ForgeHub/StudioForgeHubClient.cs` |
+| JakRunner (denyut, pekerjaan, log) | `JakRunner/Core/ForgeHubClient.cs` |
+| Activity kategori Orchestrator | `Custom.Orchestrator/Runtime/HubConnection.cs` |
+
+Jadi yang harus dijaga di sini adalah **bentuk API-nya**. Mengganti alamat
+atau nama medan JSON tanpa menyesuaikan ketiga klien itu mematahkan robot
+yang sudah terpasang — dan gejalanya muncul di mesin robot, jauh dari sini.
+`tools/uji-api.ps1` memeriksa kontrak itu terhadap backend yang berjalan;
+jalankan sebelum mengubah endpoint.
+
+---
+
 ## Dua penerapan dalam satu folder
 
 | | `server/` | `backend/` + `frontend/` |
