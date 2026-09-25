@@ -125,6 +125,28 @@ const EN: Record<string, string> = {
   "Kata sandi": "Password",
   Bahasa: "Language",
 
+  // profil
+  "Menu profil": "Profile menu",
+  "Ubah profil": "Edit profile",
+  "Ubah kata sandi": "Change password",
+  "Nama tampilan": "Display name",
+  Surel: "Email",
+  "Belum ada surel": "No email yet",
+  "Kosongkan untuk menghapus.": "Leave empty to remove it.",
+  "Nama pengguna dipakai untuk masuk dan hanya bisa diubah Administrator.":
+    "The username is used to sign in and can only be changed by an Administrator.",
+  "Kata sandi saat ini": "Current password",
+  "Kata sandi baru": "New password",
+  "Ulangi kata sandi baru": "Confirm new password",
+  "Minimal 8 karakter.": "At least 8 characters.",
+  "Nama tampilan wajib diisi.": "Display name is required.",
+  "Semua isian wajib diisi.": "All fields are required.",
+  "Kata sandi baru minimal 8 karakter.": "The new password must be at least 8 characters.",
+  "Ulangan kata sandi baru tidak sama.": "The new passwords don't match.",
+  "Kata sandi baru harus berbeda dari yang lama.": "The new password must differ from the current one.",
+  "Kata sandi berhasil diganti.": "Your password has been changed.",
+  "Menyimpan...": "Saving...",
+
   // keadaan kosong
   "Tidak ada pekerjaan yang sedang berjalan.": "No jobs are running.",
   "Tidak ada pemicu yang aktif.": "No triggers are enabled.",
@@ -234,6 +256,28 @@ const JV: Record<string, string> = {
   "Nama pengguna": "Jeneng pangguna",
   "Kata sandi": "Tembung sandi",
   Bahasa: "Basa",
+
+  // profil
+  "Menu profil": "Menu profil",
+  "Ubah profil": "Owahi profil",
+  "Ubah kata sandi": "Owahi tembung sandi",
+  "Nama tampilan": "Jeneng tampilan",
+  Surel: "Email",
+  "Belum ada surel": "Durung ana email",
+  "Kosongkan untuk menghapus.": "Kosongna yèn arep dibusak.",
+  "Nama pengguna dipakai untuk masuk dan hanya bisa diubah Administrator.":
+    "Jeneng pangguna dienggo mlebu lan mung bisa diowahi Administrator.",
+  "Kata sandi saat ini": "Tembung sandi saiki",
+  "Kata sandi baru": "Tembung sandi anyar",
+  "Ulangi kata sandi baru": "Baleni tembung sandi anyar",
+  "Minimal 8 karakter.": "Paling sethithik 8 karakter.",
+  "Nama tampilan wajib diisi.": "Jeneng tampilan kudu diisi.",
+  "Semua isian wajib diisi.": "Kabèh isian kudu diisi.",
+  "Kata sandi baru minimal 8 karakter.": "Tembung sandi anyar paling sethithik 8 karakter.",
+  "Ulangan kata sandi baru tidak sama.": "Tembung sandi anyar sing dibaleni ora padha.",
+  "Kata sandi baru harus berbeda dari yang lama.": "Tembung sandi anyar kudu béda karo sing lawas.",
+  "Kata sandi berhasil diganti.": "Tembung sandi kasil diganti.",
+  "Menyimpan...": "Nyimpen...",
 
   // keadaan kosong
   "Tidak ada pekerjaan yang sedang berjalan.": "Ora ana pagawéan sing mlaku.",

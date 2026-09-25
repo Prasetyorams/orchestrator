@@ -345,6 +345,9 @@ const get = <T,>(url: string, params?: Record<string, unknown>) =>
 const post = <T,>(url: string, body?: unknown) =>
   api.post<T>(url, body ?? {}).then((r) => r.data);
 
+const put = <T,>(url: string, body?: unknown) =>
+  api.put<T>(url, body ?? {}).then((r) => r.data);
+
 const del = <T,>(url: string) => api.delete<T>(url).then((r) => r.data);
 
 /** Nama dalam jalur bisa berisi spasi dan garis miring; selalu disandikan. */
@@ -355,6 +358,10 @@ export const ForgeHubApi = {
     post<LoginResult>("/api/auth/login", { username, password }),
 
   me: () => get<User & { tenantName: string }>("/api/auth/me"),
+
+  /** Nama tampilan dan surel milik sendiri; surel kosong berarti dihapus. */
+  updateProfile: (body: { displayName: string; email: string }) =>
+    put<User & { tenantName: string }>("/api/auth/me", body),
 
   changePassword: (currentPassword: string, newPassword: string) =>
     post<{ status: string }>("/api/auth/password", { currentPassword, newPassword }),

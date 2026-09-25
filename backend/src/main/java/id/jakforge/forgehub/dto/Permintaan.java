@@ -176,6 +176,21 @@ public final class Permintaan {
         }
     }
 
+    /**
+     * Profil milik pengguna yang sedang masuk.
+     *
+     * <p>Hanya nama tampilan dan surel. Nama pengguna dan peran sengaja tidak
+     * ada di sini: nama pengguna dipakai untuk masuk — termasuk oleh robot
+     * lewat jakrunner.json — dan peran yang bisa diubah pemiliknya sendiri
+     * bukan lagi pembatasan.
+     */
+    public record Profil(String displayName, String email) {
+
+        public static Profil dari(Map<String, Object> body) {
+            return new Profil(Badan.nama(body, "displayName"), Badan.nama(body, "email"));
+        }
+    }
+
     public record Pengguna(String username, String password, String displayName,
                            String email, String role, boolean isActive) {
 

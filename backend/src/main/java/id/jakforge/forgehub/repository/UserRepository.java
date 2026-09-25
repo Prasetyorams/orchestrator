@@ -69,6 +69,25 @@ public class UserRepository {
                 """, userId, tenantId);
     }
 
+    /**
+     * Profil yang diubah pemiliknya sendiri.
+     *
+     * <p>Terpisah dari {@link #perbarui}, yang juga menulis peran dan status
+     * aktif: memakainya di sini berarti satu medan yang lupa disaring cukup
+     * untuk membuat siapa pun menjadi Administrator.
+     *
+     * <p>Tanpa COALESCE, berbeda dengan perbarui: surel yang dikosongkan
+     * memang dimaksudkan untuk dihapus.
+     */
+    public int ubahProfil(UUID userId, UUID tenantId, String namaTampil, String surel) {
+        return db.exec("""
+                UPDATE users
+                   SET display_name = ?,
+                       email = ?
+                 WHERE id = ? AND tenant_id = ?
+                """, namaTampil, surel, userId, tenantId);
+    }
+
     public List<Map<String, Object>> semua(UUID tenantId) {
         return db.rows("""
                 SELECT id, username, display_name, email, role, is_active, created_at, last_login_at

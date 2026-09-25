@@ -6,6 +6,7 @@ import id.jakforge.forgehub.security.CurrentUser;
 import id.jakforge.forgehub.service.AuthService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -13,7 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Masuk, siapa saya, ganti kata sandi, dan pemeriksaan kesehatan. */
+/** Masuk, siapa saya, ubah profil, ganti kata sandi, dan pemeriksaan kesehatan. */
 @RestController
 @RequestMapping("/api")
 public class AuthController {
@@ -49,6 +50,12 @@ public class AuthController {
     @GetMapping("/auth/me")
     public Map<String, Object> profil() {
         return service.profil(CurrentUser.get());
+    }
+
+    /** Nama tampilan dan surel milik pengguna yang sedang masuk. */
+    @PutMapping("/auth/me")
+    public Map<String, Object> ubahProfil(@RequestBody(required = false) Map<String, Object> body) {
+        return service.ubahProfil(CurrentUser.get(), Permintaan.Profil.dari(body));
     }
 
     @PostMapping("/auth/password")

@@ -13,8 +13,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
-/** Masuk, siapa saya, dan ganti kata sandi. */
+/** Masuk, siapa saya, ubah profil, dan ganti kata sandi. */
 @Service
 public class AuthService {
 
@@ -83,7 +84,48 @@ public class AuthService {
         return user;
     }
 
+    /**
+     * Ubah nama tampilan dan surel milik pengguna yang sedang masuk.
+     *
+     * <p>Mengembalikan profil yang sudah tersimpan, bukan sekadar "OK", supaya
+     * yang ditampilkan dasbor sesudahnya adalah nilai yang benar-benar ada di
+     * basis data — termasuk pemangkasan spasi yang dilakukan di sini.
+     */
+    @Transactional
+    public Map<String, Object> ubahProfil(ForgeHubPrincipal p, Permintaan.Profil minta) {
+        if (minta.displayName() == null) {
+            throw ApiException.salah("Nama tampilan wajib diisi.");
+        }
+
+        if (minta.displayName().length() > PANJANG_NAMA) {
+            throw ApiException.salah("Nama tampilan paling panjang " + PANJANG_NAMA + " karakter.");
+        }
+
+        // Surel boleh kosong — itu berarti dihapus. Kalau diisi, bentuknya
+        // diperiksa di sini, bukan hanya di formulir: API ini juga bisa
+        // dipanggil langsung.
+        if (minta.email() != null) {
+            if (minta.email().length() > PANJANG_SUREL) {
+                throw ApiException.salah("Alamat surel paling panjang " + PANJANG_SUREL + " karakter.");
+            }
+
+            if (!BENTUK_SUREL.matcher(minta.email()).matches()) {
+                throw ApiException.salah("Alamat surel tidak sah.");
+            }
+        }
+
+        if (pengguna.ubahProfil(p.userId(), p.tenantId(), minta.displayName(), minta.email()) == 0) {
+            throw ApiException.belumMasuk("Pengguna sudah tidak ada.");
+        }
+
+        return profil(p);
+    }
+
     public Map<String, Object> gantiSandi(ForgeHubPrincipal p, Permintaan.GantiSandi minta) {
+        if (minta.currentPassword() == null) {
+            throw ApiException.salah("Kata sandi saat ini wajib diisi.");
+        }
+
         if (minta.newPassword() == null || minta.newPassword().length() < 8) {
             throw ApiException.salah("Kata sandi baru minimal 8 karakter.");
         }
@@ -91,12 +133,30 @@ public class AuthService {
         // Kata sandi lama tetap diminta walau penggunanya sudah membawa token
         // yang sah. Token bisa berasal dari layar yang ditinggal terbuka; kata
         // sandi lama hanya diketahui pemiliknya.
+        //
+        // Salah dijawab 400, BUKAN 401. Dasbor, Studio, dan JakRunner membuang
+        // tokennya begitu menerima 401 — jadi 401 di sini membuat orang yang
+        // salah ketik kata sandi lamanya langsung terlempar ke layar masuk.
+        // Tokennya sah; yang salah isiannya. ForgeHub .NET juga menjawab 400.
         if (!Passwords.verify(minta.currentPassword(), pengguna.hashSandi(p.userId()))) {
-            throw ApiException.belumMasuk("Kata sandi saat ini salah.");
+            throw ApiException.salah("Kata sandi saat ini salah.");
         }
 
         pengguna.gantiSandi(p.userId(), Passwords.hash(minta.newPassword()));
 
         return Map.of("status", "OK");
     }
+
+    /** Batas panjang mengikuti kolomnya di V1__init.sql. */
+    private static final int PANJANG_NAMA = 200;
+    private static final int PANJANG_SUREL = 160;
+
+    /**
+     * Bentuk surel yang cukup untuk menangkap salah ketik, bukan validasi RFC.
+     *
+     * <p>Aturan RFC 5322 yang lengkap menerima alamat yang tidak pernah dipakai
+     * orang dan hampir tidak menolak apa pun yang berguna. Yang benar-benar
+     * terjadi adalah "@" yang terlupa atau spasi yang ikut tersalin.
+     */
+    private static final Pattern BENTUK_SUREL = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
 }
