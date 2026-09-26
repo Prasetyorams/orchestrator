@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -50,6 +51,35 @@ public class AdminController {
     @GetMapping("/roles")
     public List<Map<String, Object>> peran() {
         return service.peran(CurrentUser.get().tenantId());
+    }
+
+    /** Sumber dan tindakan yang bisa dipilih di matriks izin. */
+    @GetMapping("/permissions")
+    public List<Map<String, Object>> katalogIzin() {
+        return service.katalogIzin();
+    }
+
+    @PostMapping("/roles")
+    public Map<String, Object> buatPeran(@RequestBody(required = false) Map<String, Object> body) {
+        service.buatPeran(CurrentUser.get(), Permintaan.Peran.dari(body));
+
+        return Map.of("ok", true);
+    }
+
+    /** {@code name} di badan yang berbeda dari jalurnya berarti ganti nama. */
+    @PutMapping("/roles/{name}")
+    public Map<String, Object> ubahPeran(@PathVariable String name,
+                                         @RequestBody(required = false) Map<String, Object> body) {
+        service.ubahPeran(CurrentUser.get(), name, Permintaan.Peran.dari(body));
+
+        return Map.of("ok", true);
+    }
+
+    @DeleteMapping("/roles/{name}")
+    public Map<String, Object> hapusPeran(@PathVariable String name) {
+        service.hapusPeran(CurrentUser.get(), name);
+
+        return Map.of("ok", true);
     }
 
     @GetMapping("/licensing")

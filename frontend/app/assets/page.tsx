@@ -2,13 +2,16 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, EyeOff, KeyRound, Trash2 } from "lucide-react";
-import { ForgeHubApi, errorText, type Asset } from "@/lib/api";
+import { Eye, EyeOff, FolderInput, KeyRound, Pencil, Trash2 } from "lucide-react";
+import { ForgeHubApi, errorText, type Asset, type FolderNode } from "@/lib/api";
 import { useT } from "@/lib/i18n";
+import { useIzin } from "@/lib/izin";
 import { cn, dateTimeOf } from "@/lib/utils";
-import { Badge, Button, Card, IconButton } from "@/components/ui/primitives";
+import { Badge, Button, Card, Galat, IconButton } from "@/components/ui/primitives";
 import { DataTable } from "@/components/DataTable";
 import { Dialog, Isian, kelasIsian } from "@/components/Dialog";
+import { DialogPindah } from "@/components/DialogPindah";
+import { JudulHalaman, PerluFolder } from "@/components/HalamanFolder";
 
 const TIPE = ["Text", "Integer", "Bool", "Credential", "Secret"];
 const RAHASIA = new Set(["Credential", "Secret"]);
@@ -17,11 +20,17 @@ const RAHASIA = new Set(["Credential", "Secret"]);
 const SAMARAN = "••••••••";
 
 export default function AsetHalaman() {
+  return <PerluFolder>{(folder) => <IsiAset folder={folder} />}</PerluFolder>;
+}
+
+function IsiAset({ folder }: { folder: FolderNode }) {
   const { t } = useT();
   const klien = useQueryClient();
+  const { boleh } = useIzin();
 
   const [sunting, setSunting] = useState<Asset | null>(null);
   const [baru, setBaru] = useState(false);
+  const [pindah, setPindah] = useState<Asset | null>(null);
   const [galat, setGalat] = useState("");
   const [saringTipe, setSaringTipe] = useState("");
   const [terbuka, setTerbuka] = useState<Record<string, string>>({});
@@ -34,11 +43,16 @@ export default function AsetHalaman() {
     if (tipe && TIPE.includes(tipe)) setSaringTipe(tipe);
   }, []);
 
-  const aset = useQuery({ queryKey: ["assets"], queryFn: ForgeHubApi.assets });
+  const aset = useQuery({ queryKey: ["assets", folder.id], queryFn: () => ForgeHubApi.assets(folder.id) });
+
+  const segarkan = useCallback(() => {
+    klien.invalidateQueries({ queryKey: ["assets"] });
+    klien.invalidateQueries({ queryKey: ["dashboard"] });
+  }, [klien]);
 
   const hapus = useMutation({
     mutationFn: ForgeHubApi.deleteAsset,
-    onSuccess: () => klien.invalidateQueries({ queryKey: ["assets"] }),
+    onSuccess: segarkan,
     onError: (e) => setGalat(errorText(e)),
   });
 
@@ -68,14 +82,21 @@ export default function AsetHalaman() {
   const data = (aset.data ?? []).filter((a) => !saringTipe || a.type === saringTipe);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-lg font-semibold text-ink">{t("Aset")}</h1>
-
+    <div>
+      <JudulHalaman
+        judul={t("Assets")}
+        aksi={
+          boleh("assets.create") ? (
+            <Button variant="primary" onClick={() => setBaru(true)}>
+              {t("Tambah aset")}
+            </Button>
+          ) : null
+        }
+      >
         <select
           value={saringTipe}
           onChange={(e) => setSaringTipe(e.target.value)}
-          className={`${kelasIsian} w-40`}
+          className={cn(kelasIsian, "w-40")}
           aria-label={t("Tipe")}
         >
           <option value="">{t("Semua tipe")}</option>
@@ -85,25 +106,16 @@ export default function AsetHalaman() {
             </option>
           ))}
         </select>
+      </JudulHalaman>
 
-        <Button variant="primary" className="ml-auto" onClick={() => setBaru(true)}>
-          {t("Tambah")}
-        </Button>
-      </div>
-
-      {galat ? <p className="rounded-lg bg-red-50 px-4 py-2 text-sm text-danger">{galat}</p> : null}
-
-      <p className="text-sm text-muted">
-        {t(
-          "Nilai yang dipakai bersama oleh banyak proses. Isi aset Secret dan kata sandi aset Credential tidak pernah tampil di daftar.",
-        )}
-      </p>
+      <Galat pesan={galat} className="mb-4" />
 
       <Card>
         <DataTable
           data={data}
           kunci={(a) => a.name}
-          onBuka={setSunting}
+          onBuka={boleh("assets.update") ? setSunting : undefined}
+          kosong={aset.isLoading ? "Memuat..." : "Belum ada aset di folder ini."}
           kolom={[
             { judul: "Nama", sel: (a) => <span className="font-medium">{a.name}</span>, urut: (a) => a.name },
             { judul: "Tipe", sel: (a) => <Badge value={a.type.toUpperCase()} />, urut: (a) => a.type },
@@ -127,16 +139,28 @@ export default function AsetHalaman() {
             {
               judul: "",
               sel: (a) => (
-                <div className="flex justify-end">
-                  <IconButton
-                    label={t("Hapus")}
-                    tone="danger"
-                    onClick={() => {
-                      if (window.confirm(`${t("Yakin menghapus")} "${a.name}"?`)) hapus.mutate(a.name);
-                    }}
-                  >
-                    <Trash2 size={16} />
-                  </IconButton>
+                <div className="flex justify-end gap-0.5">
+                  {boleh("assets.update") ? (
+                    <>
+                      <IconButton label={t("Ubah")} onClick={() => setSunting(a)}>
+                        <Pencil size={15} />
+                      </IconButton>
+                      <IconButton label={t("Pindahkan ke folder lain")} onClick={() => setPindah(a)}>
+                        <FolderInput size={16} />
+                      </IconButton>
+                    </>
+                  ) : null}
+                  {boleh("assets.delete") ? (
+                    <IconButton
+                      label={t("Hapus")}
+                      tone="danger"
+                      onClick={() => {
+                        if (window.confirm(`${t("Yakin menghapus")} "${a.name}"?`)) hapus.mutate(a.name);
+                      }}
+                    >
+                      <Trash2 size={16} />
+                    </IconButton>
+                  ) : null}
                 </div>
               ),
             },
@@ -144,16 +168,36 @@ export default function AsetHalaman() {
         />
       </Card>
 
+      <p className="mt-3 text-xs text-muted">
+        {t(
+          "Nilai yang dipakai bersama oleh banyak proses. Isi aset Secret dan kata sandi aset Credential tidak pernah tampil di daftar.",
+        )}
+      </p>
+
+      {pindah ? (
+        <DialogPindah
+          judul={t("Pindahkan aset \"{0}\"", pindah.name)}
+          keterangan={t("Robot tetap membacanya lewat nama yang sama.")}
+          folderSekarang={folder.id}
+          onTutup={() => setPindah(null)}
+          onPindah={async (tujuan) => {
+            await ForgeHubApi.moveAsset(pindah.name, tujuan);
+            segarkan();
+          }}
+        />
+      ) : null}
+
       {baru || sunting ? (
         <DialogAset
           key={sunting?.name ?? "baru"}
           awal={sunting}
+          folder={folder}
           tipeAwal={saringTipe || "Text"}
           onTutup={tutupDialog}
           onSelesai={() => {
             // Nilai Secret yang sedang terbuka mungkin baru saja diganti.
             if (sunting) tutupNilai(sunting.name);
-            klien.invalidateQueries({ queryKey: ["assets"] });
+            segarkan();
           }}
         />
       ) : null}
@@ -224,11 +268,13 @@ function Nilai({
 
 function DialogAset({
   awal,
+  folder,
   tipeAwal,
   onTutup,
   onSelesai,
 }: {
   awal: Asset | null;
+  folder: FolderNode;
   tipeAwal: string;
   onTutup: () => void;
   onSelesai: () => void;
@@ -271,6 +317,7 @@ function DialogAset({
       username: kredensial ? pengguna.trim() : undefined,
       value: nilai,
       description: ket,
+      folderId: folder.id,
     });
   }
 
@@ -375,7 +422,7 @@ function DialogAset({
           <input value={ket} onChange={(e) => setKet(e.target.value)} className={kelasIsian} />
         </Isian>
 
-        {galat ? <p className="text-sm text-danger">{galat}</p> : null}
+        <Galat pesan={galat} />
 
         {/* Supaya Enter di isian mana pun ikut menyimpan. */}
         <button type="submit" className="sr-only" tabIndex={-1} aria-hidden="true" />

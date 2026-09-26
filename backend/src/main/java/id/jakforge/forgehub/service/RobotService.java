@@ -34,8 +34,9 @@ public class RobotService {
     // Robot
     // -----------------------------------------------------------------
 
-    public List<Map<String, Object>> daftar(UUID tenantId) {
-        return robots.semua(tenantId);
+    /** @param folderId null berarti semua robot penyewa. */
+    public List<Map<String, Object>> daftar(UUID tenantId, UUID folderId) {
+        return robots.semua(tenantId, folderId);
     }
 
     public Map<String, Object> satu(UUID tenantId, String nama) {

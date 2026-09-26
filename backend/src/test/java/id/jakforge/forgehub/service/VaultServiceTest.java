@@ -3,6 +3,7 @@ package id.jakforge.forgehub.service;
 import id.jakforge.forgehub.common.ApiException;
 import id.jakforge.forgehub.dto.Permintaan;
 import id.jakforge.forgehub.repository.VaultRepository;
+import id.jakforge.forgehub.security.Penjaga;
 import id.jakforge.forgehub.security.SecretBox;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -121,7 +122,8 @@ class VaultServiceTest {
     @DisplayName("POST /api/credentials lama menghasilkan aset Credential yang sama")
     void jalurSimpanLama() {
         layanan.simpanKredensial(penyewa,
-                Permintaan.Kredensial.dari(Map.of("name", "SAP", "username", "admin", "password", "p@ss")));
+                Permintaan.Kredensial.dari(Map.of("name", "SAP", "username", "admin", "password", "p@ss")),
+                Penjaga.BEBAS);
 
         assertEquals("Credential", tabel.baris.get("SAP").get("type"));
         assertEquals("p@ss", layanan.nilaiAset(penyewa, "SAP").get("value"));
@@ -134,7 +136,8 @@ class VaultServiceTest {
         simpan("SAP", "Text", null, "https://sap.local");
 
         ApiException e = assertThrows(ApiException.class, () -> layanan.simpanKredensial(penyewa,
-                Permintaan.Kredensial.dari(Map.of("name", "SAP", "username", "admin", "password", "x"))));
+                Permintaan.Kredensial.dari(Map.of("name", "SAP", "username", "admin", "password", "x")),
+                Penjaga.BEBAS));
 
         assertEquals(HttpStatus.CONFLICT, e.status());
         assertEquals("Text", tabel.baris.get("SAP").get("type"));
@@ -160,16 +163,58 @@ class VaultServiceTest {
         assertTrue(tabel.baris.containsKey("SAP"));
     }
 
+    // ---------- folder ----------
+
+    @Test
+    @DisplayName("aset baru tinggal di folder tempat ia dibuat")
+    void asetDiFolder() {
+        UUID folder = UUID.randomUUID();
+
+        simpanDi(folder, "Alamat", "Text", null, "https://contoh.id");
+
+        assertEquals(folder, tabel.baris.get("Alamat").get("folderId"));
+    }
+
+    @Test
+    @DisplayName("nama yang sudah dipakai di folder lain ditolak 409, asetnya tidak berubah")
+    void namaDipakaiFolderLain() {
+        simpanDi(UUID.randomUUID(), "Alamat", "Text", null, "lama");
+
+        ApiException e = assertThrows(ApiException.class,
+                () -> simpanDi(UUID.randomUUID(), "Alamat", "Text", null, "baru"));
+
+        assertEquals(HttpStatus.CONFLICT, e.status());
+        assertEquals("lama", tabel.baris.get("Alamat").get("valueText"));
+    }
+
+    @Test
+    @DisplayName("menyunting dari folder yang sama, atau tanpa folder seperti Studio, tetap memperbarui")
+    void suntingDiFolderSama() {
+        UUID folder = UUID.randomUUID();
+
+        simpanDi(folder, "Alamat", "Text", null, "lama");
+        simpanDi(folder, "Alamat", "Text", null, "baru");
+        assertEquals("baru", tabel.baris.get("Alamat").get("valueText"));
+
+        simpan("Alamat", "Text", null, "dari-studio");
+        assertEquals("dari-studio", tabel.baris.get("Alamat").get("valueText"));
+        assertEquals(folder, tabel.baris.get("Alamat").get("folderId"));
+    }
+
     // ---------- alat ----------
 
     private void simpan(String nama, String tipe, String pengguna, String nilai) {
+        simpanDi(null, nama, tipe, pengguna, nilai);
+    }
+
+    private void simpanDi(UUID folder, String nama, String tipe, String pengguna, String nilai) {
         Map<String, Object> body = new HashMap<>();
         body.put("name", nama);
         body.put("type", tipe);
         body.put("username", pengguna);
         body.put("value", nilai);
 
-        layanan.simpanAset(penyewa, Permintaan.Aset.dari(body));
+        layanan.simpanAset(penyewa, Permintaan.Aset.dari(body), folder, Penjaga.BEBAS);
     }
 
     /**
@@ -177,6 +222,8 @@ class VaultServiceTest {
      * termasuk syarat {@code type = 'Credential'} pada jalur kredensial.
      */
     private static final class AsetPalsu extends VaultRepository {
+
+        static final UUID BAWAAN = UUID.randomUUID();
 
         final Map<String, Map<String, Object>> baris = new LinkedHashMap<>();
 
@@ -195,14 +242,21 @@ class VaultServiceTest {
         }
 
         @Override
+        public UUID folderAset(UUID tenantId, String nama) {
+            return baris.containsKey(nama) ? (UUID) baris.get(nama).get("folderId") : null;
+        }
+
+        @Override
         public void buatAset(UUID tenantId, String nama, String tipe, String pengguna, String nilai,
-                             String keterangan, String cakupan) {
+                             String keterangan, String cakupan, UUID folderId) {
             Map<String, Object> b = new HashMap<>();
             b.put("name", nama);
             b.put("type", tipe);
             b.put("username", pengguna);
             b.put("valueText", nilai);
             b.put("description", keterangan);
+            // Pemicu basis data mengisi folder bawaan; di sini cukup sebuah id.
+            b.put("folderId", folderId != null ? folderId : BAWAAN);
             baris.put(nama, b);
         }
 

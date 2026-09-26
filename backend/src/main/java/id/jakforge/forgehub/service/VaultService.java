@@ -5,6 +5,7 @@ import id.jakforge.forgehub.dto.Permintaan;
 import id.jakforge.forgehub.model.AssetType;
 import id.jakforge.forgehub.repository.Db;
 import id.jakforge.forgehub.repository.VaultRepository;
+import id.jakforge.forgehub.security.Penjaga;
 import id.jakforge.forgehub.security.SecretBox;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,12 +42,25 @@ public class VaultService {
     // Aset
     // -----------------------------------------------------------------
 
-    public List<Map<String, Object>> aset(UUID tenantId) {
-        return gudang.aset(tenantId);
+    /** @param folderId null berarti seluruh penyewa. */
+    public List<Map<String, Object>> aset(UUID tenantId, UUID folderId) {
+        return gudang.aset(tenantId, folderId);
     }
 
-    public Map<String, Object> simpanAset(UUID tenantId, Permintaan.Aset minta) {
+    /**
+     * @param folderId folder tempat aset BARU dibuat; null berarti folder
+     *                 bawaan. Aset yang sudah ada di folder lain ditolak, sama
+     *                 seperti proses — nama aset unik per penyewa karena Get
+     *                 Asset mencarinya lewat nama saja.
+     */
+    public Map<String, Object> simpanAset(UUID tenantId, Permintaan.Aset minta, UUID folderId, Penjaga penjaga) {
         if (minta.name() == null) throw ApiException.salah("Nama aset wajib diisi.");
+
+        UUID folderLama = gudang.folderAset(tenantId, minta.name());
+
+        if (folderLama != null && folderId != null && !folderLama.equals(folderId)) {
+            throw ApiException.sudahAda("Nama aset '" + minta.name() + "' sudah dipakai di folder lain.");
+        }
 
         AssetType tipe = AssetType.dari(minta.type());
 
@@ -58,19 +72,30 @@ public class VaultService {
 
         String tipeLama = gudang.tipeAset(tenantId, minta.name());
 
+        // assets.create untuk yang baru, assets.update untuk yang sudah ada.
+        penjaga.perluSimpan("assets", tipeLama != null);
+
         // Nama pengguna hanya milik Credential. Aset yang berganti tipe dari
         // Credential ke Text tidak boleh membawa nama pengguna yang tidak
         // lagi ditampilkan di mana pun.
         String pengguna = tipe == AssetType.Credential ? minta.username() : null;
 
         tulisAset(tenantId, minta.name(), tipe, pengguna, minta.value(),
-                minta.description(), minta.scope(), tipeLama);
+                minta.description(), minta.scope(), tipeLama, folderId);
 
         Map<String, Object> hasil = new LinkedHashMap<>();
         hasil.put("ok", true);
         hasil.put("created", tipeLama == null);
 
         return hasil;
+    }
+
+    public void pindahAset(UUID tenantId, String nama, UUID folderId) {
+        if (folderId == null) throw ApiException.salah("folderId wajib diisi.");
+
+        if (gudang.pindahAset(tenantId, nama, folderId) == 0) {
+            throw ApiException.tidakAda("Aset '" + nama + "' tidak ada.");
+        }
     }
 
     /**
@@ -116,12 +141,12 @@ public class VaultService {
      * akan pernah bisa dibuka.
      */
     private void tulisAset(UUID tenantId, String nama, AssetType tipe, String pengguna, String nilai,
-                           String keterangan, String cakupan, String tipeLama) {
+                           String keterangan, String cakupan, String tipeLama, UUID folderId) {
 
         String tersimpan = tipe.rahasia() ? rahasia.protect(nilai) : nilai;
 
         if (tipeLama == null) {
-            gudang.buatAset(tenantId, nama, tipe.name(), pengguna, tersimpan, keterangan, cakupan);
+            gudang.buatAset(tenantId, nama, tipe.name(), pengguna, tersimpan, keterangan, cakupan, folderId);
             return;
         }
 
@@ -177,10 +202,11 @@ public class VaultService {
         return gudang.kredensial(tenantId);
     }
 
-    public void simpanKredensial(UUID tenantId, Permintaan.Kredensial minta) {
+    public void simpanKredensial(UUID tenantId, Permintaan.Kredensial minta, Penjaga penjaga) {
         if (minta.name() == null) throw ApiException.salah("Nama kredensial wajib diisi.");
 
         String tipeLama = gudang.tipeAset(tenantId, minta.name());
+        penjaga.perluSimpan("assets", tipeLama != null);
 
         // Dulu kredensial dan aset punya daftar nama sendiri-sendiri; sekarang
         // satu. Menyimpan kredensial di atas aset Text bernama sama akan
@@ -191,7 +217,7 @@ public class VaultService {
         }
 
         tulisAset(tenantId, minta.name(), AssetType.Credential, minta.username(), minta.password(),
-                minta.description(), "Global", tipeLama);
+                minta.description(), "Global", tipeLama, null);
     }
 
     public Map<String, Object> nilaiKredensial(UUID tenantId, String nama) {
@@ -216,24 +242,34 @@ public class VaultService {
     // Gudang berkas
     // -----------------------------------------------------------------
 
-    public List<Map<String, Object>> daftarGudang(UUID tenantId) {
-        return gudang.gudang(tenantId);
+    /** @param folderId null berarti seluruh penyewa. */
+    public List<Map<String, Object>> daftarGudang(UUID tenantId, UUID folderId) {
+        return gudang.gudang(tenantId, folderId);
     }
 
-    public void buatGudang(UUID tenantId, Permintaan.Bernama minta) {
-        if (minta.name() == null) throw ApiException.salah("Nama gudang wajib diisi.");
+    /** @param folderId null berarti folder bawaan. */
+    public void buatGudang(UUID tenantId, Permintaan.Bernama minta, UUID folderId) {
+        if (minta.name() == null) throw ApiException.salah("Nama ember wajib diisi.");
 
         if (gudang.adaGudang(tenantId, minta.name())) {
-            throw ApiException.sudahAda("Gudang '" + minta.name() + "' sudah ada.");
+            throw ApiException.sudahAda("Ember '" + minta.name() + "' sudah ada.");
         }
 
-        gudang.buatGudang(tenantId, minta.name(), minta.description());
+        gudang.buatGudang(tenantId, minta.name(), minta.description(), folderId);
+    }
+
+    public void pindahGudang(UUID tenantId, String nama, UUID folderId) {
+        if (folderId == null) throw ApiException.salah("folderId wajib diisi.");
+
+        if (gudang.pindahGudang(tenantId, nama, folderId) == 0) {
+            throw ApiException.tidakAda("Ember '" + nama + "' tidak ada.");
+        }
     }
 
     @Transactional
     public void hapusGudang(UUID tenantId, String nama) {
         if (gudang.hapusGudang(tenantId, nama) == 0) {
-            throw ApiException.tidakAda("Gudang tidak ada.");
+            throw ApiException.tidakAda("Ember tidak ada.");
         }
     }
 
@@ -262,7 +298,7 @@ public class VaultService {
         }
 
         if (!gudang.adaGudang(tenantId, namaGudang)) {
-            throw ApiException.tidakAda("Gudang '" + namaGudang + "' tidak ada.");
+            throw ApiException.tidakAda("Ember '" + namaGudang + "' tidak ada.");
         }
 
         // Berkas dengan nama yang sama DIGANTI, bukan ditumpuk. Gudang berisi

@@ -3,8 +3,8 @@ package id.jakforge.forgehub.service;
 import id.jakforge.forgehub.common.ApiException;
 import id.jakforge.forgehub.common.Cron;
 import id.jakforge.forgehub.dto.TriggerRequest;
-import id.jakforge.forgehub.repository.CatalogRepository;
 import id.jakforge.forgehub.repository.TriggerRepository;
+import id.jakforge.forgehub.security.Penjaga;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,19 +22,28 @@ import java.util.UUID;
 public class TriggerService {
 
     private final TriggerRepository pemicu;
-    private final CatalogRepository katalog;
+    private final CatalogService katalog;
 
-    public TriggerService(TriggerRepository pemicu, CatalogRepository katalog) {
+    public TriggerService(TriggerRepository pemicu, CatalogService katalog) {
         this.pemicu = pemicu;
         this.katalog = katalog;
     }
 
-    public List<Map<String, Object>> daftar(UUID tenantId) {
-        return pemicu.semua(tenantId);
+    /** @param folderId null berarti seluruh penyewa. */
+    public List<Map<String, Object>> daftar(UUID tenantId, UUID folderId) {
+        return pemicu.semua(tenantId, folderId);
     }
 
+    /**
+     * Pemicu tinggal di folder PROSESNYA, dan namanya unik di folder itu.
+     *
+     * @param folderId folder yang sedang dibuka, sudah diperiksa haknya; null
+     *                 berarti proses bernama itu di mana pun ia berada (lihat
+     *                 CatalogService.pilihFolder)
+     * @param penjaga  triggers.create untuk yang baru, triggers.update untuk yang sudah ada
+     */
     @Transactional
-    public Map<String, Object> simpan(UUID tenantId, TriggerRequest minta) {
+    public Map<String, Object> simpan(UUID tenantId, TriggerRequest minta, UUID folderId, Penjaga penjaga) {
         if (minta.name() == null) throw ApiException.salah("Nama pemicu wajib diisi.");
         if (minta.processName() == null) throw ApiException.salah("processName wajib diisi.");
 
@@ -59,20 +68,26 @@ public class TriggerService {
                     + "'. Pakai nama IANA, mis. \"Asia/Jakarta\".");
         }
 
-        if (!katalog.adaProses(tenantId, minta.processName())) {
-            throw ApiException.salah(
-                    "Proses '" + minta.processName() + "' belum diterbitkan ke ForgeHub.");
+        UUID folder = katalog.folderProses(tenantId, minta.processName(), folderId);
+
+        if (folder == null) {
+            throw ApiException.salah(folderId == null
+                    ? "Proses '" + minta.processName() + "' belum diterbitkan ke ForgeHub."
+                    : "Proses '" + minta.processName() + "' tidak ada di folder ini.");
         }
 
         ZoneId zona = Cron.zona(minta.timezone());
         OffsetDateTime berikutnya = hitungBerikutnya(minta.cron(), minta.intervalMinutes(), zona);
 
-        if (pemicu.ada(tenantId, minta.name())) {
-            pemicu.perbarui(tenantId, minta.name(), minta.processName(), minta.robotName(),
+        boolean sudahAda = pemicu.ada(tenantId, folder, minta.name());
+        penjaga.perluSimpan("triggers", sudahAda);
+
+        if (sudahAda) {
+            pemicu.perbarui(tenantId, folder, minta.name(), minta.processName(), minta.robotName(),
                     minta.type(), minta.cron(), minta.intervalMinutes(), minta.enabled(),
                     berikutnya, minta.priority(), minta.timezone(), minta.runtimeType());
         } else {
-            pemicu.buat(tenantId, minta.name(), minta.processName(), minta.robotName(),
+            pemicu.buat(tenantId, folder, minta.name(), minta.processName(), minta.robotName(),
                     minta.type(), minta.cron(), minta.intervalMinutes(), minta.enabled(),
                     berikutnya, minta.priority(), minta.timezone(), minta.runtimeType());
         }
@@ -93,8 +108,9 @@ public class TriggerService {
      * — biasanya bukan itu yang dimaksud orang yang menekan tombolnya.
      */
     @Transactional
-    public Map<String, Object> alihkan(UUID tenantId, String nama) {
-        Map<String, Object> baris = pemicu.satu(tenantId, nama);
+    public Map<String, Object> alihkan(UUID tenantId, String nama, UUID folderId) {
+        UUID folder = folderPemicu(tenantId, nama, folderId);
+        Map<String, Object> baris = pemicu.satu(tenantId, folder, nama);
 
         if (baris == null) throw ApiException.tidakAda("Pemicu tidak ada.");
 
@@ -106,7 +122,7 @@ public class TriggerService {
                         Cron.zona((String) baris.get("timezone")))
                 : null;
 
-        pemicu.setAktif(tenantId, nama, akanAktif, berikutnya);
+        pemicu.setAktif(tenantId, folder, nama, akanAktif, berikutnya);
 
         Map<String, Object> hasil = new LinkedHashMap<>();
         hasil.put("ok", true);
@@ -115,10 +131,20 @@ public class TriggerService {
         return hasil;
     }
 
-    public void hapus(UUID tenantId, String nama) {
-        if (pemicu.hapus(tenantId, nama) == 0) {
+    public void hapus(UUID tenantId, String nama, UUID folderId) {
+        if (pemicu.hapus(tenantId, folderPemicu(tenantId, nama, folderId), nama) == 0) {
             throw ApiException.tidakAda("Pemicu tidak ada.");
         }
+    }
+
+    /** Folder pemicu yang dimaksud; aturannya sama dengan proses (CatalogService.pilihFolder). */
+    private UUID folderPemicu(UUID tenantId, String nama, UUID folderId) {
+        UUID folder = CatalogService.pilihFolder(pemicu.tempat(tenantId, nama), folderId,
+                "Pemicu '" + nama + "' ada di beberapa folder. Sebutkan foldernya.");
+
+        if (folder == null) throw ApiException.tidakAda("Pemicu tidak ada.");
+
+        return folder;
     }
 
     /**

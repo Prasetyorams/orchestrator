@@ -30,19 +30,32 @@ public class QueueService {
         this.catatan = catatan;
     }
 
-    public List<Map<String, Object>> daftar(UUID tenantId) {
-        return antrean.semua(tenantId);
+    /** @param folderId null berarti seluruh penyewa. */
+    public List<Map<String, Object>> daftar(UUID tenantId, UUID folderId) {
+        return antrean.semua(tenantId, folderId);
     }
 
-    public void buat(UUID tenantId, Permintaan.Antrean minta) {
+    /** @param folderId null berarti folder bawaan. */
+    public void buat(UUID tenantId, Permintaan.Antrean minta, UUID folderId) {
         if (minta.name() == null) throw ApiException.salah("Nama antrean wajib diisi.");
 
         if (antrean.ada(tenantId, minta.name())) {
             throw ApiException.sudahAda("Antrean '" + minta.name() + "' sudah ada.");
         }
 
+        if (minta.maxRetries() < 0) throw ApiException.salah("Jumlah percobaan ulang tidak boleh negatif.");
+
         antrean.buat(tenantId, minta.name(), minta.description(),
-                minta.maxRetries(), minta.acceptDuplicates());
+                minta.maxRetries(), minta.acceptDuplicates(), folderId);
+    }
+
+    /** Butirnya tidak perlu ikut dipindah: butir mengikuti antreannya lewat nama. */
+    public void pindah(UUID tenantId, String nama, UUID folderId) {
+        if (folderId == null) throw ApiException.salah("folderId wajib diisi.");
+
+        if (antrean.pindah(tenantId, nama, folderId) == 0) {
+            throw ApiException.tidakAda("Antrean '" + nama + "' tidak ada.");
+        }
     }
 
     @Transactional

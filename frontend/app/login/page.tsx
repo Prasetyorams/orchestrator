@@ -38,12 +38,12 @@ export default function LoginPage() {
       <Card className="w-full max-w-sm">
         <CardBody>
           <div className="mb-6 flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-info text-sm font-bold text-white">
+            <div className="flex h-9 w-9 items-center justify-center rounded-md bg-brand text-sm font-bold text-white">
               FH
             </div>
             <div>
-              <p className="text-base font-semibold">ForgeHub</p>
-              <p className="text-xs text-muted">JakForge Orchestrator</p>
+              <p className="text-base font-semibold">JakForge Orchestrator</p>
+              <p className="text-xs text-muted">ForgeHub</p>
             </div>
           </div>
 
@@ -57,7 +57,7 @@ export default function LoginPage() {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 autoComplete="username"
-                className="w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-info"
+                className="w-full rounded-lg border border-line bg-card px-3 py-2 text-sm text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
               />
             </div>
 
@@ -71,7 +71,7 @@ export default function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
-                className="w-full rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-info"
+                className="w-full rounded-lg border border-line bg-card px-3 py-2 text-sm text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
               />
             </div>
 

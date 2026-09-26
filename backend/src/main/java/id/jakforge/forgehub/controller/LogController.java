@@ -1,6 +1,7 @@
 package id.jakforge.forgehub.controller;
 
 import id.jakforge.forgehub.security.CurrentUser;
+import id.jakforge.forgehub.service.FolderService;
 import id.jakforge.forgehub.service.LogService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,9 +22,11 @@ import java.util.UUID;
 public class LogController {
 
     private final LogService service;
+    private final FolderService folders;
 
-    public LogController(LogService service) {
+    public LogController(LogService service, FolderService folders) {
         this.service = service;
+        this.folders = folders;
     }
 
     private static UUID tenant() {
@@ -41,9 +44,11 @@ public class LogController {
             @RequestParam(required = false) String robot,
             @RequestParam(required = false) String process,
             @RequestParam(name = "jobId", required = false) String jobId,
+            @RequestParam(required = false) String folderId,
             @RequestParam(required = false) Integer limit) {
 
-        return service.cari(tenant(), level, robot, process, jobId, limit);
+        return service.cari(tenant(), level, robot, process, jobId,
+                folders.saring(CurrentUser.get(), folderId), limit);
     }
 
     /**
@@ -77,6 +82,12 @@ public class LogController {
             @RequestParam(required = false) Integer limit) {
 
         return service.peringatan(tenant(), unread, severity, limit);
+    }
+
+    /** Jumlah yang belum dibaca dan delapan yang terbaru, untuk lonceng di bilah atas. */
+    @GetMapping("/alerts/summary")
+    public Map<String, Object> ringkasanPeringatan() {
+        return service.ringkasanPeringatan(tenant());
     }
 
     @PostMapping("/alerts/{id}/read")

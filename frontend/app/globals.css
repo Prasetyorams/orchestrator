@@ -2,8 +2,171 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Warna kedua tema. Tailwind membaca variabel ini (lihat tailwind.config.ts),
+ * jadi kelas yang sama berganti warna mengikuti kelas .dark di <html>.
+ *
+ * .dark dipasang oleh skrip kecil di app/layout.tsx SEBELUM halaman
+ * digambar, dari pilihan tersimpan (Terang, Gelap, atau Ikuti sistem).
+ * Tanpa itu, pemakai tema gelap melihat kilatan putih setiap kali halaman
+ * dimuat ulang.
+ *
+ * Nilai gelap dipilih untuk permukaan gelapnya sendiri, bukan dibalik
+ * otomatis: teks ≥ 4,5:1 di atas kartu (#171c23) dan kanvas (#0f1318),
+ * tombol utama bertulisan putih ≥ 5:1.
+ */
 :root {
   color-scheme: light;
+  --c-brand: 31 102 204; /* #1f66cc */
+  --c-brand-hover: 26 86 173; /* #1a56ad */
+  --c-brand-soft: 233 241 252; /* #e9f1fc */
+  --c-brand-line: 199 219 246; /* #c7dbf6 */
+  --c-canvas: 243 245 248; /* #f3f5f8 */
+  --c-card: 255 255 255; /* #ffffff */
+  --c-line: 227 231 238; /* #e3e7ee */
+  --c-ink: 31 41 55; /* #1f2937 */
+  --c-muted: 102 112 133; /* #667085 */
+  --c-ok: 46 158 91; /* #2e9e5b */
+  --c-info: 42 111 219; /* #2a6fdb */
+  --c-warn: 217 137 31; /* #d9891f */
+  --c-danger: 201 60 60; /* #c93c3c */
+  --t-brand: 31 102 204; /* #1f66cc */
+  --t-ok: 30 123 71; /* #1e7b47 */
+  --t-info: 31 95 191; /* #1f5fbf */
+  --t-warn: 161 92 7; /* #a15c07 */
+  --t-danger: 194 52 52; /* #c23434 */
+  --slate-50: 248 250 252;
+  --slate-100: 241 245 249;
+  --slate-200: 226 232 240;
+  --slate-300: 203 213 225;
+  --slate-400: 148 163 184;
+  --slate-500: 100 116 139;
+  --slate-600: 71 85 105;
+  --slate-700: 51 65 85;
+  --slate-800: 30 41 59;
+  --slate-900: 15 23 42;
+  --slate-950: 2 6 23;
+  --red-50: 254 242 242;
+  --red-100: 254 226 226;
+  --red-200: 254 202 202;
+  --red-300: 252 165 165;
+  --red-400: 248 113 113;
+  --red-500: 239 68 68;
+  --red-600: 220 38 38;
+  --red-700: 185 28 28;
+  --red-800: 153 27 27;
+  --red-900: 127 29 29;
+  --red-950: 69 10 10;
+  --amber-50: 255 251 235;
+  --amber-100: 254 243 199;
+  --amber-200: 253 230 138;
+  --amber-300: 252 211 77;
+  --amber-400: 251 191 36;
+  --amber-500: 245 158 11;
+  --amber-600: 217 119 6;
+  --amber-700: 180 83 9;
+  --amber-800: 146 64 14;
+  --amber-900: 120 53 15;
+  --amber-950: 69 26 3;
+  --blue-50: 239 246 255;
+  --blue-100: 219 234 254;
+  --blue-200: 191 219 254;
+  --blue-300: 147 197 253;
+  --blue-400: 96 165 250;
+  --blue-500: 59 130 246;
+  --blue-600: 37 99 235;
+  --blue-700: 29 78 216;
+  --blue-800: 30 64 175;
+  --blue-900: 30 58 138;
+  --blue-950: 23 37 84;
+  --emerald-50: 236 253 245;
+  --emerald-100: 209 250 229;
+  --emerald-200: 167 243 208;
+  --emerald-300: 110 231 183;
+  --emerald-400: 52 211 153;
+  --emerald-500: 16 185 129;
+  --emerald-600: 5 150 105;
+  --emerald-700: 4 120 87;
+  --emerald-800: 6 95 70;
+  --emerald-900: 6 78 59;
+  --emerald-950: 2 44 34;
+}
+
+.dark {
+  color-scheme: dark;
+  --c-brand: 43 106 216; /* #2b6ad8 */
+  --c-brand-hover: 37 96 204; /* #2560cc */
+  --c-brand-soft: 27 42 63; /* #1b2a3f */
+  --c-brand-line: 44 74 120; /* #2c4a78 */
+  --c-canvas: 15 19 24; /* #0f1318 */
+  --c-card: 23 28 35; /* #171c23 */
+  --c-line: 42 49 59; /* #2a313b */
+  --c-ink: 230 233 238; /* #e6e9ee */
+  --c-muted: 154 164 177; /* #9aa4b1 */
+  --c-ok: 63 185 111; /* #3fb96f */
+  --c-info: 74 138 232; /* #4a8ae8 */
+  --c-warn: 217 154 58; /* #d99a3a */
+  --c-danger: 201 60 60; /* #c93c3c */
+  --t-brand: 106 165 248; /* #6aa5f8 */
+  --t-ok: 78 194 127; /* #4ec27f */
+  --t-info: 106 165 248; /* #6aa5f8 */
+  --t-warn: 229 165 75; /* #e5a54b */
+  --t-danger: 242 113 106; /* #f2716a */
+  --slate-50: 30 36 45;
+  --slate-100: 36 43 53;
+  --slate-200: 47 55 67;
+  --slate-300: 59 68 82;
+  --slate-400: 86 97 115;
+  --slate-500: 125 136 152;
+  --slate-600: 168 177 189;
+  --slate-700: 197 204 214;
+  --slate-800: 221 226 232;
+  --slate-900: 238 241 244;
+  --slate-950: 247 249 251;
+  --red-50: 52 25 27;
+  --red-100: 61 28 31;
+  --red-200: 90 36 39;
+  --red-300: 116 48 47;
+  --red-400: 179 68 63;
+  --red-500: 229 83 75;
+  --red-600: 242 113 106;
+  --red-700: 245 143 137;
+  --red-800: 247 170 165;
+  --red-900: 250 198 194;
+  --red-950: 253 226 224;
+  --amber-50: 46 36 18;
+  --amber-100: 61 47 18;
+  --amber-200: 92 69 22;
+  --amber-300: 122 90 24;
+  --amber-400: 164 120 29;
+  --amber-500: 209 154 42;
+  --amber-600: 229 165 75;
+  --amber-700: 239 187 110;
+  --amber-800: 245 207 147;
+  --amber-900: 248 220 173;
+  --amber-950: 252 236 210;
+  --blue-50: 21 35 58;
+  --blue-100: 26 44 72;
+  --blue-200: 39 68 114;
+  --blue-300: 51 90 150;
+  --blue-400: 74 120 192;
+  --blue-500: 91 143 224;
+  --blue-600: 106 165 248;
+  --blue-700: 141 187 250;
+  --blue-800: 176 208 252;
+  --blue-900: 210 229 254;
+  --blue-950: 232 241 255;
+  --emerald-50: 20 42 31;
+  --emerald-100: 23 52 38;
+  --emerald-200: 31 82 54;
+  --emerald-300: 42 110 72;
+  --emerald-400: 55 144 94;
+  --emerald-500: 69 173 115;
+  --emerald-600: 78 194 127;
+  --emerald-700: 116 210 156;
+  --emerald-800: 155 224 184;
+  --emerald-900: 193 236 211;
+  --emerald-950: 224 246 233;
 }
 
 body {
@@ -21,4 +184,14 @@ body {
 }
 .thin-scroll::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* Baris tab yang bisa digeser di layar sempit, tanpa bilah gulir yang
+   menutupi garis bawah tab aktif. Geser dengan jari atau roda tetikus tetap
+   bekerja; yang hilang hanya batangnya. */
+.tanpa-bilah-gulir {
+  scrollbar-width: none;
+}
+.tanpa-bilah-gulir::-webkit-scrollbar {
+  display: none;
 }

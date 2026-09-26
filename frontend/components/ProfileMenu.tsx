@@ -3,13 +3,11 @@
 import { useCallback, useState, type ComponentType, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, KeyRound, LogOut, UserCog } from "lucide-react";
-import { ForgeHubApi, errorText, setToken, type User } from "@/lib/api";
+import { ForgeHubApi, errorText, setToken, type Profil } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/primitives";
 import { Dialog, Isian, kelasIsian } from "@/components/Dialog";
-
-type Profil = User & { tenantName: string };
 
 /**
  * Menu profil di pojok kanan bilah atas: siapa yang sedang masuk, ubah
@@ -65,7 +63,7 @@ export function ProfileMenu({
           <span className="block max-w-[10rem] truncate text-sm font-medium text-ink">{nama}</span>
           <span className="block text-[11px] text-muted">{me.data?.role ?? ""}</span>
         </span>
-        <ChevronDown className={cn("h-4 w-4 text-muted transition", terbuka && "rotate-180")} />
+        <ChevronDown className={cn("hidden h-4 w-4 text-muted transition sm:block", terbuka && "rotate-180")} />
       </button>
 
       {terbuka ? (
@@ -150,7 +148,7 @@ function Inisial({ nama, besar }: { nama: string; besar?: boolean }) {
   return (
     <span
       className={cn(
-        "flex shrink-0 items-center justify-center rounded-full bg-sidebar font-semibold text-white",
+        "flex shrink-0 items-center justify-center rounded-full bg-brand font-semibold text-white",
         besar ? "h-10 w-10 text-sm" : "h-8 w-8 text-xs",
       )}
     >

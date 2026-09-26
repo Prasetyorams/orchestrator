@@ -3,6 +3,8 @@ package id.jakforge.forgehub.controller;
 import id.jakforge.forgehub.dto.Permintaan;
 import id.jakforge.forgehub.repository.Db;
 import id.jakforge.forgehub.security.CurrentUser;
+import id.jakforge.forgehub.security.ForgeHubPrincipal;
+import id.jakforge.forgehub.security.Izin;
 import id.jakforge.forgehub.service.AuthService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -11,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -20,9 +23,11 @@ import java.util.Map;
 public class AuthController {
 
     private final AuthService service;
+    private final Izin izin;
 
-    public AuthController(AuthService service) {
+    public AuthController(AuthService service, Izin izin) {
         this.service = service;
+        this.izin = izin;
     }
 
     /**
@@ -47,15 +52,26 @@ public class AuthController {
         return service.masuk(Permintaan.Masuk.dari(body));
     }
 
+    /**
+     * Siapa saya, beserta pola izin peran saya — dasbor memakainya untuk tidak
+     * menawarkan menu dan tombol yang pasti ditolak. Yang menjaga tetap server.
+     */
     @GetMapping("/auth/me")
     public Map<String, Object> profil() {
-        return service.profil(CurrentUser.get());
+        return denganIzin(CurrentUser.get(), service.profil(CurrentUser.get()));
     }
 
     /** Nama tampilan dan surel milik pengguna yang sedang masuk. */
     @PutMapping("/auth/me")
     public Map<String, Object> ubahProfil(@RequestBody(required = false) Map<String, Object> body) {
-        return service.ubahProfil(CurrentUser.get(), Permintaan.Profil.dari(body));
+        return denganIzin(CurrentUser.get(), service.ubahProfil(CurrentUser.get(), Permintaan.Profil.dari(body)));
+    }
+
+    private Map<String, Object> denganIzin(ForgeHubPrincipal p, Map<String, Object> profil) {
+        Map<String, Object> hasil = new LinkedHashMap<>(profil);
+        hasil.put("permissions", new ArrayList<>(izin.pola(p)));
+
+        return hasil;
     }
 
     @PostMapping("/auth/password")

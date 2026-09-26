@@ -46,6 +46,11 @@ type Props<T> = {
   kosong?: string;
   /** Bilah aksi yang muncul HANYA saat ada baris terpilih. */
   aksiTerpilih?: (terpilih: T[]) => ReactNode;
+  /**
+   * Sel lebih rapat, untuk tabel di dalam kartu setengah lebar di dasbor.
+   * Kolom pertama dan terakhir tetap sejajar dengan tepi kartu.
+   */
+  rapat?: boolean;
 };
 
 export function DataTable<T>({
@@ -57,8 +62,11 @@ export function DataTable<T>({
   onBuka,
   kosong,
   aksiTerpilih,
+  rapat = false,
 }: Props<T>) {
   const { t } = useT();
+
+  const jarakSel = rapat ? "px-3 first:pl-5 last:pr-5" : "px-5";
 
   const [urutKe, setUrutKe] = useState<number | null>(null);
   const [naik, setNaik] = useState(true);
@@ -177,7 +185,8 @@ export function DataTable<T>({
                   key={k.judul}
                   onClick={() => ubahUrut(i)}
                   className={cn(
-                    "px-5 py-2.5 text-xs font-medium uppercase tracking-wide text-muted",
+                    "py-2.5 text-xs font-medium uppercase tracking-wide text-muted",
+                    jarakSel,
                     k.urut && "cursor-pointer select-none hover:text-ink",
                     k.kelas,
                   )}
@@ -224,7 +233,7 @@ export function DataTable<T>({
                   ) : null}
 
                   {kolom.map((kol) => (
-                    <td key={kol.judul} className={cn("px-5 py-3 align-middle", kol.kelas)}>
+                    <td key={kol.judul} className={cn("py-3 align-middle", jarakSel, kol.kelas)}>
                       {kol.sel(baris)}
                     </td>
                   ))}

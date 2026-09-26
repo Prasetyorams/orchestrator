@@ -1,8 +1,10 @@
 package id.jakforge.forgehub.controller;
 
+import id.jakforge.forgehub.common.Badan;
 import id.jakforge.forgehub.dto.JobRequest;
 import id.jakforge.forgehub.dto.JobStateRequest;
 import id.jakforge.forgehub.security.CurrentUser;
+import id.jakforge.forgehub.service.FolderService;
 import id.jakforge.forgehub.service.JobService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,18 +34,23 @@ import java.util.Map;
 public class JobController {
 
     private final JobService service;
+    private final FolderService folders;
 
-    public JobController(JobService service) {
+    public JobController(JobService service, FolderService folders) {
         this.service = service;
+        this.folders = folders;
     }
 
+    /** Tanpa {@code folderId}: pekerjaan seluruh penyewa. */
     @GetMapping
     public List<Map<String, Object>> daftar(
             @RequestParam(required = false) String state,
             @RequestParam(required = false) String process,
+            @RequestParam(required = false) String folderId,
             @RequestParam(required = false) Integer limit) {
 
-        return service.daftar(CurrentUser.get().tenantId(), state, process, limit);
+        return service.daftar(CurrentUser.get().tenantId(), state, process,
+                folders.saring(CurrentUser.get(), folderId), limit);
     }
 
     /**
@@ -63,9 +70,14 @@ public class JobController {
         return service.satu(CurrentUser.get().tenantId(), id);
     }
 
+    /**
+     * {@code folderId} di badan menyebut folder prosesnya; nama proses unik
+     * per folder. Studio tidak mengirimnya — lihat CatalogService.pilihFolder.
+     */
     @PostMapping
     public Map<String, Object> buat(@RequestBody(required = false) Map<String, Object> body) {
-        return service.buat(CurrentUser.get().tenantId(), JobRequest.dari(body));
+        return service.buat(CurrentUser.get().tenantId(), JobRequest.dari(body),
+                folders.saring(CurrentUser.get(), Badan.teks(body, "folderId")));
     }
 
     @PostMapping("/{id}/state")

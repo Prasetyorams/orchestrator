@@ -2,6 +2,7 @@ package id.jakforge.forgehub.dto;
 
 import id.jakforge.forgehub.common.Badan;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -163,6 +164,25 @@ public final class Permintaan {
         }
     }
 
+    /**
+     * Membuat atau menyunting folder.
+     *
+     * <p>{@code gantiInduk} membedakan "parentId tidak disebut" dari "parentId
+     * kosong": yang pertama berarti biarkan foldernya di tempatnya, yang kedua
+     * berarti pindahkan ke akar. Badan yang longgar tidak bisa membedakan
+     * keduanya lewat nilainya saja — keduanya terbaca null.
+     */
+    public record Folder(String name, String description, String parentId, boolean gantiInduk) {
+
+        public static Folder dari(Map<String, Object> body) {
+            return new Folder(
+                    Badan.nama(body, "name"),
+                    Badan.teks(body, "description"),
+                    Badan.nama(body, "parentId"),
+                    body != null && body.containsKey("parentId"));
+        }
+    }
+
     public record Masuk(String username, String password) {
 
         public static Masuk dari(Map<String, Object> body) {
@@ -191,6 +211,17 @@ public final class Permintaan {
 
         public static Profil dari(Map<String, Object> body) {
             return new Profil(Badan.nama(body, "displayName"), Badan.nama(body, "email"));
+        }
+    }
+
+    /** Peran dari layar Peran. permissions null berarti tidak dikirim. */
+    public record Peran(String name, String description, List<String> permissions) {
+
+        public static Peran dari(Map<String, Object> body) {
+            return new Peran(
+                    Badan.nama(body, "name"),
+                    Badan.teks(body, "description"),
+                    Badan.daftar(body, "permissions"));
         }
     }
 

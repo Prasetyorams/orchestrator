@@ -68,7 +68,7 @@ function Keping({ aktif, onClick, children }: { aktif: boolean; onClick: () => v
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition",
         aktif
-          ? "border-sidebar bg-sidebar text-white"
+          ? "border-brand bg-brand text-white"
           : "border-line bg-card text-muted hover:border-slate-300 hover:text-ink",
       )}
     >

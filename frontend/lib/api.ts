@@ -8,12 +8,17 @@ import { bahasaAktif, terjemahkan, terjemahkanPesan } from "@/lib/bahasa";
  * supaya tidak jadi kejutan: pilihan ini kebal CSRF (header tidak ikut terkirim
  * sendiri oleh peramban) tapi terbuka terhadap XSS. Yang menjaga sisi itu
  * adalah React, yang meng-escape seluruh teks yang dirender — selama tidak ada
- * dangerouslySetInnerHTML, tidak ada jalan masuknya.
+ * dangerouslySetInnerHTML, tidak ada jalan masuknya. (Satu-satunya yang ada,
+ * di app/layout.tsx, berisi skrip tema yang tetap — tanpa data apa pun.)
  *
  * BENTUK DATANYA mengikuti kontrak yang sama dengan yang dipakai Studio dan
  * JakRunner. Itu bukan kebetulan: satu API melayani ketiganya, dan tipe di
  * berkas ini adalah satu-satunya tempat bentuk itu dituliskan di sisi
  * peramban.
+ *
+ * FOLDER dikirim sebagai parameter ?folderId=, bukan header: CORS server hanya
+ * mengizinkan Authorization dan Content-Type, dan permintaan TANPA folder tetap
+ * berarti seluruh penyewa — bentuk yang dipakai Studio dan JakRunner.
  */
 const TOKEN_KEY = "forgehub.token";
 
@@ -67,6 +72,11 @@ export function errorText(e: unknown, bawaan = "Terjadi kesalahan."): string {
   return pesan ? terjemahkanPesan(bahasaAktif(), pesan) : terjemahkan(bahasaAktif(), bawaan);
 }
 
+/** Status HTTP sebuah galat, kalau ada. */
+export function statusGalat(e: unknown): number | undefined {
+  return (e as AxiosError)?.response?.status;
+}
+
 // ---------------------------------------------------------------------
 // Bentuk data
 // ---------------------------------------------------------------------
@@ -88,6 +98,7 @@ export type Job = {
   createdAt: string;
   startedAt: string | null;
   endedAt: string | null;
+  folderId?: string | null;
 };
 
 export type Robot = {
@@ -103,6 +114,8 @@ export type Robot = {
   memoryMb: number;
   lastHeartbeatAt: string | null;
   createdAt: string;
+  /** Nama folder bersama tempat robot ini ditugaskan. */
+  folders?: string[] | null;
 };
 
 export type Machine = {
@@ -133,6 +146,7 @@ export type Process = {
   jobCount: number;
   lastRunAt: string | null;
   createdAt: string;
+  folderId: string;
   /** Pekerjaan yang belum selesai: PENDING, RUNNING, atau STOPPING. */
   activeJobs: number;
   /** Keadaan terjauh di antara pekerjaan itu; null kalau tidak ada. */
@@ -165,6 +179,7 @@ export type Trigger = {
   nextRunAt: string | null;
   lastRunAt: string | null;
   createdAt: string;
+  folderId?: string;
 };
 
 export type Queue = {
@@ -179,6 +194,7 @@ export type Queue = {
   failedCount: number;
   totalCount: number;
   createdAt: string;
+  folderId: string;
 };
 
 export type QueueItem = {
@@ -214,6 +230,7 @@ export type Asset = {
   description: string | null;
   createdAt: string;
   updatedAt: string | null;
+  folderId: string;
 };
 
 export type Bucket = {
@@ -223,6 +240,7 @@ export type Bucket = {
   fileCount: number;
   totalBytes: number;
   createdAt: string;
+  folderId: string;
 };
 
 export type BucketFile = {
@@ -264,14 +282,30 @@ export type User = {
   isActive: boolean;
   createdAt: string;
   lastLoginAt: string | null;
+  /** Nama folder tempat pengguna ini ditugaskan. */
+  folders?: string[] | null;
 };
 
 export type Role = {
   id: string;
   name: string;
   description: string | null;
+  /** Pola dipisah koma: "*", "processes.*", "*.read", "processes.read". */
   permissions: string | null;
   userCount: number;
+  /** Administrator: tidak bisa diubah atau dihapus. */
+  locked: boolean;
+};
+
+/** Satu baris matriks izin: sumber dan tindakan yang berlaku untuknya. */
+export type SumberIzin = { resource: string; actions: string[] };
+
+/** Orang yang sedang masuk, beserta izin perannya. */
+export type Profil = User & {
+  tenantName: string;
+  tenantDisplayName?: string | null;
+  /** Pola izin peran; lihat lib/izin.ts. */
+  permissions?: string[];
 };
 
 export type Tenant = {
@@ -301,6 +335,58 @@ export type Settings = {
   counts: { users: number; robots: number; processes: number; jobs: number; logs: number };
 };
 
+// ---------------------------------------------------------------------
+// Folder
+// ---------------------------------------------------------------------
+
+export type FolderNode = {
+  id: string;
+  parentId: string | null;
+  name: string;
+  description: string | null;
+  isDefault: boolean;
+  /** Folder Saya: hanya terlihat oleh pemiliknya. */
+  personal: boolean;
+  createdAt: string;
+  /**
+   * false untuk LELUHUR folder yang boleh dibuka: ia tampil supaya pohonnya
+   * utuh, tapi tidak bisa dipilih.
+   */
+  accessible?: boolean;
+};
+
+export type FolderTree = {
+  folders: FolderNode[];
+  personal: FolderNode | null;
+  /** Administrator: boleh membuat, mengubah, dan menghapus folder. */
+  canManage: boolean;
+};
+
+/** Baris halaman pengelolaan folder: termasuk Folder Saya setiap orang, beserta isinya. */
+export type FolderKelola = FolderNode & {
+  ownerUsername: string | null;
+  childCount: number;
+  processCount: number;
+  triggerCount: number;
+  queueCount: number;
+  assetCount: number;
+  bucketCount: number;
+  userCount: number;
+  robotCount: number;
+};
+
+export type FolderAnggota = {
+  folder: FolderNode;
+  users: { id: string; username: string; displayName: string; role: string; isActive: boolean; assignedAt: string }[];
+  robots: { id: string; name: string; machineName: string | null; type: string; assignedAt: string }[];
+  canManageUsers: boolean;
+  canManageRobots: boolean;
+};
+
+// ---------------------------------------------------------------------
+// Dasbor, audit
+// ---------------------------------------------------------------------
+
 /** Rentang waktu di dasbor: hari, minggu, bulan, atau tahun INI — rentang kalender. */
 export type Periode = "today" | "week" | "month" | "year";
 
@@ -310,33 +396,48 @@ export type AngkaPeriode = {
   start: string;
   successful: number;
   faulted: number;
+  stopped: number;
   /** Pekerjaan yang DIBUAT sepanjang periode, apa pun keadaannya. */
   total: number;
   /** Dari pekerjaan yang sudah selesai saja; 100 kalau belum ada yang selesai. */
   successRate: number;
 };
 
+/**
+ * Satu irisan donat per proses. Anggotanya sama untuk keempat periode, dalam
+ * urutan yang sama — warnanya mengikuti urutan itu. `other` menggabungkan
+ * proses selebihnya.
+ */
+export type IrisanProses = { name: string | null; count: number; other: boolean; processes?: number };
+
 export type Dashboard = {
   robots: { total: number; available: number; busy: number; disconnected: number };
   jobs: {
     running: number;
     pending: number;
+    stopping: number;
     successfulToday: number;
     faultedToday: number;
     totalToday: number;
   };
   /**
-   * Keempat periode sekaligus: setiap kartu di dasbor memilih rentangnya
+   * Keempat periode sekaligus: setiap donat di dasbor memilih rentangnya
    * sendiri, dan berganti pilihan tidak perlu menunggu permintaan baru.
    */
   periods: Record<Periode, AngkaPeriode>;
+  processBreakdown: Record<Periode, IrisanProses[]>;
   queues: { total: number; newItems: number; inProgress: number; failed: number };
   library: {
     processes: number;
     packages: number;
     assets: number;
-    machines: number;
+    queues: number;
     triggers: number;
+    triggersEnabled: number;
+    buckets: number;
+    users: number;
+    robots: number;
+    machines: number;
   };
   successRate: number;
   unreadAlerts: number;
@@ -361,7 +462,17 @@ export type Dashboard = {
  */
 export type HistoryDay = { bucket: string; day: string; successful: number; faulted: number };
 
-export type SearchHit = { kind: string; label: string; detail: string; page: string };
+export type SearchHit = { kind: string; label: string; detail: string; page: string; folderId: string | null };
+
+export type AuditEntry = {
+  id: number;
+  username: string | null;
+  component: string;
+  action: string;
+  target: string | null;
+  detail: string | null;
+  createdAt: string;
+};
 
 export type LoginResult = {
   token: string;
@@ -384,38 +495,65 @@ const get = <T,>(url: string, params?: Record<string, unknown>) =>
 const post = <T,>(url: string, body?: unknown) =>
   api.post<T>(url, body ?? {}).then((r) => r.data);
 
-const put = <T,>(url: string, body?: unknown) =>
-  api.put<T>(url, body ?? {}).then((r) => r.data);
+const put = <T,>(url: string, body?: unknown, params?: Record<string, unknown>) =>
+  api.put<T>(url, body ?? {}, { params }).then((r) => r.data);
 
-const del = <T,>(url: string) => api.delete<T>(url).then((r) => r.data);
+const del = <T,>(url: string, params?: Record<string, unknown>) =>
+  api.delete<T>(url, { params }).then((r) => r.data);
 
 /** Nama dalam jalur bisa berisi spasi dan garis miring; selalu disandikan. */
 const seg = (s: string) => encodeURIComponent(s);
+
+/** Parameter folder: dihilangkan sama sekali kalau tidak ada, bukan dikirim kosong. */
+const dalam = (folderId?: string | null) => (folderId ? { folderId } : undefined);
 
 export const ForgeHubApi = {
   login: (username: string, password: string) =>
     post<LoginResult>("/api/auth/login", { username, password }),
 
-  me: () => get<User & { tenantName: string }>("/api/auth/me"),
+  me: () => get<Profil>("/api/auth/me"),
 
   /** Nama tampilan dan surel milik sendiri; surel kosong berarti dihapus. */
-  updateProfile: (body: { displayName: string; email: string }) =>
-    put<User & { tenantName: string }>("/api/auth/me", body),
+  updateProfile: (body: { displayName: string; email: string }) => put<Profil>("/api/auth/me", body),
 
   changePassword: (currentPassword: string, newPassword: string) =>
     post<{ status: string }>("/api/auth/password", { currentPassword, newPassword }),
 
+  // --- folder ---
+  folders: () => get<FolderTree>("/api/folders"),
+  foldersManage: () => get<FolderKelola[]>("/api/folders/manage"),
+  createFolder: (body: { name: string; description?: string; parentId?: string | null }) =>
+    post<{ ok: boolean; id: string }>("/api/folders", body),
+  /** parentId disertakan hanya kalau foldernya dipindah; null berarti ke akar. */
+  updateFolder: (id: string, body: { name: string; description?: string; parentId?: string | null }) =>
+    put<{ ok: boolean }>(`/api/folders/${seg(id)}`, body),
+  deleteFolder: (id: string) => del<{ ok: boolean }>(`/api/folders/${seg(id)}`),
+  personalFolder: () => post<FolderNode>("/api/folders/personal"),
+  folderMembers: (id: string) => get<FolderAnggota>(`/api/folders/${seg(id)}/members`),
+  assignUser: (id: string, username: string) => post<{ ok: boolean }>(`/api/folders/${seg(id)}/users`, { username }),
+  unassignUser: (id: string, username: string) =>
+    del<{ ok: boolean }>(`/api/folders/${seg(id)}/users/${seg(username)}`),
+  assignRobot: (id: string, robotName: string) =>
+    post<{ ok: boolean }>(`/api/folders/${seg(id)}/robots`, { robotName }),
+  unassignRobot: (id: string, robotName: string) =>
+    del<{ ok: boolean }>(`/api/folders/${seg(id)}/robots/${seg(robotName)}`),
+
   // --- dasbor ---
-  dashboard: () => get<Dashboard>("/api/dashboard"),
+  dashboard: (folderId?: string | null) => get<Dashboard>("/api/dashboard", dalam(folderId)),
   history: (period: Periode) => get<HistoryDay[]>("/api/dashboard/history", { period }),
   search: (q: string) => get<SearchHit[]>("/api/search", { q }),
 
   // --- pekerjaan ---
-  jobs: (params?: { state?: string; process?: string; limit?: number }) =>
-    get<Job[]>("/api/jobs", params),
+  jobs: (params?: { state?: string; process?: string; folderId?: string | null; limit?: number }) =>
+    get<Job[]>("/api/jobs", { ...params, folderId: params?.folderId || undefined }),
   job: (id: string) => get<Job>(`/api/jobs/${seg(id)}`),
+  /**
+   * folderId: folder prosesnya. Nama proses unik per folder, jadi dasbor
+   * selalu mengirimnya; tanpa itu server memakai aturan untuk Studio.
+   */
   startJob: (body: {
     processName: string;
+    folderId?: string;
     robotName?: string;
     priority?: string;
     inputJson?: string;
@@ -425,7 +563,8 @@ export const ForgeHubApi = {
   deleteJob: (id: string) => del<{ ok: boolean }>(`/api/jobs/${seg(id)}`),
 
   // --- robot dan mesin ---
-  robots: () => get<Robot[]>("/api/robots"),
+  /** Dengan folder: hanya robot yang ditugaskan ke folder itu. */
+  robots: (folderId?: string | null) => get<Robot[]>("/api/robots", dalam(folderId)),
   saveRobot: (body: Partial<Robot> & { name: string }) => post<{ ok: boolean }>("/api/robots", body),
   deleteRobot: (name: string) => del<{ ok: boolean }>(`/api/robots/${seg(name)}`),
 
@@ -440,22 +579,35 @@ export const ForgeHubApi = {
   deleteEnvironment: (name: string) => del<{ ok: boolean }>(`/api/environments/${seg(name)}`),
 
   // --- proses dan paket ---
-  processes: () => get<Process[]>("/api/processes"),
-  saveProcess: (body: { name: string; description?: string; environment?: string }) =>
-    post<{ ok: boolean }>("/api/processes", body),
-  deleteProcess: (name: string) => del<{ ok: boolean }>(`/api/processes/${seg(name)}`),
+  processes: (folderId?: string | null) => get<Process[]>("/api/processes", dalam(folderId)),
+  saveProcess: (body: {
+    name: string;
+    packageName?: string;
+    packageVersion?: string;
+    description?: string;
+    environment?: string;
+    folderId?: string;
+  }) => post<{ ok: boolean }>("/api/processes", body),
+  /** Nama proses unik per folder: dari folder mana, ke folder mana. */
+  moveProcess: (name: string, dari: string, ke: string) =>
+    put<{ ok: boolean }>(`/api/processes/${seg(name)}/folder`, { folderId: ke }, { folderId: dari }),
+  deleteProcess: (name: string, folderId: string) =>
+    del<{ ok: boolean }>(`/api/processes/${seg(name)}`, { folderId }),
 
-  packages: () => get<Package[]>("/api/packages"),
+  /** Dengan folder: paket yang dipakai proses di folder itu; tanpa folder: seluruh umpan. */
+  packages: (folderId?: string | null) => get<Package[]>("/api/packages", dalam(folderId)),
   deletePackage: (name: string, version: string) =>
     del<{ ok: boolean }>(`/api/packages/${seg(name)}/${seg(version)}`),
   packageUrl: (name: string, version: string) =>
     `${api.defaults.baseURL}/api/packages/${seg(name)}/${seg(version)}/content`,
 
   // --- pemicu ---
-  triggers: () => get<Trigger[]>("/api/triggers"),
+  triggers: (folderId?: string | null) => get<Trigger[]>("/api/triggers", dalam(folderId)),
+  /** Pemicu tinggal di folder prosesnya, dan namanya unik di folder itu. */
   saveTrigger: (body: {
     name: string;
     processName: string;
+    folderId?: string;
     robotName?: string;
     cron?: string;
     intervalMinutes?: number;
@@ -463,14 +615,24 @@ export const ForgeHubApi = {
     priority?: string;
     enabled?: boolean;
   }) => post<{ ok: boolean; nextRunAt: string }>("/api/triggers", body),
-  toggleTrigger: (name: string) =>
-    post<{ ok: boolean; enabled: boolean }>(`/api/triggers/${seg(name)}/toggle`),
-  deleteTrigger: (name: string) => del<{ ok: boolean }>(`/api/triggers/${seg(name)}`),
+  toggleTrigger: (name: string, folderId: string) =>
+    api
+      .post<{ ok: boolean; enabled: boolean }>(`/api/triggers/${seg(name)}/toggle`, {}, { params: { folderId } })
+      .then((r) => r.data),
+  deleteTrigger: (name: string, folderId: string) =>
+    del<{ ok: boolean }>(`/api/triggers/${seg(name)}`, { folderId }),
 
   // --- antrean ---
-  queues: () => get<Queue[]>("/api/queues"),
-  saveQueue: (body: { name: string; description?: string; maxRetries?: number }) =>
-    post<{ ok: boolean }>("/api/queues", body),
+  queues: (folderId?: string | null) => get<Queue[]>("/api/queues", dalam(folderId)),
+  saveQueue: (body: {
+    name: string;
+    description?: string;
+    maxRetries?: number;
+    acceptDuplicates?: boolean;
+    folderId?: string;
+  }) => post<{ ok: boolean }>("/api/queues", body),
+  moveQueue: (name: string, folderId: string) =>
+    put<{ ok: boolean }>(`/api/queues/${seg(name)}/folder`, { folderId }),
   deleteQueue: (name: string) => del<{ ok: boolean }>(`/api/queues/${seg(name)}`),
   queueItems: (name: string, params?: { status?: string; limit?: number }) =>
     get<QueueItem[]>(`/api/queues/${seg(name)}/items`, params),
@@ -481,7 +643,7 @@ export const ForgeHubApi = {
   // /api/credentials sengaja tidak dipakai lagi dari sini. Endpoint itu tetap
   // ada di server untuk activity Get Credential, tapi yang dilayaninya sama
   // persis dengan aset bertipe Credential di bawah.
-  assets: () => get<Asset[]>("/api/assets"),
+  assets: (folderId?: string | null) => get<Asset[]>("/api/assets", dalam(folderId)),
   saveAsset: (body: {
     name: string;
     type?: string;
@@ -490,15 +652,20 @@ export const ForgeHubApi = {
     /** Untuk Credential: kata sandinya. Kosong pada Credential/Secret yang disunting berarti "biarkan". */
     value?: string;
     description?: string;
+    folderId?: string;
   }) => post<{ ok: boolean; created: boolean }>("/api/assets", body),
+  moveAsset: (name: string, folderId: string) =>
+    put<{ ok: boolean }>(`/api/assets/${seg(name)}/folder`, { folderId }),
   assetValue: (name: string) =>
     get<{ name: string; type: string; value: string | null }>(`/api/assets/${seg(name)}/value`),
   deleteAsset: (name: string) => del<{ ok: boolean }>(`/api/assets/${seg(name)}`),
 
-  // --- gudang berkas ---
-  buckets: () => get<Bucket[]>("/api/buckets"),
-  saveBucket: (body: { name: string; description?: string }) =>
+  // --- ember penyimpanan ---
+  buckets: (folderId?: string | null) => get<Bucket[]>("/api/buckets", dalam(folderId)),
+  saveBucket: (body: { name: string; description?: string; folderId?: string }) =>
     post<{ ok: boolean }>("/api/buckets", body),
+  moveBucket: (name: string, folderId: string) =>
+    put<{ ok: boolean }>(`/api/buckets/${seg(name)}/folder`, { folderId }),
   deleteBucket: (name: string) => del<{ ok: boolean }>(`/api/buckets/${seg(name)}`),
   bucketFiles: (name: string) => get<BucketFile[]>(`/api/buckets/${seg(name)}/files`),
   uploadBucketFile: (name: string, body: { fileName: string; contentBase64: string; contentType?: string }) =>
@@ -518,10 +685,12 @@ export const ForgeHubApi = {
     robot?: string;
     process?: string;
     jobId?: string;
+    folderId?: string | null;
     limit?: number;
   }) =>
     get<LogLine[]>("/api/logs", {
       ...params,
+      folderId: params?.folderId || undefined,
       level: params?.level?.length ? params.level.join(",") : undefined,
     }),
   clearLogs: (olderThanDays: number) =>
@@ -533,6 +702,8 @@ export const ForgeHubApi = {
       ...params,
       severity: params?.severity?.length ? params.severity.join(",") : undefined,
     }),
+  /** Lonceng di bilah atas: jumlah yang belum dibaca dan delapan yang terbaru. */
+  alertSummary: () => get<{ unread: number; recent: Alert[] }>("/api/alerts/summary"),
   readAlert: (id: number) => post<{ ok: boolean }>(`/api/alerts/${id}/read`),
   readAllAlerts: () => post<{ ok: boolean; changed: number }>("/api/alerts/read-all"),
 
@@ -549,9 +720,24 @@ export const ForgeHubApi = {
   deleteUser: (username: string) => del<{ ok: boolean }>(`/api/users/${seg(username)}`),
 
   roles: () => get<Role[]>("/api/roles"),
+  permissionCatalog: () => get<SumberIzin[]>("/api/permissions"),
+  createRole: (body: { name: string; description?: string; permissions: string[] }) =>
+    post<{ ok: boolean }>("/api/roles", body),
+  /** name di badan boleh berbeda dari yang di jalur: itu berarti ganti nama. */
+  updateRole: (nama: string, body: { name: string; description?: string; permissions: string[] }) =>
+    put<{ ok: boolean }>(`/api/roles/${seg(nama)}`, body),
+  deleteRole: (nama: string) => del<{ ok: boolean }>(`/api/roles/${seg(nama)}`),
   tenants: () => get<Tenant[]>("/api/tenants"),
   licensing: () => get<License[]>("/api/licensing"),
   settings: () => get<Settings>("/api/settings"),
+
+  audit: (params?: { component?: string; q?: string; limit?: number }) =>
+    get<AuditEntry[]>("/api/audit", {
+      component: params?.component || undefined,
+      q: params?.q || undefined,
+      limit: params?.limit,
+    }),
+  auditComponents: () => get<{ component: string; total: number }[]>("/api/audit/components"),
 };
 
 /**

@@ -2,13 +2,14 @@
 
 import { useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ForgeHubApi } from "@/lib/api";
+import { ForgeHubApi, type FolderNode } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { cn, dateTimeOf } from "@/lib/utils";
 import { Badge, Button, Card } from "@/components/ui/primitives";
 import { DataTable } from "@/components/DataTable";
 import { kelasIsian } from "@/components/Dialog";
 import { PilihTingkat } from "@/components/PilihTingkat";
+import { BilahAlat, PerluFolder } from "@/components/HalamanFolder";
 
 // Tanpa TRACE dan DEBUG: ForgeHub tidak menyimpan maupun menampilkan tingkat
 // rincian (lihat LogLevel.rincian di backend), jadi pilihan itu selalu kosong.
@@ -16,20 +17,28 @@ import { PilihTingkat } from "@/components/PilihTingkat";
 const TINGKAT = ["INFO", "WARN", "ERROR", "FATAL"];
 
 export default function Catatan() {
+  return <PerluFolder>{(folder) => <IsiCatatan folder={folder} />}</PerluFolder>;
+}
+
+function IsiCatatan({ folder }: { folder: FolderNode }) {
   const { t, tp } = useT();
 
   const [tingkat, setTingkat] = useState<string[]>([]);
   const [proses, setProses] = useState("");
   const [ikuti, setIkuti] = useState(true);
 
-  const daftarProses = useQuery({ queryKey: ["processes"], queryFn: ForgeHubApi.processes });
+  const daftarProses = useQuery({
+    queryKey: ["processes", folder.id],
+    queryFn: () => ForgeHubApi.processes(folder.id),
+  });
 
   const log = useQuery({
-    queryKey: ["logs", tingkat, proses],
+    queryKey: ["logs", folder.id, tingkat, proses],
     queryFn: () =>
       ForgeHubApi.logs({
         level: tingkat,
         process: proses || undefined,
+        folderId: folder.id,
         limit: 500,
       }),
     // Hanya menyegarkan sendiri saat "ikuti" menyala. Tabel yang melompat ke
@@ -41,16 +50,14 @@ export default function Catatan() {
   });
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-lg font-semibold text-ink">{t("Catatan")}</h1>
-
+    <div>
+      <BilahAlat aksi={<Button onClick={() => log.refetch()}>{t("Muat ulang")}</Button>}>
         <PilihTingkat pilihan={TINGKAT} terpilih={tingkat} onUbah={setTingkat} />
 
         <select
           value={proses}
           onChange={(e) => setProses(e.target.value)}
-          className={`${kelasIsian} w-48`}
+          className={cn(kelasIsian, "w-48")}
           aria-label={t("Proses|satu")}
         >
           <option value="">{t("Semua proses")}</option>
@@ -70,32 +77,41 @@ export default function Catatan() {
           />
           {t("Ikuti otomatis")}
         </label>
-
-        <Button className="ml-auto" onClick={() => log.refetch()}>
-          {t("Muat ulang")}
-        </Button>
-      </div>
-
-      <p className="text-sm text-muted">
-        {t(
-          "Paling banyak 500 baris terbaru. Untuk catatan satu proses atau satu pekerjaan, buka detailnya dari halaman Proses atau Pekerjaan.",
-        )}
-      </p>
+      </BilahAlat>
 
       <Card className={cn("transition-opacity", log.isPlaceholderData && "opacity-60")}>
         <DataTable
           data={log.data ?? []}
           kunci={(l) => String(l.id)}
           perHalaman={50}
+          kosong={log.isLoading ? "Memuat..." : "Belum ada catatan di folder ini."}
           kolom={[
-            { judul: "Waktu", sel: (l) => <span className="tabular-nums text-muted">{dateTimeOf(l.loggedAt)}</span>, urut: (l) => l.id },
+            {
+              judul: "Waktu",
+              sel: (l) => <span className="whitespace-nowrap tabular-nums text-muted">{dateTimeOf(l.loggedAt)}</span>,
+              urut: (l) => l.id,
+            },
             { judul: "Tingkat", sel: (l) => <Badge value={l.level} />, urut: (l) => l.level },
-            { judul: "Robot|satu", sel: (l) => <span className="text-muted">{l.robotName ?? "-"}</span>, urut: (l) => l.robotName },
-            { judul: "Proses|satu", sel: (l) => <span className="text-muted">{l.processName ?? "-"}</span>, urut: (l) => l.processName },
+            {
+              judul: "Robot|satu",
+              sel: (l) => <span className="text-muted">{l.robotName ?? "-"}</span>,
+              urut: (l) => l.robotName,
+            },
+            {
+              judul: "Proses|satu",
+              sel: (l) => <span className="text-muted">{l.processName ?? "-"}</span>,
+              urut: (l) => l.processName,
+            },
             { judul: "Pesan", sel: (l) => <span className="break-all">{tp(l.message)}</span> },
           ]}
         />
       </Card>
+
+      <p className="mt-3 text-xs text-muted">
+        {t(
+          "Paling banyak 500 baris terbaru dari pekerjaan di folder ini. Untuk catatan satu proses atau satu pekerjaan, buka detailnya dari halaman Proses atau Pekerjaan.",
+        )}
+      </p>
     </div>
   );
 }

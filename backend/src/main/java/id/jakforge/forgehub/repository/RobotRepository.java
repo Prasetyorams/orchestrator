@@ -2,6 +2,7 @@ package id.jakforge.forgehub.repository;
 
 import org.springframework.stereotype.Repository;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -34,14 +35,35 @@ public class RobotRepository {
         this.db = db;
     }
 
-    public List<Map<String, Object>> semua(UUID tenantId) {
+    /**
+     * @param folderId null berarti semua robot penyewa; selain itu hanya robot
+     *                 yang ditugaskan ke folder itu.
+     *
+     * <p>{@code folders} berisi nama folder bersama tempat robotnya ditugaskan,
+     * supaya halaman robot penyewa bisa menunjukkannya tanpa bertanya satu per
+     * satu. Folder Saya tidak ikut disebut: namanya sama untuk semua orang dan
+     * tidak menjelaskan apa pun.
+     */
+    public List<Map<String, Object>> semua(UUID tenantId, UUID folderId) {
+        List<Object> args = new ArrayList<>(List.of(tenantId));
+        String saring = "";
+
+        if (folderId != null) {
+            saring = " AND id IN (SELECT robot_id FROM folder_robots WHERE tenant_id = ? AND folder_id = ?)";
+            args.add(tenantId);
+            args.add(folderId);
+        }
+
         return db.rows("""
                 SELECT id, name, machine_name, username, type, environment, description,
-                       %s, cpu_percent, memory_mb, last_heartbeat_at, created_at
+                       %s, cpu_percent, memory_mb, last_heartbeat_at, created_at,
+                       (SELECT array_agg(f.name ORDER BY lower(f.name))
+                          FROM folder_robots fr JOIN folders f ON f.id = fr.folder_id
+                         WHERE fr.robot_id = robots.id AND f.owner_id IS NULL) AS folders
                   FROM robots
-                 WHERE tenant_id = ?
+                 WHERE tenant_id = ?%s
                  ORDER BY name
-                """.formatted(STATUS), tenantId);
+                """.formatted(STATUS, saring), args.toArray());
     }
 
     public Map<String, Object> satu(UUID tenantId, String nama) {
@@ -54,7 +76,18 @@ public class RobotRepository {
     }
 
     /** Untuk dasbor: ikut membawa jumlah pekerjaan yang sedang dijalankannya. */
-    public List<Map<String, Object>> untukDasbor(UUID tenantId, int batas) {
+    public List<Map<String, Object>> untukDasbor(UUID tenantId, UUID folderId, int batas) {
+        List<Object> args = new ArrayList<>(List.of(tenantId));
+        String saring = "";
+
+        if (folderId != null) {
+            saring = " AND r.id IN (SELECT robot_id FROM folder_robots WHERE tenant_id = ? AND folder_id = ?)";
+            args.add(tenantId);
+            args.add(folderId);
+        }
+
+        args.add(batas);
+
         return db.rows("""
                 SELECT r.name, r.machine_name, r.type, r.environment, r.cpu_percent, r.memory_mb,
                        r.last_heartbeat_at,
@@ -65,13 +98,13 @@ public class RobotRepository {
                          WHERE j.tenant_id = r.tenant_id AND j.robot_name = r.name
                            AND j.state = 'RUNNING') AS running_jobs
                   FROM robots r
-                 WHERE r.tenant_id = ?
+                 WHERE r.tenant_id = ?%s
                  ORDER BY CASE WHEN r.last_heartbeat_at IS NULL
                                  OR now() - r.last_heartbeat_at > make_interval(secs => %d)
                                THEN 2 ELSE 0 END,
                           r.name
                  LIMIT ?
-                """.formatted(PUTUS_SETELAH_DETIK, PUTUS_SETELAH_DETIK), tenantId, batas);
+                """.formatted(PUTUS_SETELAH_DETIK, saring, PUTUS_SETELAH_DETIK), args.toArray());
     }
 
     public boolean ada(UUID tenantId, String nama) {
@@ -119,7 +152,16 @@ public class RobotRepository {
     }
 
     /** Hitungan per keadaan, diambil dalam satu kueri supaya angkanya sezaman. */
-    public Map<String, Object> hitungan(UUID tenantId) {
+    public Map<String, Object> hitungan(UUID tenantId, UUID folderId) {
+        List<Object> args = new ArrayList<>(List.of(tenantId));
+        String saring = "";
+
+        if (folderId != null) {
+            saring = " AND id IN (SELECT robot_id FROM folder_robots WHERE tenant_id = ? AND folder_id = ?)";
+            args.add(tenantId);
+            args.add(folderId);
+        }
+
         return db.row("""
                 SELECT count(*) AS total,
                        count(*) FILTER (WHERE status = 'AVAILABLE' AND segar) AS available,
@@ -128,8 +170,8 @@ public class RobotRepository {
                   FROM (SELECT status,
                                last_heartbeat_at IS NOT NULL
                                AND now() - last_heartbeat_at <= make_interval(secs => %d) AS segar
-                          FROM robots WHERE tenant_id = ?) AS r
-                """.formatted(PUTUS_SETELAH_DETIK), tenantId);
+                          FROM robots WHERE tenant_id = ?%s) AS r
+                """.formatted(PUTUS_SETELAH_DETIK, saring), args.toArray());
     }
 
     /** Jumlah robot Attended, atau selain Attended. Dipakai halaman lisensi. */

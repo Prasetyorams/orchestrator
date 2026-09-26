@@ -27,6 +27,30 @@ export function dateTimeOf(iso: string | null | undefined) {
     : d.toLocaleString(lokalTanggal(), { dateStyle: "medium", timeStyle: "short" });
 }
 
+/**
+ * Waktu yang ringkas untuk kolom sempit: jamnya saja kalau hari ini, tanggal
+ * dan jam kalau tahun ini, dan lengkap kalau lebih lama dari itu. Tanggal
+ * lengkapnya ada di petunjuk saat kursor diam di atasnya.
+ */
+export function waktuSingkat(iso: string | null | undefined) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "-";
+
+  const kini = new Date();
+  const lokal = lokalTanggal();
+
+  if (d.toDateString() === kini.toDateString()) {
+    return d.toLocaleTimeString(lokal, { hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+
+  if (d.getFullYear() === kini.getFullYear()) {
+    return d.toLocaleString(lokal, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+
+  return dateTimeOf(iso);
+}
+
 /** Bita menjadi satuan yang enak dibaca. */
 export function ukuranBerkas(b: number) {
   if (b < 1024) return `${b} B`;

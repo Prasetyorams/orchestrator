@@ -3,6 +3,7 @@ package id.jakforge.forgehub.repository;
 import id.jakforge.forgehub.model.QueueItemStatus;
 import org.springframework.stereotype.Repository;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -28,9 +29,19 @@ public class QueueRepository {
      * alih-alih lima, dan seluruh angka dalam satu baris berasal dari satu saat
      * yang sama.
      */
-    public List<Map<String, Object>> semua(UUID tenantId) {
+    /** @param folderId null berarti seluruh penyewa. */
+    public List<Map<String, Object>> semua(UUID tenantId, UUID folderId) {
+        List<Object> args = new ArrayList<>(List.of(tenantId));
+        String saring = "";
+
+        if (folderId != null) {
+            saring = " AND q.folder_id = ?";
+            args.add(folderId);
+        }
+
         return db.rows("""
                 SELECT q.id, q.name, q.description, q.max_retries, q.accept_duplicates, q.created_at,
+                       q.folder_id,
                        count(*) FILTER (WHERE i.status = 'NEW')         AS new_count,
                        count(*) FILTER (WHERE i.status = 'IN_PROGRESS') AS in_progress_count,
                        count(*) FILTER (WHERE i.status = 'SUCCESSFUL')  AS successful_count,
@@ -39,14 +50,25 @@ public class QueueRepository {
                   FROM queues q
                   LEFT JOIN queue_items i
                          ON i.tenant_id = q.tenant_id AND i.queue_name = q.name
-                 WHERE q.tenant_id = ?
-                 GROUP BY q.id, q.name, q.description, q.max_retries, q.accept_duplicates, q.created_at
+                 WHERE q.tenant_id = ?%s
+                 GROUP BY q.id, q.name, q.description, q.max_retries, q.accept_duplicates, q.created_at,
+                          q.folder_id
                  ORDER BY q.name
-                """, tenantId);
+                """.formatted(saring), args.toArray());
     }
 
     /** Ringkasan untuk dasbor: tanpa kolom setelan, dan dibatasi. */
-    public List<Map<String, Object>> ringkasan(UUID tenantId, int batas) {
+    public List<Map<String, Object>> ringkasan(UUID tenantId, UUID folderId, int batas) {
+        List<Object> args = new ArrayList<>(List.of(tenantId));
+        String saring = "";
+
+        if (folderId != null) {
+            saring = " AND q.folder_id = ?";
+            args.add(folderId);
+        }
+
+        args.add(batas);
+
         return db.rows("""
                 SELECT q.name,
                        count(*) FILTER (WHERE i.status = 'NEW')         AS new_count,
@@ -56,11 +78,11 @@ public class QueueRepository {
                   FROM queues q
                   LEFT JOIN queue_items i
                          ON i.tenant_id = q.tenant_id AND i.queue_name = q.name
-                 WHERE q.tenant_id = ?
+                 WHERE q.tenant_id = ?%s
                  GROUP BY q.name
                  ORDER BY q.name
                  LIMIT ?
-                """, tenantId, batas);
+                """.formatted(saring), args.toArray());
     }
 
     public Map<String, Object> satu(UUID tenantId, String nama) {
@@ -72,11 +94,19 @@ public class QueueRepository {
         return db.exists("SELECT count(*) FROM queues WHERE tenant_id = ? AND name = ?", tenantId, nama);
     }
 
-    public void buat(UUID tenantId, String nama, String keterangan, int maksPercobaan, boolean bolehKembar) {
+    /** @param folderId null berarti folder bawaan (diisi pemicu basis data). */
+    public void buat(UUID tenantId, String nama, String keterangan, int maksPercobaan, boolean bolehKembar,
+                     UUID folderId) {
         db.exec("""
-                INSERT INTO queues (id, tenant_id, name, description, max_retries, accept_duplicates, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, now())
-                """, Db.newId(), tenantId, nama, keterangan, maksPercobaan, bolehKembar);
+                INSERT INTO queues (id, tenant_id, name, description, max_retries, accept_duplicates,
+                                    folder_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, now())
+                """, Db.newId(), tenantId, nama, keterangan, maksPercobaan, bolehKembar, folderId);
+    }
+
+    public int pindah(UUID tenantId, String nama, UUID folderId) {
+        return db.exec("UPDATE queues SET folder_id = ? WHERE tenant_id = ? AND name = ?",
+                folderId, tenantId, nama);
     }
 
     public int hapus(UUID tenantId, String nama) {
@@ -87,17 +117,26 @@ public class QueueRepository {
         db.exec("DELETE FROM queue_items WHERE tenant_id = ? AND queue_name = ?", tenantId, nama);
     }
 
-    public long jumlahAntrean(UUID tenantId) {
-        return db.count("SELECT count(*) FROM queues WHERE tenant_id = ?", tenantId);
-    }
+    /**
+     * Hitungan butir tiap keadaan. Butir tidak menyimpan foldernya; foldernya
+     * adalah folder antreannya.
+     */
+    public Map<String, Object> hitunganButir(UUID tenantId, UUID folderId) {
+        List<Object> args = new ArrayList<>(List.of(tenantId));
+        String saring = "";
 
-    public Map<String, Object> hitunganButir(UUID tenantId) {
+        if (folderId != null) {
+            saring = " AND i.queue_name IN (SELECT q.name FROM queues q"
+                    + " WHERE q.tenant_id = i.tenant_id AND q.folder_id = ?)";
+            args.add(folderId);
+        }
+
         return db.row("""
-                SELECT count(*) FILTER (WHERE status = 'NEW')         AS new_items,
-                       count(*) FILTER (WHERE status = 'IN_PROGRESS') AS in_progress,
-                       count(*) FILTER (WHERE status = 'FAILED')      AS failed
-                  FROM queue_items WHERE tenant_id = ?
-                """, tenantId);
+                SELECT count(*) FILTER (WHERE i.status = 'NEW')         AS new_items,
+                       count(*) FILTER (WHERE i.status = 'IN_PROGRESS') AS in_progress,
+                       count(*) FILTER (WHERE i.status = 'FAILED')      AS failed
+                  FROM queue_items i WHERE i.tenant_id = ?%s
+                """.formatted(saring), args.toArray());
     }
 
     // -----------------------------------------------------------------

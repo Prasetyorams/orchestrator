@@ -1,5 +1,7 @@
 package id.jakforge.forgehub.common;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -75,6 +77,28 @@ public final class Badan {
         if (s.equalsIgnoreCase("false") || s.equals("0")) return false;
 
         return bawaan;
+    }
+
+    /**
+     * Daftar teks: larik JSON, atau satu untai dipisah koma — bentuk yang
+     * tersimpan di basis data. null kalau medannya tidak dikirim sama sekali,
+     * supaya "tidak diubah" bisa dibedakan dari "dikosongkan".
+     */
+    public static List<String> daftar(Map<String, Object> body, String nama) {
+        Object v = ambil(body, nama);
+        if (v == null) return null;
+
+        List<String> hasil = new ArrayList<>();
+
+        if (v instanceof List<?> larik) {
+            for (Object x : larik) {
+                if (x != null) hasil.add(String.valueOf(x));
+            }
+        } else {
+            for (String x : String.valueOf(v).split(",")) hasil.add(x);
+        }
+
+        return hasil;
     }
 
     private static Object ambil(Map<String, Object> body, String nama) {

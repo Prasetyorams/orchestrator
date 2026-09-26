@@ -2,43 +2,103 @@
 
 import { useEffect, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ForgeHubApi, type HistoryDay, type Periode } from "@/lib/api";
+import {
+  AppWindow,
+  CircleCheck,
+  CircleStop,
+  CircleX,
+  Clock,
+  CopyPlus,
+  Hand,
+  Laptop,
+  Network,
+  Play,
+  Users,
+  Zap,
+} from "lucide-react";
+import { ForgeHubApi, type Dashboard, type FolderNode, type Periode } from "@/lib/api";
 import { useT } from "@/lib/i18n";
+import { useTema } from "@/lib/tema";
 import { lokalTanggal } from "@/lib/bahasa";
-import { cn, dateTimeOf } from "@/lib/utils";
-import { Badge, Card, CardBody, CardHeader, StatCard } from "@/components/ui/primitives";
+import { cn, dateTimeOf, waktuSingkat } from "@/lib/utils";
+import { Badge, Card, CardHeader, Galat, KpiCard } from "@/components/ui/primitives";
 import { DataTable } from "@/components/DataTable";
 import { PilihTingkat } from "@/components/PilihTingkat";
+import { Donat, type Irisan } from "@/components/Donat";
+import { JudulHalaman, PerluFolder } from "@/components/HalamanFolder";
 
 /**
- * Rentang yang bisa dipilih di setiap kartu. Semuanya rentang KALENDER, sama
+ * Rentang yang bisa dipilih di setiap donat. Semuanya rentang KALENDER, sama
  * dengan yang dihitung server: "Mingguan" berarti minggu ini sejak Senin,
  * "Bulanan" bulan ini sejak tanggal 1 — bukan tujuh atau tiga puluh hari
  * terakhir.
  */
-const PERIODE: { kode: Periode; label: string; riwayat: string; jumlah: string }[] = [
-  { kode: "today", label: "Harian", riwayat: "Riwayat per jam, hari ini", jumlah: "{0} pekerjaan hari ini" },
-  { kode: "week", label: "Mingguan", riwayat: "Riwayat per hari, minggu ini", jumlah: "{0} pekerjaan minggu ini" },
-  { kode: "month", label: "Bulanan", riwayat: "Riwayat per hari, bulan ini", jumlah: "{0} pekerjaan bulan ini" },
-  { kode: "year", label: "Tahunan", riwayat: "Riwayat per bulan, tahun ini", jumlah: "{0} pekerjaan tahun ini" },
+const PERIODE: { kode: Periode; label: string }[] = [
+  { kode: "today", label: "Harian" },
+  { kode: "week", label: "Mingguan" },
+  { kode: "month", label: "Bulanan" },
+  { kode: "year", label: "Tahunan" },
 ];
 
 const TINGKAT_PERINGATAN = ["Info", "Warning", "Error"];
 
-/** Awalan kunci penyimpanan pilihan periode; setiap metrik menambahkan namanya. */
+/** Awalan kunci penyimpanan pilihan periode; setiap donat menambahkan namanya. */
 const KUNCI_PERIODE = "forgehub.dasbor.periode";
 
-function infoPeriode(kode: Periode) {
-  return PERIODE.find((p) => p.kode === kode) ?? PERIODE[0];
+/**
+ * Keadaan pekerjaan di donat, dalam URUTAN CINCINNYA.
+ *
+ * Urutan ini bukan urutan logis (aktif lalu selesai): urutan itu menaruh
+ * Berhasil tepat di sebelah Gagal, hijau di sebelah merah, dan keduanya
+ * nyaris sama bagi pembaca buta warna merah-hijau. Urutan di bawah dipilih
+ * dengan validator palet: setiap pasangan yang bersebelahan — termasuk
+ * sambungan akhir ke awal — terpisah ΔE ≥ 10,7 di bawah simulasi protan dan
+ * deutan, dan ≥ 15,7 untuk penglihatan normal.
+ *
+ * Warnanya warna STATUS (baik, peringatan, serius, kritis), karena keadaan
+ * pekerjaan memang berarti baik atau buruk; setiap irisan selalu berlabel.
+ *
+ * Tema gelap: warna status tidak berganti (paletnya memang dibuat untuk
+ * kedua permukaan); hanya biru Berjalan yang memakai langkah gelapnya. Diuji
+ * ulang di atas kartu gelap #171c23 — ΔE ≥ 10,7 buta warna, ≥ 15,7 normal,
+ * semua ≥ 3:1 terhadap kartunya.
+ */
+const KEADAAN = [
+  { kunci: "RUNNING", label: "Berjalan", warna: "#2a78d6", warnaGelap: "#3987e5", ikon: Play },
+  { kunci: "STOPPING", label: "Menghentikan", warna: "#ec835a", ikon: Hand },
+  { kunci: "FAULTED", label: "Gagal", warna: "#d03b3b", ikon: CircleX },
+  { kunci: "PENDING", label: "Menunggu", warna: "#fab219", ikon: Clock },
+  { kunci: "SUCCESSFUL", label: "Berhasil", warna: "#0ca30c", ikon: CircleCheck },
+  { kunci: "STOPPED", label: "Dihentikan", warna: "#898781", ikon: CircleStop },
+] as const;
+
+/**
+ * Warna irisan per proses: lima slot pertama palet kategori, dalam urutan
+ * tetap, dan abu-abu terang untuk "lainnya". Diperiksa dengan validator:
+ * setiap pasangan bersebelahan di cincin ΔE ≥ 9,1 (buta warna) dan ≥ 15,5
+ * (normal), untuk dua sampai enam irisan.
+ *
+ * Tema gelap memakai langkah gelap kelima slot yang sama — bukan palet lain —
+ * dan diuji ulang di atas kartu gelap: ΔE ≥ 8,4 buta warna, ≥ 15,4 normal,
+ * semua ≥ 3:1, untuk dua sampai enam irisan termasuk "lainnya". Abu-abu
+ * "lainnya" sama di kedua tema: yang lebih gelap terlalu mirip magenta dan
+ * hijau bagi pembaca buta warna.
+ */
+const WARNA_PROSES = {
+  terang: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"],
+  gelap: ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181"],
+};
+const WARNA_LAINNYA = "#c3c2b7";
+
+export default function Beranda() {
+  return <PerluFolder>{(folder) => <IsiBeranda folder={folder} />}</PerluFolder>;
 }
 
-export default function Dasbor() {
+function IsiBeranda({ folder }: { folder: FolderNode }) {
   const { t, tp } = useT();
 
-  // Setiap metrik memilih rentangnya sendiri, dan pilihannya diingat sendiri.
-  const [periodeBerhasil, setPeriodeBerhasil] = usePeriode("berhasil");
-  const [periodeGagal, setPeriodeGagal] = usePeriode("gagal");
-  const [periodeKeberhasilan, setPeriodeKeberhasilan] = usePeriode("keberhasilan");
+  // Setiap donat memilih rentangnya sendiri, dan pilihannya diingat sendiri.
+  const [periodePekerjaan, setPeriodePekerjaan] = usePeriode("pekerjaan");
   const [periodeRiwayat, setPeriodeRiwayat] = usePeriode("riwayat");
 
   const [tingkat, setTingkat] = useState<string[]>([]);
@@ -47,28 +107,15 @@ export default function Dasbor() {
   // terlihat sama dengan dasbor yang rusak.
   //
   // Angka keempat periode datang bersama dalam satu jawaban, jadi berganti
-  // pilihan di sebuah kartu langsung mengganti angkanya — tanpa permintaan
-  // baru dan tanpa "Memuat...".
+  // pilihan di sebuah donat langsung mengganti isinya — tanpa permintaan baru.
   const d = useQuery({
-    queryKey: ["dashboard"],
-    queryFn: ForgeHubApi.dashboard,
+    queryKey: ["dashboard", folder.id],
+    queryFn: () => ForgeHubApi.dashboard(folder.id),
     refetchInterval: 5_000,
   });
 
-  // Grafik berbeda: setiap periode punya batangnya sendiri, jadi berganti
-  // periode berarti satu permintaan. keepPreviousData menampilkan grafik
-  // lama sebentar, bukan kotak kosong.
-  //
-  // Periodenya ikut disimpan bersama batangnya: selama grafik lama masih
-  // tampil, labelnya harus tetap label periode LAMA — bukan nama hari untuk
-  // batang yang sebenarnya per jam.
-  const riwayat = useQuery({
-    queryKey: ["history", periodeRiwayat],
-    queryFn: async () => ({ periode: periodeRiwayat, batang: await ForgeHubApi.history(periodeRiwayat) }),
-    refetchInterval: 30_000,
-    placeholderData: keepPreviousData,
-  });
-
+  // Peringatan milik seluruh penyewa, bukan folder: robot yang terputus harus
+  // terlihat dari folder mana pun.
   const peringatan = useQuery({
     queryKey: ["alerts", "dasbor", tingkat],
     queryFn: () => ForgeHubApi.alerts({ severity: tingkat, limit: 20 }),
@@ -78,76 +125,55 @@ export default function Dasbor() {
 
   if (d.isLoading) return <p className="text-sm text-muted">{t("Memuat...")}</p>;
 
-  if (d.isError || !d.data) {
-    return <p className="text-sm text-danger">{t("Tidak bisa mengambil data dasbor.")}</p>;
-  }
+  if (d.isError || !d.data) return <Galat pesan={t("Tidak bisa mengambil data dasbor.")} />;
 
   const x = d.data;
-  const berhasil = x.periods[periodeBerhasil];
-  const gagal = x.periods[periodeGagal];
-  const keberhasilan = x.periods[periodeKeberhasilan];
+  const pustaka = x.library;
 
   return (
-    <div className="space-y-6">
-      {/* Keadaan SAAT INI di baris atas, angka per rentang di bawahnya.
-          Kelimanya tidak lagi dijejalkan ke satu baris: di kartu selebar
-          seperlima layar, label dan pilihan rentang tidak muat berdampingan. */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
-        <StatCard
-          className="xl:col-span-3"
-          label={t("Robot Aktif")}
-          action={<SaatIni />}
-          value={x.robots.available + x.robots.busy}
-          hint={t("{0} terdaftar · {1} terputus", x.robots.total, x.robots.disconnected)}
-          tone={x.robots.available + x.robots.busy > 0 ? "ok" : "default"}
-        />
-        <StatCard
-          className="xl:col-span-3"
-          label={t("Pekerjaan Berjalan")}
-          action={<SaatIni />}
-          value={x.jobs.running}
-          hint={t("{0} menunggu", x.jobs.pending)}
-          tone={x.jobs.running > 0 ? "info" : "default"}
-        />
-        <StatCard
-          className="xl:col-span-2"
-          label={t("Berhasil")}
-          action={<PilihPeriode nilai={periodeBerhasil} onUbah={setPeriodeBerhasil} untuk={t("Berhasil")} />}
-          value={berhasil.successful}
-          hint={keteranganRentang(periodeBerhasil, berhasil.start, t)}
-          tone="ok"
-        />
-        <StatCard
-          className="xl:col-span-2"
-          label={t("Gagal")}
-          action={<PilihPeriode nilai={periodeGagal} onUbah={setPeriodeGagal} untuk={t("Gagal")} />}
-          value={gagal.faulted}
-          hint={keteranganRentang(periodeGagal, gagal.start, t)}
-          tone={gagal.faulted > 0 ? "danger" : "default"}
-        />
-        <StatCard
-          className="sm:col-span-2 xl:col-span-2"
-          label={t("Tingkat Keberhasilan")}
-          action={
-            <PilihPeriode
-              nilai={periodeKeberhasilan}
-              onUbah={setPeriodeKeberhasilan}
-              untuk={t("Tingkat Keberhasilan")}
-            />
-          }
-          value={`${keberhasilan.successRate}%`}
-          hint={t(infoPeriode(periodeKeberhasilan).jumlah, keberhasilan.total)}
-          tone={keberhasilan.successRate >= 90 ? "ok" : keberhasilan.successRate >= 70 ? "warn" : "danger"}
-        />
-      </div>
+    <div className="space-y-5">
+      <JudulHalaman judul={t("Beranda")} />
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader title={t("Sedang Berjalan")} />
+      <section className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 xl:grid-cols-6">
+        <KpiCard label={t("Processes")} value={pustaka.processes} icon={Network} href="/automation/processes" />
+        <KpiCard label={t("Assets")} value={pustaka.assets} icon={AppWindow} href="/assets" />
+        <KpiCard label={t("Queues")} value={pustaka.queues} icon={CopyPlus} href="/queues" />
+        <KpiCard
+          label={t("Triggers")}
+          value={pustaka.triggers}
+          icon={Zap}
+          href="/automation/triggers"
+          hint={t("{0} aktif", pustaka.triggersEnabled)}
+        />
+        <KpiCard label={t("Users")} value={pustaka.users} icon={Users} href="/folder-settings?tab=pengguna" />
+        <KpiCard
+          label={t("Machines")}
+          value={pustaka.machines}
+          icon={Laptop}
+          href="/monitoring/robots"
+          hint={t("Robot: {0}", pustaka.robots)}
+        />
+      </section>
+
+      <section className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+        <KartuPekerjaan data={x} periode={periodePekerjaan} onPeriode={setPeriodePekerjaan} />
+
+        <Card>
+          <CardHeader
+            title={t("Jobs History")}
+            subtitle={t("Pekerjaan per proses · {0}", keteranganRentang(periodeRiwayat, x.periods[periodeRiwayat].start, t))}
+            action={<PilihPeriode nilai={periodeRiwayat} onUbah={setPeriodeRiwayat} untuk={t("Jobs History")} />}
+          />
+          <div className="px-5 pb-4 pt-3">
+            <DonatProses data={x} periode={periodeRiwayat} />
+          </div>
+
+          <h3 className="border-t border-line px-5 pb-1 pt-4 text-sm font-semibold text-ink">{t("Sedang Berjalan")}</h3>
           <DataTable
             data={x.jobsInProgress}
             kunci={(j) => j.id}
             perHalaman={0}
+            rapat
             kosong="Tidak ada pekerjaan yang sedang berjalan."
             kolom={[
               { judul: "Proses|satu", sel: (j) => <span className="font-medium">{j.processName}</span> },
@@ -157,50 +183,54 @@ export default function Dasbor() {
                 judul: "Kemajuan",
                 sel: (j) => (
                   <div className="flex items-center gap-2">
-                    <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-100">
-                      <div className="h-full bg-info" style={{ width: `${j.progress}%` }} />
+                    <div className="h-1.5 w-14 overflow-hidden rounded-full bg-slate-100">
+                      <div className="h-full rounded-full bg-brand" style={{ width: `${j.progress}%` }} />
                     </div>
-                    <span className="tabular-nums text-xs text-muted">{j.progress}%</span>
+                    <span className="text-xs tabular-nums text-muted">{j.progress}%</span>
                   </div>
                 ),
               },
-              { judul: "Dibuat", sel: (j) => <span className="text-muted">{dateTimeOf(j.createdAt)}</span> },
+              {
+                judul: "Dibuat",
+                sel: (j) => (
+                  <span className="whitespace-nowrap text-muted" title={dateTimeOf(j.createdAt)}>
+                    {waktuSingkat(j.createdAt)}
+                  </span>
+                ),
+              },
             ]}
           />
         </Card>
+      </section>
 
+      <section className="grid grid-cols-1 gap-5 xl:grid-cols-2">
         <Card>
-          <CardHeader
-            title={t(infoPeriode(periodeRiwayat).riwayat)}
-            action={
-              <PilihPeriode nilai={periodeRiwayat} onUbah={setPeriodeRiwayat} untuk={t("Riwayat pekerjaan")} />
-            }
-          />
-          <CardBody className={cn("transition-opacity", riwayat.isPlaceholderData && "opacity-60")}>
-            <Grafik data={riwayat.data?.batang ?? []} periode={riwayat.data?.periode ?? periodeRiwayat} />
-          </CardBody>
-        </Card>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader title={t("Robot")} />
+          <CardHeader title={t("Robot")} subtitle={t("Robot yang ditugaskan ke folder ini")} />
           <DataTable
             data={x.activeRobots}
             kunci={(r) => r.name}
             perHalaman={0}
+            rapat
+            kosong="Belum ada robot yang ditugaskan ke folder ini."
             kolom={[
-              { judul: "Nama", sel: (r) => <span className="font-medium">{r.name}</span> },
+              { judul: "Robot|satu", sel: (r) => <span className="font-medium">{r.name}</span> },
               { judul: "Status", sel: (r) => <Badge value={r.status} /> },
               {
                 judul: "CPU / Memori",
                 sel: (r) => (
                   <span className="tabular-nums text-muted">
-                    {Math.round(r.cpuPercent)}% · {Math.round(r.memoryMb)} MB
+                    {Math.round(r.cpuPercent)}% / {Math.round(r.memoryMb)} MB
                   </span>
                 ),
               },
-              { judul: "Denyut", sel: (r) => <span className="text-muted">{dateTimeOf(r.lastHeartbeatAt)}</span> },
+              {
+                judul: "Denyut",
+                sel: (r) => (
+                  <span className="whitespace-nowrap text-muted" title={dateTimeOf(r.lastHeartbeatAt)}>
+                    {waktuSingkat(r.lastHeartbeatAt)}
+                  </span>
+                ),
+              },
             ]}
           />
         </Card>
@@ -211,6 +241,7 @@ export default function Dasbor() {
             data={x.upcomingTriggers}
             kunci={(q) => q.name}
             perHalaman={0}
+            rapat
             kosong="Tidak ada pemicu yang aktif."
             kolom={[
               { judul: "Nama", sel: (q) => <span className="font-medium">{q.name}</span> },
@@ -224,19 +255,28 @@ export default function Dasbor() {
                     <span className="text-muted">{t("tiap {0} menit", q.intervalMinutes)}</span>
                   ),
               },
-              { judul: "Jalan Berikutnya", sel: (q) => <span className="text-muted">{dateTimeOf(q.nextRunAt)}</span> },
+              {
+                judul: "Jalan Berikutnya",
+                sel: (q) => (
+                  <span className="whitespace-nowrap text-muted" title={dateTimeOf(q.nextRunAt)}>
+                    {waktuSingkat(q.nextRunAt)}
+                  </span>
+                ),
+              },
             ]}
           />
         </Card>
-      </div>
+      </section>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <section className="grid grid-cols-1 gap-5 xl:grid-cols-2">
         <Card>
           <CardHeader title={t("Ringkasan Antrean")} />
           <DataTable
             data={x.queueSummary}
             kunci={(q) => q.name}
             perHalaman={0}
+            rapat
+            kosong="Belum ada antrean di folder ini."
             kolom={[
               { judul: "Nama", sel: (q) => <span className="font-medium">{q.name}</span> },
               { judul: "Baru", sel: (q) => <span className="tabular-nums">{q.newCount}</span> },
@@ -256,7 +296,10 @@ export default function Dasbor() {
 
         <Card>
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-3">
-            <h2 className="text-sm font-semibold text-ink">{t("Peringatan Terbaru")}</h2>
+            <div>
+              <h2 className="text-[15px] font-semibold text-ink">{t("Peringatan Terbaru")}</h2>
+              <p className="mt-0.5 text-xs text-muted">{t("Seluruh penyewa")}</p>
+            </div>
             <PilihTingkat pilihan={TINGKAT_PERINGATAN} terpilih={tingkat} onUbah={setTingkat} />
           </div>
 
@@ -270,6 +313,7 @@ export default function Dasbor() {
               data={peringatan.data ?? []}
               kunci={(a) => String(a.id)}
               perHalaman={0}
+              rapat
               kosong={
                 peringatan.isLoading
                   ? "Memuat..."
@@ -290,14 +334,117 @@ export default function Dasbor() {
                 },
                 {
                   judul: "Waktu",
-                  sel: (a) => <span className="whitespace-nowrap text-muted">{dateTimeOf(a.createdAt)}</span>,
+                  sel: (a) => (
+                    <span className="whitespace-nowrap text-muted" title={dateTimeOf(a.createdAt)}>
+                      {waktuSingkat(a.createdAt)}
+                    </span>
+                  ),
                 },
               ]}
             />
           </div>
         </Card>
-      </div>
+      </section>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------
+// Donat
+// ---------------------------------------------------------------------
+
+/**
+ * Pekerjaan per keadaan: yang masih berjalan, menunggu, atau sedang dihentikan
+ * — tanpa rentang, karena belum punya akhir — ditambah yang selesai di dalam
+ * periodenya.
+ */
+function KartuPekerjaan({
+  data,
+  periode,
+  onPeriode,
+}: {
+  data: Dashboard;
+  periode: Periode;
+  onPeriode: (p: Periode) => void;
+}) {
+  const { t } = useT();
+  const { gelap } = useTema();
+  const angka = data.periods[periode];
+
+  const nilai: Record<(typeof KEADAAN)[number]["kunci"], number> = {
+    RUNNING: data.jobs.running,
+    STOPPING: data.jobs.stopping ?? 0,
+    FAULTED: angka.faulted,
+    PENDING: data.jobs.pending,
+    SUCCESSFUL: angka.successful,
+    STOPPED: angka.stopped ?? 0,
+  };
+
+  const irisan: Irisan[] = KEADAAN.map((k) => ({
+    kunci: k.kunci,
+    label: t(k.label),
+    nilai: nilai[k.kunci],
+    warna: (gelap && "warnaGelap" in k ? k.warnaGelap : undefined) ?? k.warna,
+    ikon: k.ikon,
+  }));
+
+  const total = irisan.reduce((s, x) => s + x.nilai, 0);
+  const selesai = angka.successful + angka.faulted;
+
+  return (
+    <Card>
+      <CardHeader
+        title={t("Jobs Pekerjaan")}
+        subtitle={t("Pekerjaan per keadaan · {0}", keteranganRentang(periode, angka.start, t))}
+        action={<PilihPeriode nilai={periode} onUbah={onPeriode} untuk={t("Jobs Pekerjaan")} />}
+      />
+      <div className="px-5 pb-5 pt-3">
+        <Donat
+          irisan={irisan}
+          tengah={total}
+          keteranganTengah={t("pekerjaan")}
+          judul={t("Jobs Pekerjaan")}
+          kosong={t("Belum ada pekerjaan pada rentang ini.")}
+        />
+
+        <p className="mt-3 border-t border-line pt-3 text-sm text-muted">
+          {selesai > 0
+            ? t("Tingkat keberhasilan {0}% dari {1} pekerjaan yang selesai.", angka.successRate, selesai)
+            : t("Belum ada pekerjaan yang selesai pada rentang ini.")}
+        </p>
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * Pekerjaan per proses. Warnanya mengikuti PROSESNYA — urutan irisannya sama
+ * di keempat periode (lihat DashboardService.prosesTerpilih) — jadi berganti
+ * dari Harian ke Tahunan tidak mewarnai ulang proses yang sama.
+ */
+function DonatProses({ data, periode }: { data: Dashboard; periode: Periode }) {
+  const { t } = useT();
+  const { gelap } = useTema();
+  const daftar = data.processBreakdown?.[periode] ?? [];
+  const warna = gelap ? WARNA_PROSES.gelap : WARNA_PROSES.terang;
+
+  const irisan: Irisan[] = daftar.map((p, i) => ({
+    kunci: p.other ? "__lainnya" : (p.name ?? String(i)),
+    label: p.other ? t("Lainnya ({0} proses)", p.processes ?? 0) : (p.name ?? "-"),
+    nilai: p.count,
+    warna: p.other ? WARNA_LAINNYA : warna[i % warna.length],
+  }));
+
+  const total = irisan.reduce((s, x) => s + x.nilai, 0);
+
+  return (
+    <Donat
+      irisan={irisan}
+      tengah={total}
+      keteranganTengah={t("pekerjaan")}
+      judul={t("Jobs History")}
+      kosong={t("Belum ada pekerjaan pada rentang ini.")}
+    />
   );
 }
 
@@ -306,7 +453,7 @@ export default function Dasbor() {
 // ---------------------------------------------------------------------
 
 /**
- * Rentang yang dipilih untuk SATU metrik, diingat per peramban.
+ * Rentang yang dipilih untuk SATU donat, diingat per peramban.
  *
  * Dibaca SESUDAH dipasang, alasannya sama dengan pilihan bahasa di
  * I18nProvider: di server tidak ada localStorage, dan membacanya saat render
@@ -350,7 +497,7 @@ function PilihPeriode({
 }: {
   nilai: Periode;
   onUbah: (p: Periode) => void;
-  /** Nama metriknya, untuk pembaca layar: "Rentang waktu: Gagal". */
+  /** Nama kartunya, untuk pembaca layar: "Rentang waktu: Jobs History". */
   untuk: string;
 }) {
   const { t } = useT();
@@ -361,8 +508,8 @@ function PilihPeriode({
       onChange={(e) => onUbah(e.target.value as Periode)}
       aria-label={t("Rentang waktu: {0}", untuk)}
       className={cn(
-        "shrink-0 cursor-pointer rounded-md border border-line bg-card py-0.5 pl-1.5 pr-1 text-xs text-ink",
-        "outline-none transition hover:border-slate-300 focus:border-sidebar focus:ring-2 focus:ring-sidebar/20",
+        "shrink-0 cursor-pointer rounded-md border border-line bg-card py-1 pl-2 pr-1 text-xs text-ink",
+        "outline-none transition hover:border-slate-300 focus:border-brand focus:ring-2 focus:ring-brand/20",
       )}
     >
       {PERIODE.map((p) => (
@@ -375,27 +522,9 @@ function PilihPeriode({
 }
 
 /**
- * Tanda pada kartu yang menggambarkan keadaan SEKARANG. Kartu seperti itu
- * tidak punya rentang waktu; tempat pilihan rentangnya diisi tanda ini supaya
- * tidak tampak seperti pilihannya lupa dipasang.
- */
-function SaatIni() {
-  const { t } = useT();
-
-  return (
-    <span
-      title={t("Keadaan saat ini, tidak bergantung pada rentang waktu.")}
-      className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-muted"
-    >
-      {t("Saat ini")}
-    </span>
-  );
-}
-
-/**
- * Keterangan di bawah angka: "Hari ini", atau sejak kapan periodenya dimulai.
- * Itu menjawab "mingguan itu tujuh hari terakhir, atau sejak Senin?" tanpa
- * orang perlu bertanya.
+ * Keterangan rentang: "Hari ini", atau sejak kapan periodenya dimulai. Itu
+ * menjawab "mingguan itu tujuh hari terakhir, atau sejak Senin?" tanpa orang
+ * perlu bertanya.
  */
 function keteranganRentang(kode: Periode, awal: string, t: ReturnType<typeof useT>["t"]): string {
   if (kode === "today") return t("Hari ini");
@@ -407,143 +536,7 @@ function keteranganRentang(kode: Periode, awal: string, t: ReturnType<typeof use
         ? { day: "numeric", month: "short" }
         : { day: "numeric", month: "short", year: "numeric" };
 
-  return t("Sejak {0}", tanggalDari(`${awal}T00:00`).toLocaleDateString(lokalTanggal(), bentuk));
-}
-
-// ---------------------------------------------------------------------
-// Grafik
-// ---------------------------------------------------------------------
-
-/**
- * "YYYY-MM-DDTHH:mm" dari server menjadi tanggal PERAMBAN dengan angka yang
- * sama. Waktunya sudah waktu setempat server, jadi sengaja tidak diberi zona:
- * yang dibutuhkan hanya nama hari dan bulannya, bukan titik waktunya.
- */
-function tanggalDari(bucket: string) {
-  return new Date(`${bucket.slice(0, 16)}:00`);
-}
-
-/** Label pendek di bawah batang. */
-function labelSumbu(bucket: string, periode: Periode, lokal: string): string {
-  switch (periode) {
-    case "today":
-      return bucket.slice(11, 13);
-    case "week":
-      return tanggalDari(bucket).toLocaleDateString(lokal, { weekday: "short" });
-    case "month":
-      return String(Number(bucket.slice(8, 10)));
-    case "year":
-      return tanggalDari(bucket).toLocaleDateString(lokal, { month: "short" });
-  }
-}
-
-/** Label lengkap untuk petunjuk saat kursor di atas batang. */
-function labelPenuh(bucket: string, periode: Periode, lokal: string): string {
-  const d = tanggalDari(bucket);
-
-  switch (periode) {
-    case "today":
-      return `${bucket.slice(11, 16)}–${bucket.slice(11, 13)}:59`;
-    case "week":
-      return d.toLocaleDateString(lokal, { weekday: "long", day: "numeric", month: "short" });
-    case "month":
-      return d.toLocaleDateString(lokal, { day: "numeric", month: "long" });
-    case "year":
-      return d.toLocaleDateString(lokal, { month: "long", year: "numeric" });
-  }
-}
-
-/**
- * Tidak setiap batang diberi label: 24 jam atau 31 hari yang semuanya
- * berlabel saling bertumpuk menjadi garis abu-abu yang tidak terbaca.
- */
-function berlabel(i: number, bucket: string, periode: Periode): boolean {
-  if (periode === "today") return i % 3 === 0;
-  if (periode === "month") {
-    const hari = Number(bucket.slice(8, 10));
-    return hari === 1 || hari % 5 === 0;
-  }
-  return true;
-}
-
-/**
- * Grafik batang, ditulis dengan div biasa.
- *
- * Tanpa pustaka grafik: yang dibutuhkan hanya dua batang per titik, dan sebuah
- * pustaka bagan menambah ratusan kilobita ke setiap pemuatan halaman untuk
- * sesuatu yang muat dalam beberapa puluh baris.
- */
-function Grafik({ data, periode }: { data: HistoryDay[]; periode: Periode }) {
-  const { t } = useT();
-  const lokal = lokalTanggal();
-
-  if (data.length === 0) return <p className="text-sm text-muted">{t("Belum ada data.")}</p>;
-
-  // Minimal 1 supaya pembagi tidak nol pada rentang yang seluruhnya kosong.
-  const puncak = Math.max(1, ...data.map((d) => d.successful + d.faulted));
-  const rapat = data.length > 14;
-
-  // Batang lama (tanpa "bucket") dari server yang belum diperbarui tetap bisa
-  // digambar: "day" selalu ada.
-  const kunciDari = (d: HistoryDay) => d.bucket ?? `${d.day}T00:00`;
-
-  return (
-    <div>
-      <div className={cn("flex h-40 items-end", rapat ? "gap-0.5" : "gap-1")}>
-        {data.map((d) => {
-          const total = d.successful + d.faulted;
-          const kunci = kunciDari(d);
-
-          return (
-            <div
-              key={kunci}
-              // h-full WAJIB ada.
-              //
-              // items-end pada barisnya membuat tiap kolom menyusut ke isinya,
-              // dan tinggi persen pada batang di dalamnya lalu tidak punya
-              // acuan — hasilnya kolom setinggi 1px dan grafik yang kosong
-              // sama sekali, tanpa galat apa pun.
-              className="group relative flex h-full flex-1 flex-col justify-end gap-px"
-              title={t("{0}: {1} berhasil, {2} gagal", labelPenuh(kunci, periode, lokal), d.successful, d.faulted)}
-            >
-              {d.faulted > 0 ? (
-                <div
-                  className="w-full rounded-t bg-danger/70"
-                  style={{ height: `${(d.faulted / puncak) * 100}%` }}
-                />
-              ) : null}
-              {d.successful > 0 ? (
-                <div
-                  className={cn("w-full bg-ok/70", d.faulted === 0 && "rounded-t")}
-                  style={{ height: `${(d.successful / puncak) * 100}%` }}
-                />
-              ) : null}
-              {total === 0 ? <div className="h-px w-full bg-line" /> : null}
-            </div>
-          );
-        })}
-      </div>
-
-      <div className={cn("mt-1 flex", rapat ? "gap-0.5" : "gap-1")} aria-hidden="true">
-        {data.map((d, i) => {
-          const kunci = kunciDari(d);
-
-          return (
-            <span key={kunci} className="flex-1 overflow-visible whitespace-nowrap text-center text-[10px] text-muted">
-              {berlabel(i, kunci, periode) ? labelSumbu(kunci, periode, lokal) : ""}
-            </span>
-          );
-        })}
-      </div>
-
-      <div className="mt-3 flex items-center gap-4 text-xs text-muted">
-        <span className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-sm bg-ok/70" /> {t("berhasil")}
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-sm bg-danger/70" /> {t("gagal")}
-        </span>
-      </div>
-    </div>
-  );
+  // "YYYY-MM-DD" dari server adalah tanggal SETEMPAT server; sengaja tanpa
+  // zona, karena yang dibutuhkan hanya nama hari dan bulannya.
+  return t("Sejak {0}", new Date(`${awal}T00:00:00`).toLocaleDateString(lokalTanggal(), bentuk));
 }

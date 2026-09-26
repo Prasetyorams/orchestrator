@@ -62,7 +62,8 @@ public class UserRepository {
     public Map<String, Object> profil(UUID userId, UUID tenantId) {
         return db.row("""
                 SELECT u.id, u.username, u.display_name, u.email, u.role, u.is_active,
-                       u.created_at, u.last_login_at, t.name AS tenant_name
+                       u.created_at, u.last_login_at, t.name AS tenant_name,
+                       t.display_name AS tenant_display_name
                   FROM users u
                   JOIN tenants t ON t.id = u.tenant_id
                  WHERE u.id = ? AND u.tenant_id = ?
@@ -88,9 +89,17 @@ public class UserRepository {
                 """, namaTampil, surel, userId, tenantId);
     }
 
+    /**
+     * {@code folders}: nama folder bersama tempat penggunanya ditugaskan, supaya
+     * halaman pengguna bisa menunjukkan siapa melihat apa tanpa membuka setiap
+     * folder satu per satu.
+     */
     public List<Map<String, Object>> semua(UUID tenantId) {
         return db.rows("""
-                SELECT id, username, display_name, email, role, is_active, created_at, last_login_at
+                SELECT id, username, display_name, email, role, is_active, created_at, last_login_at,
+                       (SELECT array_agg(f.name ORDER BY lower(f.name))
+                          FROM folder_users fu JOIN folders f ON f.id = fu.folder_id
+                         WHERE fu.user_id = users.id) AS folders
                   FROM users
                  WHERE tenant_id = ?
                  ORDER BY username
@@ -181,6 +190,69 @@ public class UserRepository {
                  WHERE r.tenant_id = ?
                  ORDER BY r.name
                 """, tenantId);
+    }
+
+    /**
+     * Peran seseorang SAAT INI dan izinnya — bukan peran yang tertulis di
+     * tokennya. LEFT JOIN: pengguna dengan peran yang barisnya tidak ada tetap
+     * ditemukan, dengan izin kosong.
+     */
+    public Map<String, Object> izinPengguna(UUID userId, UUID tenantId) {
+        return db.row("""
+                SELECT u.role, u.is_active, r.permissions
+                  FROM users u
+                  LEFT JOIN roles r ON r.tenant_id = u.tenant_id AND r.name = u.role
+                 WHERE u.id = ? AND u.tenant_id = ?
+                """, userId, tenantId);
+    }
+
+    /** Peran bernama itu, atau null. Nama dicocokkan tanpa membedakan huruf besar. */
+    public Map<String, Object> peranSatu(UUID tenantId, String nama) {
+        return db.row("""
+                SELECT id, name, description, permissions
+                  FROM roles WHERE tenant_id = ? AND lower(name) = lower(?)
+                """, tenantId, nama);
+    }
+
+    public void buatPeran(UUID tenantId, String nama, String keterangan, String izin) {
+        db.exec("""
+                INSERT INTO roles (id, tenant_id, name, description, permissions, created_at)
+                VALUES (?, ?, ?, ?, ?, now())
+                """, Db.newId(), tenantId, nama, keterangan, izin);
+    }
+
+    public int ubahPeran(UUID tenantId, String namaLama, String nama, String keterangan, String izin) {
+        return db.exec("""
+                UPDATE roles SET name = ?, description = ?, permissions = ?
+                 WHERE tenant_id = ? AND name = ?
+                """, nama, keterangan, izin, tenantId, namaLama);
+    }
+
+    /** Pengguna menyimpan NAMA perannya, jadi ganti nama peran ikut mengganti milik mereka. */
+    public int gantiNamaPeranPengguna(UUID tenantId, String namaLama, String nama) {
+        return db.exec("UPDATE users SET role = ? WHERE tenant_id = ? AND role = ?", nama, tenantId, namaLama);
+    }
+
+    public long jumlahPemakaiPeran(UUID tenantId, String nama) {
+        return db.count("SELECT count(*) FROM users WHERE tenant_id = ? AND role = ?", tenantId, nama);
+    }
+
+    public int hapusPeran(UUID tenantId, String nama) {
+        return db.exec("DELETE FROM roles WHERE tenant_id = ? AND name = ?", tenantId, nama);
+    }
+
+    /** Peran pengguna itu, atau null kalau penggunanya tidak ada. */
+    public String peranPengguna(UUID tenantId, String username) {
+        Object v = db.scalar("SELECT role FROM users WHERE tenant_id = ? AND username = ?", tenantId, username);
+        return v == null ? null : String.valueOf(v);
+    }
+
+    /** Aktif, berperan Administrator — untuk penjagaan "Administrator terakhir". */
+    public boolean administratorAktif(UUID tenantId, String username) {
+        return db.exists("""
+                SELECT count(*) FROM users
+                 WHERE tenant_id = ? AND username = ? AND role = 'Administrator' AND is_active
+                """, tenantId, username);
     }
 
     public List<Map<String, Object>> lisensi(UUID tenantId) {

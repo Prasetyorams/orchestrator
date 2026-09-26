@@ -52,7 +52,7 @@ class DashboardServiceTest {
     @Test
     @DisplayName("keempat periode dihitung dalam satu kueri, dengan batas tengah malam WIB sebagai UTC")
     void semuaPeriodeSekaligus() {
-        Map<String, Object> hasil = pada("2026-09-24T01:30").dasbor(penyewa);
+        Map<String, Object> hasil = pada("2026-09-24T01:30").dasbor(penyewa, null);
 
         // Kamis 24 September, Senin 21 September, 1 September, dan 1 Januari —
         // masing-masing tengah malam WIB, yaitu pukul 17.00 UTC sehari sebelumnya.
@@ -70,15 +70,15 @@ class DashboardServiceTest {
     @Test
     @DisplayName("minggu yang dibuka hari Minggu masih milik Senin sebelumnya; hari Senin milik dirinya")
     void awalMinggu() {
-        assertEquals("2026-09-21", angkaPeriode(pada("2026-09-27T23:59").dasbor(penyewa), "week").get("start"));
-        assertEquals("2026-09-28", angkaPeriode(pada("2026-09-28T00:00").dasbor(penyewa), "week").get("start"));
+        assertEquals("2026-09-21", angkaPeriode(pada("2026-09-27T23:59").dasbor(penyewa, null), "week").get("start"));
+        assertEquals("2026-09-28", angkaPeriode(pada("2026-09-28T00:00").dasbor(penyewa, null), "week").get("start"));
     }
 
     @Test
     @DisplayName("awal Januari: minggu ini boleh dimulai di tahun lalu, bulan dan tahun ini tidak")
     void mingguMelintasiTahun() {
         // Jumat 1 Januari 2027; minggunya dimulai Senin 28 Desember 2026.
-        Map<String, Object> hasil = pada("2027-01-01T10:00").dasbor(penyewa);
+        Map<String, Object> hasil = pada("2027-01-01T10:00").dasbor(penyewa, null);
 
         assertEquals("2026-12-28", angkaPeriode(hasil, "week").get("start"));
         assertEquals("2027-01-01", angkaPeriode(hasil, "month").get("start"));
@@ -92,7 +92,7 @@ class DashboardServiceTest {
                 "weekSuccessful", 9L, "weekFaulted", 1L, "weekTotal", 13L,
                 "yearSuccessful", 2L, "yearFaulted", 1L, "yearTotal", 3L));
 
-        Map<String, Object> hasil = pada("2026-09-24T01:30").dasbor(penyewa);
+        Map<String, Object> hasil = pada("2026-09-24T01:30").dasbor(penyewa, null);
 
         assertEquals(100.0, angkaPeriode(hasil, "today").get("successRate"));
         assertEquals(90.0, angkaPeriode(hasil, "week").get("successRate"));
@@ -110,7 +110,7 @@ class DashboardServiceTest {
                 "todaySuccessful", 3L, "todayFaulted", 1L, "todayTotal", 6L,
                 "weekSuccessful", 30L, "weekFaulted", 0L));
 
-        Map<String, Object> hasil = pada("2026-09-24T01:30").dasbor(penyewa);
+        Map<String, Object> hasil = pada("2026-09-24T01:30").dasbor(penyewa, null);
         Map<?, ?> pekerjaan = (Map<?, ?>) hasil.get("jobs");
 
         assertEquals(2L, pekerjaan.get("running"));
@@ -119,6 +119,85 @@ class DashboardServiceTest {
         assertEquals(1L, pekerjaan.get("faultedToday"));
         assertEquals(6L, pekerjaan.get("totalToday"));
         assertEquals(75.0, hasil.get("successRate"));
+    }
+
+    @Test
+    @DisplayName("dasbor sebuah folder menyaring hitungan pekerjaannya ke folder itu")
+    void folderIkutDisaring() {
+        UUID folder = UUID.randomUUID();
+
+        pada("2026-09-24T01:30").dasbor(penyewa, folder);
+
+        String sql = sqlDari("WITH awal AS");
+        List<Object> args = argsDari("WITH awal AS");
+
+        assertTrue(sql.contains("j.folder_id = ?"), sql);
+        assertEquals(folder, args.get(args.size() - 1));
+
+        // Pustaka menerima foldernya lewat CTE, sekali saja.
+        assertEquals(List.of(penyewa, folder), argsDari("WITH t AS"));
+    }
+
+    @Test
+    @DisplayName("tanpa folder, hitungannya milik seluruh penyewa")
+    void tanpaFolder() {
+        pada("2026-09-24T01:30").dasbor(penyewa, null);
+
+        assertTrue(!sqlDari("WITH awal AS").contains("folder_id"), sqlDari("WITH awal AS"));
+    }
+
+    @Test
+    @DisplayName("yang dihentikan ikut dihitung per periode")
+    void dihentikanPerPeriode() {
+        db.hitungan.putAll(Map.of("stopping", 1L, "monthStopped", 4L));
+
+        Map<String, Object> hasil = pada("2026-09-24T01:30").dasbor(penyewa, null);
+
+        assertEquals(4L, angkaPeriode(hasil, "month").get("stopped"));
+        assertEquals(0L, angkaPeriode(hasil, "today").get("stopped"));
+        assertEquals(1L, ((Map<?, ?>) hasil.get("jobs")).get("stopping"));
+    }
+
+    @Test
+    @DisplayName("irisan donat per proses: lima terbanyak tahun ini, sisanya satu irisan lainnya")
+    void irisanProses() {
+        List<Map<String, Object>> baris = new ArrayList<>();
+        for (String[] p : new String[][] {
+                { "A", "9", "1" }, { "B", "7", "0" }, { "C", "5", "4" }, { "D", "4", "0" }, { "E", "3", "0" },
+                { "F", "2", "2" }, { "G", "1", "1" }, { "H", "0", "0" } }) {
+            baris.add(new HashMap<>(Map.of("processName", p[0],
+                    "year", Long.parseLong(p[1]), "today", Long.parseLong(p[2]))));
+        }
+
+        List<String> terpilih = DashboardService.prosesTerpilih(baris);
+        assertEquals(List.of("A", "B", "C", "D", "E"), terpilih);
+
+        List<Map<String, Object>> irisan = DashboardService.irisanProses(baris, "today", terpilih);
+
+        // Urutannya urutan tahun, bukan urutan hari ini — C tetap di tempat
+        // ketiga walau hari ini paling banyak — dan yang nol tetap ikut.
+        assertEquals(List.of("A", "B", "C", "D", "E"),
+                irisan.subList(0, 5).stream().map(m -> m.get("name")).toList());
+        assertEquals(List.of(1L, 0L, 4L, 0L, 0L),
+                irisan.subList(0, 5).stream().map(m -> m.get("count")).toList());
+
+        Map<String, Object> lainnya = irisan.get(5);
+        assertEquals(true, lainnya.get("other"));
+        assertEquals(3L, lainnya.get("count"));
+        assertEquals(2, lainnya.get("processes"));
+    }
+
+    @Test
+    @DisplayName("tanpa proses di luar yang terpilih, tidak ada irisan lainnya")
+    void tanpaLainnya() {
+        List<Map<String, Object>> baris = new ArrayList<>();
+        for (int i = 0; i < 3; i++) baris.add(new HashMap<>(Map.of("processName", "P" + i, "year", 3L - i, "week", 1L)));
+
+        List<Map<String, Object>> irisan =
+                DashboardService.irisanProses(baris, "week", DashboardService.prosesTerpilih(baris));
+
+        assertEquals(3, irisan.size());
+        assertTrue(irisan.stream().noneMatch(m -> Boolean.TRUE.equals(m.get("other"))));
     }
 
     @Test
@@ -182,6 +261,14 @@ class DashboardServiceTest {
 
     private static Map<?, ?> angkaPeriode(Map<String, Object> dasbor, String nama) {
         return (Map<?, ?>) ((Map<?, ?>) dasbor.get("periods")).get(nama);
+    }
+
+    private String sqlDari(String potonganSql) {
+        for (String s : db.sql) {
+            if (s.contains(potonganSql)) return s;
+        }
+
+        throw new AssertionError("Tidak ada SQL yang memuat: " + potonganSql + "\n" + db.sql);
     }
 
     private List<Object> argsDari(String potonganSql) {

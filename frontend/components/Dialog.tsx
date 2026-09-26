@@ -35,22 +35,32 @@ export function Dialog({
   const panel = useRef<HTMLDivElement>(null);
   const fokusSebelumnya = useRef<HTMLElement | null>(null);
 
+  // onTutup dibaca lewat ref, bukan dijadikan syarat efek di bawah. Halaman
+  // yang menyegarkan datanya tiap beberapa detik mengirim fungsi baru setiap
+  // kali dirender ulang; kalau efeknya ikut berjalan ulang, kursor melompat
+  // kembali ke isian pertama di tengah orang mengetik.
+  const tutup = useRef(onTutup);
+  useEffect(() => {
+    tutup.current = onTutup;
+  });
+
   useEffect(() => {
     if (!terbuka) return;
 
     fokusSebelumnya.current = document.activeElement as HTMLElement | null;
 
-    // Elemen yang bisa difokus PERTAMA, bukan panelnya: orang yang membuka
-    // dialog isian biasanya langsung mengetik.
-    const isian = panel.current?.querySelector<HTMLElement>(
-      "input, textarea, select, button, [tabindex]:not([tabindex='-1'])",
-    );
+    // Isian PERTAMA, bukan panelnya: orang yang membuka dialog isian
+    // biasanya langsung mengetik. Isian dicari lebih dulu daripada tombol,
+    // karena tombol tutup di kepala dialog letaknya paling atas.
+    const isian =
+      panel.current?.querySelector<HTMLElement>("input:not([disabled]), textarea, select:not([disabled])") ??
+      panel.current?.querySelector<HTMLElement>("button, [tabindex]:not([tabindex='-1'])");
     isian?.focus();
 
     function padaTombol(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onTutup();
+        tutup.current();
       }
     }
 
@@ -66,13 +76,13 @@ export function Dialog({
       document.body.style.overflow = gulirLama;
       fokusSebelumnya.current?.focus();
     };
-  }, [terbuka, onTutup]);
+  }, [terbuka]);
 
   if (!terbuka) return null;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 dark:bg-black/60"
       onMouseDown={(e) => {
         // onMouseDown, bukan onClick: menyeret teks dari dalam dialog dan
         // melepasnya di luar akan menghitung sebagai klik di luar, lalu
@@ -138,4 +148,4 @@ export function Isian({
 
 export const kelasIsian =
   "w-full rounded-lg border border-line bg-card px-3 py-2 text-sm text-ink " +
-  "outline-none transition focus:border-sidebar focus:ring-2 focus:ring-sidebar/20";
+  "outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/20";

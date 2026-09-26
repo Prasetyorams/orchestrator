@@ -70,7 +70,7 @@ class LogServiceTest {
     @Test
     @DisplayName("pembacaan selalu menyaring TRACE dan DEBUG yang terlanjur tersimpan")
     void pembacaanMenyaringRincian() {
-        layanan.cari(penyewa, null, null, "cha", null, null);
+        layanan.cari(penyewa, null, null, "cha", null, null, null);
 
         List<Object> args = argsTerakhir();
 
@@ -82,8 +82,8 @@ class LogServiceTest {
     @Test
     @DisplayName("meminta tingkat DEBUG saja dijawab kosong tanpa bertanya ke basis data")
     void memintaRincianKosong() {
-        assertEquals(List.of(), layanan.cari(penyewa, List.of("debug"), null, null, null, null));
-        assertEquals(List.of(), layanan.cari(penyewa, List.of("TRACE,debug"), null, null, null, null));
+        assertEquals(List.of(), layanan.cari(penyewa, List.of("debug"), null, null, null, null, null));
+        assertEquals(List.of(), layanan.cari(penyewa, List.of("TRACE,debug"), null, null, null, null, null));
 
         assertTrue(db.sql.isEmpty(), db.sql.toString());
     }
@@ -91,7 +91,7 @@ class LogServiceTest {
     @Test
     @DisplayName("meminta tingkat ERROR tetap menyaring rincian dan hanya ERROR")
     void memintaTingkatLain() {
-        layanan.cari(penyewa, List.of("error"), null, null, null, null);
+        layanan.cari(penyewa, List.of("error"), null, null, null, null, null);
 
         assertTrue(sqlTerakhir().contains("level NOT IN (?, ?)") && sqlTerakhir().contains("level IN (?)"),
                 sqlTerakhir());
@@ -101,27 +101,27 @@ class LogServiceTest {
     @Test
     @DisplayName("lebih dari satu tingkat, dipisah koma maupun parameter berulang")
     void banyakTingkat() {
-        layanan.cari(penyewa, List.of("info,error"), null, null, null, null);
+        layanan.cari(penyewa, List.of("info,error"), null, null, null, null, null);
         assertEquals(List.of("INFO", "ERROR"), tingkatDiSaring());
 
-        layanan.cari(penyewa, List.of("FATAL", "info"), null, null, null, null);
+        layanan.cari(penyewa, List.of("FATAL", "info"), null, null, null, null, null);
         assertEquals(List.of("INFO", "FATAL"), tingkatDiSaring());
     }
 
     @Test
     @DisplayName("WARN ikut membawa WARNING, karena keduanya satu tingkat")
     void warnDanWarning() {
-        layanan.cari(penyewa, List.of("warn"), null, null, null, null);
+        layanan.cari(penyewa, List.of("warn"), null, null, null, null, null);
         assertEquals(List.of("WARN", "WARNING"), tingkatDiSaring());
 
-        layanan.cari(penyewa, List.of("warning", "WARN"), null, null, null, null);
+        layanan.cari(penyewa, List.of("warning", "WARN"), null, null, null, null, null);
         assertEquals(List.of("WARN", "WARNING"), tingkatDiSaring());
     }
 
     @Test
     @DisplayName("rincian yang diminta bersama tingkat lain dibuang, tingkat lainnya tetap")
     void rincianBersamaTingkatLain() {
-        layanan.cari(penyewa, List.of("debug,error"), null, null, null, null);
+        layanan.cari(penyewa, List.of("debug,error"), null, null, null, null, null);
 
         assertEquals(List.of("ERROR"), tingkatDiSaring());
     }
@@ -130,7 +130,7 @@ class LogServiceTest {
     @DisplayName("tingkat yang tidak dikenal ditolak 400, bukan diam-diam menjadi INFO")
     void tingkatTakDikenal() {
         ApiException e = assertThrows(ApiException.class,
-                () -> layanan.cari(penyewa, List.of("info,peringatan"), null, null, null, null));
+                () -> layanan.cari(penyewa, List.of("info,peringatan"), null, null, null, null, null));
 
         assertEquals(HttpStatus.BAD_REQUEST, e.status());
         assertTrue(db.sql.isEmpty(), db.sql.toString());

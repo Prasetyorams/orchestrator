@@ -7,6 +7,10 @@ import java.util.Map;
 /**
  * Permintaan menjadwalkan pekerjaan.
  *
+ * <p>Folder prosesnya TIDAK ada di sini: {@code folderId} dari badan harus
+ * diperiksa haknya lebih dulu, dan itu urusan controller — record ini tidak
+ * tahu siapa yang meminta.
+ *
  * <p>Dibuat dari {@code Map}, bukan dipetakan langsung oleh Jackson sebagai
  * {@code @RequestBody}. Alasannya bukan gaya: Studio, JakRunner, dan dasbor
  * mengirim susunan yang sedikit berbeda untuk hal yang sama, dan record yang

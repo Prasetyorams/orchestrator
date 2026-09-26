@@ -89,6 +89,7 @@ public class SchedulerService {
         for (Map<String, Object> t : jatuhTempo) {
             UUID id = Db.uuid((String) t.get("id"));
             UUID tenantId = Db.uuid((String) t.get("tenantId"));
+            UUID folder = Db.uuid((String) t.get("folderId"));
             String nama = (String) t.get("name");
             String proses = (String) t.get("processName");
             String cron = (String) t.get("cron");
@@ -97,8 +98,9 @@ public class SchedulerService {
             // Proses bisa saja sudah dihapus setelah pemicunya dibuat.
             // Pemicunya dimatikan, bukan diam-diam gagal tiap 30 detik
             // selamanya — kegagalan yang berulang tanpa henti adalah kegagalan
-            // yang berhenti dibaca orang.
-            if (!katalog.adaProses(tenantId, proses)) {
+            // yang berhenti dibaca orang. Yang diperiksa proses di folder
+            // PEMICUNYA: yang bernama sama di folder lain adalah proses lain.
+            if (!katalog.adaProses(tenantId, proses, folder)) {
                 matikan(id, tenantId, nama,
                         "Pemicu '" + nama + "' menunjuk proses '" + proses + "' yang sudah tidak ada.");
                 continue;
@@ -116,7 +118,7 @@ public class SchedulerService {
             UUID jobId = Db.newId();
             Object prioritas = t.get("priority");
 
-            jobs.buat(jobId, tenantId, proses, (String) t.get("robotName"), null,
+            jobs.buat(jobId, tenantId, folder, proses, (String) t.get("robotName"), null,
                     "Trigger", prioritas == null ? "Normal" : String.valueOf(prioritas),
                     "Dijadwalkan oleh pemicu '" + nama + "'.", null);
 

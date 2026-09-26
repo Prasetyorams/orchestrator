@@ -5,8 +5,8 @@ import id.jakforge.forgehub.dto.JobRequest;
 import id.jakforge.forgehub.dto.JobStateRequest;
 import id.jakforge.forgehub.model.JobState;
 import id.jakforge.forgehub.model.Severity;
-import id.jakforge.forgehub.repository.CatalogRepository;
 import id.jakforge.forgehub.repository.Db;
+import id.jakforge.forgehub.repository.FolderRepository;
 import id.jakforge.forgehub.repository.JobRepository;
 import id.jakforge.forgehub.repository.LogRepository;
 import org.springframework.stereotype.Service;
@@ -31,22 +31,27 @@ public class JobService {
     private static final int BATAS_DAFTAR_MAKS = 1000;
 
     private final JobRepository jobs;
-    private final CatalogRepository katalog;
+    private final CatalogService katalog;
     private final LogRepository catatan;
+    private final FolderRepository folders;
 
-    public JobService(JobRepository jobs, CatalogRepository katalog, LogRepository catatan) {
+    public JobService(JobRepository jobs, CatalogService katalog, LogRepository catatan,
+                      FolderRepository folders) {
         this.jobs = jobs;
         this.katalog = katalog;
         this.catatan = catatan;
+        this.folders = folders;
     }
 
-    public List<Map<String, Object>> daftar(UUID tenantId, String state, String process, Integer batas) {
+    /** @param folderId null berarti seluruh penyewa. */
+    public List<Map<String, Object>> daftar(UUID tenantId, String state, String process, UUID folderId,
+                                            Integer batas) {
         // Keadaan dinormalkan lewat enum, bukan dengan toUpperCase mentah:
         // "?state=berjalan" tidak akan pernah cocok, dan lebih baik menyaring
         // dengan nilai yang jelas tidak ada daripada dengan untai sembarang.
         JobState keadaan = JobState.dari(state);
 
-        return jobs.cari(tenantId, keadaan == null ? null : keadaan.name(), process,
+        return jobs.cari(tenantId, keadaan == null ? null : keadaan.name(), process, folderId,
                 Batas.antara(batas, BATAS_DAFTAR_BAWAAN, BATAS_DAFTAR_MAKS));
     }
 
@@ -64,22 +69,40 @@ public class JobService {
      * <p>Proses yang belum diterbitkan DITOLAK di sini, bukan dibiarkan menjadi
      * pekerjaan PENDING yang tidak akan pernah bisa dijalankan robot mana pun —
      * dan yang terlihat kemudian adalah antrean yang menumpuk tanpa sebab.
+     *
+     * @param folderId folder prosesnya, sudah diperiksa haknya; null berarti
+     *                 proses bernama itu di mana pun ia berada — bentuk yang
+     *                 dikirim Studio (lihat CatalogService.pilihFolder)
      */
     @Transactional
-    public Map<String, Object> buat(UUID tenantId, JobRequest minta) {
+    public Map<String, Object> buat(UUID tenantId, JobRequest minta, UUID folderId) {
         if (minta.processName() == null) {
             throw ApiException.salah("processName wajib diisi.");
         }
 
-        if (!katalog.adaProses(tenantId, minta.processName())) {
-            throw ApiException.salah(
-                    "Proses '" + minta.processName() + "' belum diterbitkan ke ForgeHub.");
+        UUID folder = katalog.folderProses(tenantId, minta.processName(), folderId);
+
+        if (folder == null) {
+            throw ApiException.salah(folderId == null
+                    ? "Proses '" + minta.processName() + "' belum diterbitkan ke ForgeHub."
+                    : "Proses '" + minta.processName() + "' tidak ada di folder ini.");
         }
 
         UUID id = Db.newId();
 
-        jobs.buat(id, tenantId, minta.processName(), minta.robotName(), minta.machineName(),
-                minta.source(), minta.priority(), "Menunggu robot yang tersedia.", minta.inputJson());
+        // Folder pekerjaan adalah folder prosesnya, disebut langsung — bukan
+        // dibiarkan ditebak basis data dari namanya. Folder tanpa robot berarti
+        // pekerjaan ini akan menunggu selamanya, dan keterangannya harus
+        // mengatakan itu — bukan "menunggu robot yang tersedia", yang membuat
+        // orang menunggu robot yang tidak akan datang.
+        boolean adaRobot = minta.robotName() != null || folders.adaRobot(tenantId, folder);
+
+        String info = adaRobot
+                ? "Menunggu robot yang tersedia."
+                : "Belum ada robot yang ditugaskan ke folder proses ini. Tugaskan robot lewat Setelan folder.";
+
+        jobs.buat(id, tenantId, folder, minta.processName(), minta.robotName(), minta.machineName(),
+                minta.source(), minta.priority(), info, minta.inputJson());
 
         catatan.tulisSistem(tenantId,
                 "Pekerjaan dijadwalkan untuk " + minta.processName() + ".",

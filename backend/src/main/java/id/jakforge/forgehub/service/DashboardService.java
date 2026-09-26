@@ -18,10 +18,13 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -42,6 +45,13 @@ public class DashboardService {
     private static final int BATAS_PERINGATAN = 8;
     private static final int BATAS_ANTREAN = 8;
     private static final int BATAS_CARI = 30;
+
+    /**
+     * Irisan donat per proses. Lebih dari itu, sisanya digabung menjadi satu
+     * irisan "lainnya": dua puluh irisan setipis rambut tidak terbaca sebagai
+     * apa pun, dan warnanya mulai berulang.
+     */
+    private static final int IRISAN_PROSES = 5;
 
     private final DashboardRepository ringkasan;
     private final RobotRepository robots;
@@ -83,55 +93,137 @@ public class DashboardService {
     }
 
     /**
-     * Isi dasbor.
+     * Isi dasbor sebuah folder.
      *
-     * <p>Angka berhasil, gagal, total, dan tingkat keberhasilan dikirim untuk
-     * KEEMPAT periode sekaligus, di {@code periods}: setiap kartu di dasbor
+     * <p>Angka pekerjaan dikirim untuk KEEMPAT periode sekaligus, di
+     * {@code periods} dan {@code processBreakdown}: setiap donat di dasbor
      * memilih rentangnya sendiri, dan berganti pilihan tidak perlu menunggu
-     * permintaan baru. Kartu yang menggambarkan keadaan SAAT INI (robot aktif,
-     * pekerjaan berjalan) tidak punya rentang.
+     * permintaan baru. Yang menggambarkan keadaan SAAT INI — robot, pekerjaan
+     * yang sedang berjalan — tidak punya rentang.
+     *
+     * <p>Peringatan tetap milik seluruh penyewa: peringatan tidak tinggal di
+     * folder, dan robot yang terputus perlu terlihat dari folder mana pun.
+     *
+     * @param folderId null berarti seluruh penyewa, seperti sebelum folder ada.
      */
-    public Map<String, Object> dasbor(UUID tenantId) {
+    public Map<String, Object> dasbor(UUID tenantId, UUID folderId) {
         LocalDate hariIni = LocalDate.now(jam);
 
         Map<Periode, LocalDate> awal = new EnumMap<>(Periode.class);
         for (Periode p : Periode.values()) awal.put(p, p.hariPertama(hariIni));
 
-        Map<String, Object> hitungan = ringkasan.hitunganPekerjaan(tenantId,
-                awalHariUtc(awal.get(Periode.TODAY)), awalHariUtc(awal.get(Periode.WEEK)),
-                awalHariUtc(awal.get(Periode.MONTH)), awalHariUtc(awal.get(Periode.YEAR)));
+        OffsetDateTime hari = awalHariUtc(awal.get(Periode.TODAY));
+        OffsetDateTime minggu = awalHariUtc(awal.get(Periode.WEEK));
+        OffsetDateTime bulan = awalHariUtc(awal.get(Periode.MONTH));
+        OffsetDateTime tahun = awalHariUtc(awal.get(Periode.YEAR));
+
+        Map<String, Object> hitungan = ringkasan.hitunganPekerjaan(tenantId, folderId, hari, minggu, bulan, tahun);
 
         Map<String, Map<String, Object>> perPeriode = new LinkedHashMap<>();
         for (Periode p : Periode.values()) perPeriode.put(p.nama(), angkaPeriode(hitungan, p.nama(), awal.get(p)));
+
+        List<Map<String, Object>> barisProses = ringkasan.perProses(tenantId, folderId, hari, minggu, bulan, tahun);
+        List<String> terpilih = prosesTerpilih(barisProses);
+
+        Map<String, List<Map<String, Object>>> perProses = new LinkedHashMap<>();
+        for (Periode p : Periode.values()) perProses.put(p.nama(), irisanProses(barisProses, p.nama(), terpilih));
 
         // "jobs" dan "successRate" tetap berbentuk seperti sebelum ada periode,
         // untuk klien yang sudah membacanya: angka ...Today selalu hari ini.
         Map<String, Object> angkaHariIni = perPeriode.get(Periode.TODAY.nama());
 
         Map<String, Object> pekerjaan = new LinkedHashMap<>();
-        pekerjaan.put("running", hitungan.get("running"));
-        pekerjaan.put("pending", hitungan.get("pending"));
+        pekerjaan.put("running", angka(hitungan.get("running")));
+        pekerjaan.put("pending", angka(hitungan.get("pending")));
+        pekerjaan.put("stopping", angka(hitungan.get("stopping")));
         pekerjaan.put("successfulToday", angkaHariIni.get("successful"));
         pekerjaan.put("faultedToday", angkaHariIni.get("faulted"));
         pekerjaan.put("totalToday", angkaHariIni.get("total"));
 
-        Map<String, Object> antreanHitung = antrean.hitunganButir(tenantId);
-        antreanHitung.put("total", antrean.jumlahAntrean(tenantId));
+        Map<String, Object> pustaka = ringkasan.hitunganPustaka(tenantId, folderId);
+
+        Map<String, Object> antreanHitung = antrean.hitunganButir(tenantId, folderId);
+        antreanHitung.put("total", pustaka == null ? 0L : angka(pustaka.get("queues")));
 
         Map<String, Object> hasil = new LinkedHashMap<>();
-        hasil.put("robots", robots.hitungan(tenantId));
+        hasil.put("robots", robots.hitungan(tenantId, folderId));
         hasil.put("jobs", pekerjaan);
         hasil.put("periods", perPeriode);
+        hasil.put("processBreakdown", perProses);
         hasil.put("queues", antreanHitung);
-        hasil.put("library", ringkasan.hitunganPustaka(tenantId));
+        hasil.put("library", pustaka);
         hasil.put("successRate", angkaHariIni.get("successRate"));
         hasil.put("unreadAlerts", catatan.belumDibaca(tenantId));
-        hasil.put("jobsInProgress", ringkasan.sedangBerjalan(tenantId, BATAS_PANEL));
-        hasil.put("activeRobots", robots.untukDasbor(tenantId, BATAS_PANEL));
-        hasil.put("upcomingTriggers", pemicu.berikutnya(tenantId, BATAS_PEMICU));
+        hasil.put("jobsInProgress", ringkasan.sedangBerjalan(tenantId, folderId, BATAS_PANEL));
+        hasil.put("activeRobots", robots.untukDasbor(tenantId, folderId, BATAS_PANEL));
+        hasil.put("upcomingTriggers", pemicu.berikutnya(tenantId, folderId, BATAS_PEMICU));
         hasil.put("recentAlerts", catatan.peringatan(tenantId, false, BATAS_PERINGATAN));
-        hasil.put("queueSummary", antrean.ringkasan(tenantId, BATAS_ANTREAN));
+        hasil.put("queueSummary", antrean.ringkasan(tenantId, folderId, BATAS_ANTREAN));
         hasil.put("serverTime", Db.nowText());
+
+        return hasil;
+    }
+
+    /**
+     * Proses yang mendapat irisan sendiri: paling banyak {@link #IRISAN_PROSES},
+     * yang terbanyak sepanjang TAHUN ini — periode terlebar.
+     *
+     * <p>Anggotanya SAMA untuk keempat periode, dan urutannya juga. Dasbor
+     * mewarnai irisan menurut urutan ini, jadi berganti dari Harian ke Bulanan
+     * tidak mewarnai ulang proses yang sama dengan warna lain: warna mengikuti
+     * prosesnya, bukan peringkatnya hari itu.
+     */
+    static List<String> prosesTerpilih(List<Map<String, Object>> baris) {
+        return baris.stream()
+                .filter(b -> angka(b.get("year")) > 0)
+                .sorted(Comparator.<Map<String, Object>>comparingLong(b -> angka(b.get("year"))).reversed()
+                        .thenComparing(b -> String.valueOf(b.get("processName")), String.CASE_INSENSITIVE_ORDER))
+                .limit(IRISAN_PROSES)
+                .map(b -> String.valueOf(b.get("processName")))
+                .toList();
+    }
+
+    /**
+     * Irisan donat per proses untuk satu periode, dalam urutan {@code terpilih}.
+     *
+     * <p>Proses terpilih tetap ikut walau jumlahnya nol di periode ini —
+     * keterangan donatnya tidak berganti isi setiap kali periodenya diganti.
+     * Proses lain digabung menjadi satu irisan "lainnya" ({@code other: true},
+     * tanpa nama), hanya kalau jumlahnya lebih dari nol.
+     */
+    static List<Map<String, Object>> irisanProses(List<Map<String, Object>> baris, String periode,
+                                                  List<String> terpilih) {
+        Map<String, Long> jumlah = new LinkedHashMap<>();
+        for (Map<String, Object> b : baris) jumlah.put(String.valueOf(b.get("processName")), angka(b.get(periode)));
+
+        List<Map<String, Object>> hasil = new ArrayList<>();
+
+        for (String nama : terpilih) {
+            Map<String, Object> irisan = new LinkedHashMap<>();
+            irisan.put("name", nama);
+            irisan.put("count", jumlah.getOrDefault(nama, 0L));
+            irisan.put("other", false);
+            hasil.add(irisan);
+        }
+
+        long sisa = 0;
+        int prosesSisa = 0;
+
+        for (Map.Entry<String, Long> e : jumlah.entrySet()) {
+            if (terpilih.contains(e.getKey()) || e.getValue() <= 0) continue;
+
+            sisa += e.getValue();
+            prosesSisa++;
+        }
+
+        if (sisa > 0) {
+            Map<String, Object> lainnya = new LinkedHashMap<>();
+            lainnya.put("name", null);
+            lainnya.put("count", sisa);
+            lainnya.put("other", true);
+            lainnya.put("processes", prosesSisa);
+            hasil.add(lainnya);
+        }
 
         return hasil;
     }
@@ -187,6 +279,7 @@ public class DashboardService {
         hasil.put("start", awal.toString());
         hasil.put("successful", berhasil);
         hasil.put("faulted", gagal);
+        hasil.put("stopped", angka(hitungan.get(nama + "Stopped")));
         hasil.put("total", angka(hitungan.get(nama + "Total")));
 
         // Tingkat keberhasilan dihitung dari pekerjaan yang sudah SELESAI saja.
@@ -203,10 +296,21 @@ public class DashboardService {
      * <p>Satu huruf tidak dilayani: hasilnya akan berisi hampir semua yang ada
      * dan tidak menolong siapa pun, sementara biayanya enam pemindaian tabel.
      */
-    public List<Map<String, Object>> cari(UUID tenantId, String q) {
+    /**
+     * @param akses folder yang boleh dilihat penanya, atau null untuk semua.
+     *              Hasil dari folder lain dibuang: pencarian tidak boleh
+     *              menjadi jalan melihat isi folder yang disembunyikan dari
+     *              bilah folder.
+     */
+    public List<Map<String, Object>> cari(UUID tenantId, String q, Set<UUID> akses) {
         if (q == null || q.trim().length() < 2) return Db.kosong();
 
-        return ringkasan.cari(tenantId, pola(q), BATAS_CARI);
+        List<Map<String, Object>> hasil = ringkasan.cari(tenantId, pola(q), BATAS_CARI);
+        if (akses == null) return hasil;
+
+        return hasil.stream()
+                .filter(h -> h.get("folderId") == null || akses.contains(Db.uuid((String) h.get("folderId"))))
+                .toList();
     }
 
     /**

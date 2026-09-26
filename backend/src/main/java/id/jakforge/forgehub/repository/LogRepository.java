@@ -36,8 +36,14 @@ public class LogRepository {
      *                Kosong berarti semua tingkat — selain rincian, yang
      *                SELALU disaring.
      */
+    /**
+     * @param folderId null berarti seluruh penyewa. Catatan tidak menyimpan
+     *                 foldernya: catatan sebuah pekerjaan milik folder
+     *                 pekerjaannya, dan catatan tanpa pekerjaan — yang ditulis
+     *                 ForgeHub sendiri — milik folder prosesnya.
+     */
     public List<Map<String, Object>> cari(UUID tenantId, Collection<String> tingkat, String robot,
-                                          String process, UUID jobId, int batas) {
+                                          String process, UUID jobId, UUID folderId, int batas) {
         List<String> where = new ArrayList<>();
         List<Object> args = new ArrayList<>();
 
@@ -70,6 +76,18 @@ public class LogRepository {
         if (jobId != null) {
             where.add("job_id = ?");
             args.add(jobId);
+        }
+
+        if (folderId != null) {
+            where.add("""
+                    (job_id IN (SELECT j.id FROM jobs j WHERE j.tenant_id = ? AND j.folder_id = ?)
+                     OR (job_id IS NULL
+                         AND process_name IN (SELECT p.name FROM processes p
+                                               WHERE p.tenant_id = ? AND p.folder_id = ?)))""");
+            args.add(tenantId);
+            args.add(folderId);
+            args.add(tenantId);
+            args.add(folderId);
         }
 
         args.add(batas);

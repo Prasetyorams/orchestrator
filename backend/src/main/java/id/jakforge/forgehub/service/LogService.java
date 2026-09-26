@@ -51,7 +51,7 @@ public class LogService {
      *              Kosong berarti semua tingkat.
      */
     public List<Map<String, Object>> cari(UUID tenantId, List<String> level, String robot,
-                                          String process, String jobId, Integer batas) {
+                                          String process, String jobId, UUID folderId, Integer batas) {
 
         UUID job = null;
 
@@ -76,7 +76,7 @@ public class LogService {
             if (!t.rincian()) ejaan.addAll(t.ejaan());
         }
 
-        return catatan.cari(tenantId, ejaan, robot, process, job,
+        return catatan.cari(tenantId, ejaan, robot, process, job, folderId,
                 Batas.antara(batas, BATAS_BAWAAN, BATAS_MAKS));
     }
 
@@ -240,6 +240,19 @@ public class LogService {
         Map<String, Object> hasil = new LinkedHashMap<>();
         hasil.put("ok", true);
         hasil.put("changed", catatan.tandaiDibaca(tenantId, id));
+
+        return hasil;
+    }
+
+    /**
+     * Isi lonceng di bilah atas: jumlah yang belum dibaca dan beberapa yang
+     * terbaru. Terpisah dari dasbor supaya lonceng bekerja di halaman mana
+     * pun — dasbor kini milik satu folder, sedangkan peringatan milik penyewa.
+     */
+    public Map<String, Object> ringkasanPeringatan(UUID tenantId) {
+        Map<String, Object> hasil = new LinkedHashMap<>();
+        hasil.put("unread", catatan.belumDibaca(tenantId));
+        hasil.put("recent", catatan.peringatan(tenantId, false, 8));
 
         return hasil;
     }

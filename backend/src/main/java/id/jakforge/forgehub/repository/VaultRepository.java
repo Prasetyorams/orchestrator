@@ -2,6 +2,7 @@ package id.jakforge.forgehub.repository;
 
 import org.springframework.stereotype.Repository;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -37,15 +38,37 @@ public class VaultRepository {
      * <p>Nama pengguna aset Credential ikut: itu bukan rahasia, dan tanpa itu
      * daftar kredensial tidak bisa dibedakan satu sama lain.
      */
-    public List<Map<String, Object>> aset(UUID tenantId) {
+    /** @param folderId null berarti seluruh penyewa. */
+    public List<Map<String, Object>> aset(UUID tenantId, UUID folderId) {
+        List<Object> args = new ArrayList<>(List.of(tenantId));
+        String saring = "";
+
+        if (folderId != null) {
+            saring = " AND folder_id = ?";
+            args.add(folderId);
+        }
+
         return db.rows("""
-                SELECT id, name, type, scope, username, description, created_at, updated_at,
+                SELECT id, name, type, scope, username, description, created_at, updated_at, folder_id,
                        CASE WHEN type IN ('Credential', 'Secret') THEN NULL ELSE value_text END AS value_text,
                        CASE WHEN value_text IS NULL OR value_text = '' THEN FALSE ELSE TRUE END AS has_value
                   FROM assets
-                 WHERE tenant_id = ?
+                 WHERE tenant_id = ?%s
                  ORDER BY name
-                """, tenantId);
+                """.formatted(saring), args.toArray());
+    }
+
+    /** Folder aset bernama itu, atau null kalau asetnya belum ada. */
+    public UUID folderAset(UUID tenantId, String nama) {
+        Object id = db.scalar("SELECT folder_id FROM assets WHERE tenant_id = ? AND name = ?", tenantId, nama);
+        if (id == null) return null;
+
+        return id instanceof UUID u ? u : Db.uuid(String.valueOf(id));
+    }
+
+    public int pindahAset(UUID tenantId, String nama, UUID folderId) {
+        return db.exec("UPDATE assets SET folder_id = ? WHERE tenant_id = ? AND name = ?",
+                folderId, tenantId, nama);
     }
 
     public Map<String, Object> nilaiAset(UUID tenantId, String nama) {
@@ -74,13 +97,14 @@ public class VaultRepository {
                 """, tipe, pengguna, pertahankanNilai, nilai, keterangan, cakupan, tenantId, nama);
     }
 
+    /** @param folderId null berarti folder bawaan (diisi pemicu basis data). */
     public void buatAset(UUID tenantId, String nama, String tipe, String pengguna, String nilai,
-                         String keterangan, String cakupan) {
+                         String keterangan, String cakupan, UUID folderId) {
         db.exec("""
                 INSERT INTO assets (id, tenant_id, name, type, username, value_text, description, scope,
-                                    created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, now(), now())
-                """, Db.newId(), tenantId, nama, tipe, pengguna, nilai, keterangan, cakupan);
+                                    folder_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, now(), now())
+                """, Db.newId(), tenantId, nama, tipe, pengguna, nilai, keterangan, cakupan, folderId);
     }
 
     public int hapusAset(UUID tenantId, String nama) {
@@ -124,32 +148,50 @@ public class VaultRepository {
     // Gudang berkas
     // -----------------------------------------------------------------
 
-    public List<Map<String, Object>> gudang(UUID tenantId) {
+    /** @param folderId null berarti seluruh penyewa. */
+    public List<Map<String, Object>> gudang(UUID tenantId, UUID folderId) {
+        List<Object> args = new ArrayList<>(List.of(tenantId));
+        String saring = "";
+
+        if (folderId != null) {
+            saring = " AND b.folder_id = ?";
+            args.add(folderId);
+        }
+
         return db.rows("""
-                SELECT b.id, b.name, b.description, b.created_at,
+                SELECT b.id, b.name, b.description, b.created_at, b.folder_id,
                        count(f.id)                    AS file_count,
                        COALESCE(sum(f.size_bytes), 0) AS total_bytes
                   FROM buckets b
                   LEFT JOIN bucket_files f
                          ON f.tenant_id = b.tenant_id AND f.bucket_name = b.name
-                 WHERE b.tenant_id = ?
-                 GROUP BY b.id, b.name, b.description, b.created_at
+                 WHERE b.tenant_id = ?%s
+                 GROUP BY b.id, b.name, b.description, b.created_at, b.folder_id
                  ORDER BY b.name
-                """, tenantId);
+                """.formatted(saring), args.toArray());
     }
 
     public boolean adaGudang(UUID tenantId, String nama) {
         return db.exists("SELECT count(*) FROM buckets WHERE tenant_id = ? AND name = ?", tenantId, nama);
     }
 
-    public void buatGudang(UUID tenantId, String nama, String keterangan) {
+    /** @param folderId null berarti folder bawaan (diisi pemicu basis data). */
+    public void buatGudang(UUID tenantId, String nama, String keterangan, UUID folderId) {
         db.exec("""
-                INSERT INTO buckets (id, tenant_id, name, description, created_at)
-                VALUES (?, ?, ?, ?, now())
-                """, Db.newId(), tenantId, nama, keterangan);
+                INSERT INTO buckets (id, tenant_id, name, description, folder_id, created_at)
+                VALUES (?, ?, ?, ?, ?, now())
+                """, Db.newId(), tenantId, nama, keterangan, folderId);
     }
 
+    public int pindahGudang(UUID tenantId, String nama, UUID folderId) {
+        return db.exec("UPDATE buckets SET folder_id = ? WHERE tenant_id = ? AND name = ?",
+                folderId, tenantId, nama);
+    }
+
+    /** Berkasnya ikut dibuang: berkas tanpa gudang tidak bisa dicapai lewat jalan mana pun. */
     public int hapusGudang(UUID tenantId, String nama) {
+        db.exec("DELETE FROM bucket_files WHERE tenant_id = ? AND bucket_name = ?", tenantId, nama);
+
         return db.exec("DELETE FROM buckets WHERE tenant_id = ? AND name = ?", tenantId, nama);
     }
 
