@@ -126,14 +126,23 @@ export function TopNav({ onMenu }: { onMenu: () => void }) {
         <Menu className="h-5 w-5" />
       </button>
 
-      <Link href="/" className="flex shrink-0 items-center gap-2.5 rounded-md pr-2">
-        <span className="flex h-8 w-8 items-center justify-center rounded-md bg-brand text-sm font-bold text-white">
-          OO
-        </span>
-        <span className="hidden text-[17px] font-semibold tracking-tight text-ink md:block">
-          Open Orchestrator
-        </span>
-      </Link>
+      {/* Di layar lebar, kolom merek selebar ini supaya kotak cari mulai tepat
+          di atas tab pertama NavBar, dan ikon kaca pembesarnya segaris dengan
+          ikon tab: 16 (px-4) + 224 (w-56) + 12 (gap-3) + 12 (ml-3) = 264 =
+          256 (FolderSidebar w-64) + 8 (NavBar sm:px-2). Mengubah salah satu
+          angka itu berarti mengubah yang lain juga. Pembungkusnya yang
+          melebar, bukan Link-nya: ruang kosong di kanan nama tidak ikut bisa
+          diklik. */}
+      <div className="flex shrink-0 lg:w-56">
+        <Link href="/" className="flex shrink-0 items-center gap-2.5 rounded-md pr-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-md bg-brand text-sm font-bold text-white">
+            OO
+          </span>
+          <span className="hidden text-[17px] font-semibold tracking-tight text-ink md:block">
+            Open Orchestrator
+          </span>
+        </Link>
+      </div>
 
       <div className="relative ml-1 min-w-0 max-w-xl flex-1 sm:ml-3">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
