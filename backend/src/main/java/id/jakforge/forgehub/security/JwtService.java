@@ -1,13 +1,13 @@
 package id.jakforge.forgehub.security;
 
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 import java.util.Map;
@@ -20,51 +20,69 @@ import java.util.UUID;
  * Panjang minimalnya diperiksa saat aplikasi mulai: HS256 menuntut kunci
  * minimal 256 bit, dan kunci yang terlalu pendek gagal saat token pertama
  * dibuat — jauh setelah aplikasi dianggap sehat.
+ *
+ * <p>Dibuat lewat {@code CryptoConfig}, bukan dipindai sebagai komponen.
  */
-@Service
 public class JwtService {
 
-    private final SecretKey key;
+    /** HS256 menuntut kunci minimal 256 bit. */
+    static final int MIN_SECRET_BYTES = 32;
+
+    static final String CLAIM_TENANT_ID = "tenantId";
+    static final String CLAIM_USERNAME = "username";
+    static final String CLAIM_ROLE = "role";
+
+    private final SecretKey signingKey;
     private final long expirationMinutes;
 
-    public JwtService(
-            @Value("${forgehub.jwt.secret}") String secret,
-            @Value("${forgehub.jwt.expiration-minutes}") long expirationMinutes) {
+    public JwtService(String secret, long expirationMinutes) {
+        byte[] secretBytes = secret.getBytes(StandardCharsets.UTF_8);
 
-        byte[] bytes = secret.getBytes(StandardCharsets.UTF_8);
-        if (bytes.length < 32) {
+        if (secretBytes.length < MIN_SECRET_BYTES) {
             throw new IllegalStateException(
-                    "forgehub.jwt.secret terlalu pendek: butuh minimal 32 karakter untuk HS256.");
+                    "forgehub.jwt.secret terlalu pendek: butuh minimal " + MIN_SECRET_BYTES + " karakter untuk HS256.");
         }
 
-        this.key = Keys.hmacShaKeyFor(bytes);
+        this.signingKey = Keys.hmacShaKeyFor(secretBytes);
         this.expirationMinutes = expirationMinutes;
     }
 
-    public String issue(UUID userId, UUID tenantId, String username, String role) {
-        Instant now = Instant.now();
+    public String issueToken(UUID userId, UUID tenantId, String username, String role) {
+        Instant issuedAt = Instant.now();
 
         return Jwts.builder()
                 .subject(userId.toString())
                 .claims(Map.of(
-                        "tenantId", tenantId.toString(),
-                        "username", username,
-                        "role", role))
-                .issuedAt(Date.from(now))
-                .expiration(Date.from(now.plusSeconds(expirationMinutes * 60)))
-                .signWith(key)
+                        CLAIM_TENANT_ID, tenantId.toString(),
+                        CLAIM_USERNAME, username,
+                        CLAIM_ROLE, role))
+                .issuedAt(Date.from(issuedAt))
+                .expiration(Date.from(issuedAt.plus(Duration.ofMinutes(expirationMinutes))))
+                .signWith(signingKey)
                 .compact();
     }
 
-    public Claims parse(String token) {
-        return Jwts.parser()
-                .verifyWith(key)
+    /**
+     * Pemanggil yang tertulis di token.
+     *
+     * @throws JwtException             kalau tokennya rusak, palsu, atau kedaluwarsa
+     * @throws IllegalArgumentException kalau isinya tidak berbentuk token ForgeHub
+     */
+    public ForgeHubPrincipal parsePrincipal(String token) {
+        Claims claims = Jwts.parser()
+                .verifyWith(signingKey)
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
+
+        return new ForgeHubPrincipal(
+                UUID.fromString(claims.getSubject()),
+                UUID.fromString(claims.get(CLAIM_TENANT_ID, String.class)),
+                claims.get(CLAIM_USERNAME, String.class),
+                claims.get(CLAIM_ROLE, String.class));
     }
 
-    public long getExpirationMinutes() {
+    public long expirationMinutes() {
         return expirationMinutes;
     }
 }

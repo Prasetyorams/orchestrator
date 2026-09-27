@@ -1,90 +1,105 @@
 package id.jakforge.forgehub.repository;
 
+import id.jakforge.forgehub.model.TriggerDefinition;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
-/** Akses data pemicu terjadwal. */
+/**
+ * Akses data pemicu terjadwal.
+ *
+ * <p>Nama pemicu unik PER FOLDER (V5), jadi setiap perubahan menyebut folder.
+ */
 @Repository
+@RequiredArgsConstructor
 public class TriggerRepository {
 
-    private static final String KOLOM = """
+    private static final String COLUMNS = """
             id, name, process_name, robot_name, type, cron, interval_minutes,
             priority, timezone, runtime_type, enabled, next_run_at, last_run_at, created_at, folder_id
             """;
 
-    private final Db db;
-
-    public TriggerRepository(Db db) {
-        this.db = db;
+    /** Jadwal sebuah pemicu: cukup untuk menghitung waktu jalan berikutnya. */
+    public record TriggerSchedule(boolean enabled, String cron, int intervalMinutes, String timezone) {
     }
 
+    /** Pemicu yang sudah waktunya jalan, beserta yang dibutuhkan untuk menjadwalkan pekerjaannya. */
+    public record DueTrigger(UUID id, UUID tenantId, UUID folderId, String name, String processName,
+                             String robotName, int intervalMinutes, String cron, String priority,
+                             String timezone) {
+    }
+
+    private final Database database;
+
     /** @param folderId null berarti seluruh penyewa. */
-    public List<Map<String, Object>> semua(UUID tenantId, UUID folderId) {
+    public List<Map<String, Object>> findAll(UUID tenantId, UUID folderId) {
         List<Object> args = new ArrayList<>(List.of(tenantId));
-        String saring = "";
+        String folderFilter = "";
 
         if (folderId != null) {
-            saring = " AND folder_id = ?";
+            folderFilter = " AND folder_id = ?";
             args.add(folderId);
         }
 
-        return db.rows("""
+        return database.queryRows("""
                 SELECT %s FROM triggers
                  WHERE tenant_id = ?%s
                  ORDER BY enabled DESC, next_run_at
-                """.formatted(KOLOM, saring), args.toArray());
+                """.formatted(COLUMNS, folderFilter), args.toArray());
     }
 
     /** Untuk dasbor: hanya yang aktif, paling dekat lebih dulu. */
-    public List<Map<String, Object>> berikutnya(UUID tenantId, UUID folderId, int batas) {
+    public List<Map<String, Object>> findUpcoming(UUID tenantId, UUID folderId, int limit) {
         List<Object> args = new ArrayList<>(List.of(tenantId));
-        String saring = "";
+        String folderFilter = "";
 
         if (folderId != null) {
-            saring = " AND folder_id = ?";
+            folderFilter = " AND folder_id = ?";
             args.add(folderId);
         }
 
-        args.add(batas);
+        args.add(limit);
 
-        return db.rows("""
+        return database.queryRows("""
                 SELECT name, process_name, type, interval_minutes, cron, timezone,
                        enabled, next_run_at, last_run_at
                   FROM triggers
                  WHERE tenant_id = ? AND enabled%s
                  ORDER BY next_run_at
                  LIMIT ?
-                """.formatted(saring), args.toArray());
+                """.formatted(folderFilter), args.toArray());
     }
 
-    // Nama pemicu unik PER FOLDER (V5), jadi setiap perubahan menyebut folder.
-
-    public Map<String, Object> satu(UUID tenantId, UUID folderId, String nama) {
-        return db.row("""
+    public Optional<TriggerSchedule> findSchedule(UUID tenantId, UUID folderId, String name) {
+        return database.query("""
                 SELECT enabled, cron, interval_minutes, timezone
                   FROM triggers WHERE tenant_id = ? AND folder_id = ? AND name = ?
-                """, tenantId, folderId, nama);
+                """, (rs, rowNumber) -> new TriggerSchedule(rs.getBoolean(1), rs.getString(2), rs.getInt(3),
+                        rs.getString(4)),
+                tenantId, folderId, name).stream().findFirst();
     }
 
-    public boolean ada(UUID tenantId, UUID folderId, String nama) {
-        return db.exists("SELECT count(*) FROM triggers WHERE tenant_id = ? AND folder_id = ? AND name = ?",
-                tenantId, folderId, nama);
+    public boolean existsInFolder(UUID tenantId, UUID folderId, String name) {
+        return database.exists("SELECT count(*) FROM triggers WHERE tenant_id = ? AND folder_id = ? AND name = ?",
+                tenantId, folderId, name);
     }
 
     /** Folder-folder tempat pemicu bernama itu ada, folder bawaan lebih dulu. */
-    public List<Tempat> tempat(UUID tenantId, String nama) {
-        return db.jdbc().query("""
+    public List<FolderLocation> findLocations(UUID tenantId, String name) {
+        return database.query("""
                 SELECT t.folder_id, f.is_default
                   FROM triggers t
                   JOIN folders f ON f.id = t.folder_id
                  WHERE t.tenant_id = ? AND t.name = ?
                  ORDER BY f.is_default DESC, t.created_at
-                """, (rs, i) -> new Tempat(rs.getObject(1, UUID.class), rs.getBoolean(2)), tenantId, nama);
+                """, (rs, rowNumber) -> new FolderLocation(rs.getObject(1, UUID.class), rs.getBoolean(2)),
+                tenantId, name);
     }
 
     /**
@@ -92,70 +107,97 @@ public class TriggerRepository {
      * folder yang sama, karena pemicu selalu tinggal bersama proses yang
      * dijalankannya.
      */
-    public void perbarui(UUID tenantId, UUID folderId, String nama, String proses, String robot, String tipe,
-                         String cron, int selang, boolean aktif, OffsetDateTime berikutnya,
-                         String prioritas, String zona, String runtimeType) {
-        db.exec("""
+    public void update(UUID tenantId, UUID folderId, TriggerDefinition trigger, OffsetDateTime nextRunAt) {
+        database.update("""
                 UPDATE triggers
                    SET process_name = ?, robot_name = ?, type = ?, cron = ?,
                        interval_minutes = ?, enabled = ?, next_run_at = ?,
                        priority = ?, timezone = ?, runtime_type = ?
                  WHERE tenant_id = ? AND folder_id = ? AND name = ?
-                """, proses, robot, tipe, cron, selang, aktif, berikutnya,
-                prioritas, zona, runtimeType, tenantId, folderId, nama);
+                """, trigger.processName(), trigger.robotName(), trigger.type(), trigger.cron(),
+                trigger.intervalMinutes(), trigger.enabled(), nextRunAt,
+                trigger.priority(), trigger.timezone(), trigger.runtimeType(), tenantId, folderId, trigger.name());
     }
 
-    public void buat(UUID tenantId, UUID folderId, String nama, String proses, String robot, String tipe,
-                     String cron, int selang, boolean aktif, OffsetDateTime berikutnya,
-                     String prioritas, String zona, String runtimeType) {
-        db.exec("""
+    public void insert(UUID tenantId, UUID folderId, TriggerDefinition trigger, OffsetDateTime nextRunAt) {
+        database.update("""
                 INSERT INTO triggers
                     (id, tenant_id, folder_id, name, process_name, robot_name, type, cron,
                      interval_minutes, enabled, next_run_at, created_at,
                      priority, timezone, runtime_type)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?, ?, ?)
-                """, Db.newId(), tenantId, folderId, nama, proses, robot, tipe, cron,
-                selang, aktif, berikutnya, prioritas, zona, runtimeType);
+                """, UUID.randomUUID(), tenantId, folderId, trigger.name(), trigger.processName(),
+                trigger.robotName(), trigger.type(), trigger.cron(), trigger.intervalMinutes(), trigger.enabled(),
+                nextRunAt, trigger.priority(), trigger.timezone(), trigger.runtimeType());
     }
 
-    public void setAktif(UUID tenantId, UUID folderId, String nama, boolean aktif, OffsetDateTime berikutnya) {
-        db.exec("""
+    public void setEnabled(UUID tenantId, UUID folderId, String name, boolean enabled, OffsetDateTime nextRunAt) {
+        database.update("""
                 UPDATE triggers SET enabled = ?, next_run_at = ?
                  WHERE tenant_id = ? AND folder_id = ? AND name = ?
-                """, aktif, berikutnya, tenantId, folderId, nama);
+                """, enabled, nextRunAt, tenantId, folderId, name);
     }
 
-    public int hapus(UUID tenantId, UUID folderId, String nama) {
-        return db.exec("DELETE FROM triggers WHERE tenant_id = ? AND folder_id = ? AND name = ?",
-                tenantId, folderId, nama);
+    public int delete(UUID tenantId, UUID folderId, String name) {
+        return database.update("DELETE FROM triggers WHERE tenant_id = ? AND folder_id = ? AND name = ?",
+                tenantId, folderId, name);
     }
 
-    /**
-     * Pemicu yang sudah waktunya jalan, dikunci supaya tidak diambil dua kali.
-     *
-     * <p>SKIP LOCKED penting kalau nanti ada lebih dari satu ForgeHub: dua
-     * penjadwal yang membaca daftar yang sama akan menjadwalkan tiap pemicu dua
-     * kali, dan yang terlihat adalah automasi berjalan ganda tanpa sebab.
-     */
-    public List<Map<String, Object>> jatuhTempo() {
-        return db.rows("""
-                SELECT id, tenant_id, folder_id, name, process_name, robot_name,
-                       interval_minutes, cron, priority, timezone
-                  FROM triggers
+    // -----------------------------------------------------------------
+    // Penjadwal
+    // -----------------------------------------------------------------
+
+    /** Id pemicu yang sudah waktunya jalan, paling lama tertunda lebih dulu. Belum dikunci. */
+    public List<UUID> findDueTriggerIds() {
+        return database.query("""
+                SELECT id FROM triggers
                  WHERE enabled = TRUE
                    AND next_run_at IS NOT NULL
                    AND next_run_at <= now()
                  ORDER BY next_run_at
+                """, (rs, rowNumber) -> rs.getObject(1, UUID.class));
+    }
+
+    /**
+     * Kunci satu pemicu yang MASIH jatuh tempo, di dalam transaksi pemanggilnya.
+     *
+     * <p>SKIP LOCKED penting kalau nanti ada lebih dari satu ForgeHub: dua
+     * penjadwal yang membaca daftar yang sama akan menjadwalkan tiap pemicu dua
+     * kali, dan yang terlihat adalah automasi berjalan ganda tanpa sebab.
+     * Syarat jatuh temponya diperiksa ULANG di sini: penjadwal lain mungkin
+     * sudah menjalankannya sesudah daftarnya dibaca.
+     *
+     * @return kosong kalau sudah dipegang penjadwal lain atau tidak lagi jatuh tempo
+     */
+    public Optional<DueTrigger> lockIfDue(UUID triggerId) {
+        return database.query("""
+                SELECT id, tenant_id, folder_id, name, process_name, robot_name,
+                       interval_minutes, cron, priority, timezone
+                  FROM triggers
+                 WHERE id = ?
+                   AND enabled = TRUE
+                   AND next_run_at IS NOT NULL
+                   AND next_run_at <= now()
                  FOR UPDATE SKIP LOCKED
-                """);
+                """, (rs, rowNumber) -> new DueTrigger(
+                        rs.getObject("id", UUID.class),
+                        rs.getObject("tenant_id", UUID.class),
+                        rs.getObject("folder_id", UUID.class),
+                        rs.getString("name"),
+                        rs.getString("process_name"),
+                        rs.getString("robot_name"),
+                        rs.getInt("interval_minutes"),
+                        rs.getString("cron"),
+                        rs.getString("priority"),
+                        rs.getString("timezone")),
+                triggerId).stream().findFirst();
     }
 
-    public void catatJalan(UUID id, OffsetDateTime berikutnya) {
-        db.exec("UPDATE triggers SET last_run_at = now(), next_run_at = ? WHERE id = ?", berikutnya, id);
+    public void recordRun(UUID triggerId, OffsetDateTime nextRunAt) {
+        database.update("UPDATE triggers SET last_run_at = now(), next_run_at = ? WHERE id = ?", nextRunAt, triggerId);
     }
 
-    public void matikan(UUID id) {
-        db.exec("UPDATE triggers SET enabled = FALSE, next_run_at = NULL WHERE id = ?", id);
+    public void disable(UUID triggerId) {
+        database.update("UPDATE triggers SET enabled = FALSE, next_run_at = NULL WHERE id = ?", triggerId);
     }
-
 }

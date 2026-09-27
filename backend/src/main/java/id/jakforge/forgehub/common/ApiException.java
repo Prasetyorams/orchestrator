@@ -18,8 +18,8 @@ public class ApiException extends RuntimeException {
 
     private final HttpStatus status;
 
-    public ApiException(HttpStatus status, String pesan) {
-        super(pesan);
+    public ApiException(HttpStatus status, String message) {
+        super(message);
         this.status = status;
     }
 
@@ -32,27 +32,27 @@ public class ApiException extends RuntimeException {
     // -----------------------------------------------------------------
 
     /** Permintaan yang salah bentuk atau melanggar aturan. */
-    public static ApiException salah(String pesan) {
-        return new ApiException(HttpStatus.BAD_REQUEST, pesan);
+    public static ApiException badRequest(String message) {
+        return new ApiException(HttpStatus.BAD_REQUEST, message);
     }
 
     /** Tidak ada, atau bukan milik penyewa yang meminta — keduanya dijawab sama. */
-    public static ApiException tidakAda(String pesan) {
-        return new ApiException(HttpStatus.NOT_FOUND, pesan);
+    public static ApiException notFound(String message) {
+        return new ApiException(HttpStatus.NOT_FOUND, message);
     }
 
     /** Sudah ada, dan tidak boleh digandakan. */
-    public static ApiException sudahAda(String pesan) {
-        return new ApiException(HttpStatus.CONFLICT, pesan);
+    public static ApiException conflict(String message) {
+        return new ApiException(HttpStatus.CONFLICT, message);
     }
 
     /** Dikenali, tapi tidak berhak. Berbeda dari 401, yang berarti belum dikenali. */
-    public static ApiException tidakBerhak(String pesan) {
-        return new ApiException(HttpStatus.FORBIDDEN, pesan);
+    public static ApiException forbidden(String message) {
+        return new ApiException(HttpStatus.FORBIDDEN, message);
     }
 
     /** Belum dikenali, atau tokennya sudah tidak berlaku. */
-    public static ApiException belumMasuk(String pesan) {
-        return new ApiException(HttpStatus.UNAUTHORIZED, pesan);
+    public static ApiException unauthorized(String message) {
+        return new ApiException(HttpStatus.UNAUTHORIZED, message);
     }
 }

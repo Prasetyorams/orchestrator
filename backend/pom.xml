@@ -29,9 +29,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <!-- JDBC, bukan data-jpa: lapisan datanya JdbcTemplate dan tidak ada
+             satu pun @Entity. Menarik Hibernate hanya untuk transaksi berarti
+             memuat ORM lengkap yang tidak pernah dipakai. -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-jpa</artifactId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

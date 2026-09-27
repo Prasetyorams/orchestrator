@@ -1,11 +1,14 @@
 package id.jakforge.forgehub.controller;
 
-import id.jakforge.forgehub.security.CurrentUser;
-import id.jakforge.forgehub.service.FolderService;
+import id.jakforge.forgehub.dto.request.LogBatchRequest;
+import id.jakforge.forgehub.dto.response.DeletedCountResponse;
+import id.jakforge.forgehub.dto.response.LogWriteResponse;
+import id.jakforge.forgehub.security.ForgeHubPrincipal;
 import id.jakforge.forgehub.service.LogService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -14,89 +17,42 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
-/** Catatan dan peringatan. */
+/** Catatan jalannya automasi. */
 @RestController
-@RequestMapping("/api")
+@RequestMapping("/api/logs")
+@RequiredArgsConstructor
 public class LogController {
 
-    private final LogService service;
-    private final FolderService folders;
-
-    public LogController(LogService service, FolderService folders) {
-        this.service = service;
-        this.folders = folders;
-    }
-
-    private static UUID tenant() {
-        return CurrentUser.get().tenantId();
-    }
-
-    // -----------------------------------------------------------------
-    // Catatan
-    // -----------------------------------------------------------------
+    private final LogService logService;
 
     /** {@code level} boleh lebih dari satu: {@code ?level=WARN,ERROR} atau {@code ?level=WARN&level=ERROR}. */
-    @GetMapping("/logs")
-    public List<Map<String, Object>> daftar(
-            @RequestParam(required = false) List<String> level,
-            @RequestParam(required = false) String robot,
-            @RequestParam(required = false) String process,
-            @RequestParam(name = "jobId", required = false) String jobId,
-            @RequestParam(required = false) String folderId,
-            @RequestParam(required = false) Integer limit) {
-
-        return service.cari(tenant(), level, robot, process, jobId,
-                folders.saring(CurrentUser.get(), folderId), limit);
+    @GetMapping
+    public List<Map<String, Object>> search(@AuthenticationPrincipal ForgeHubPrincipal principal,
+                                            @RequestParam(required = false) List<String> level,
+                                            @RequestParam(required = false) String robot,
+                                            @RequestParam(required = false) String process,
+                                            @RequestParam(required = false) String jobId,
+                                            @RequestParam(required = false) String folderId,
+                                            @RequestParam(required = false) Integer limit) {
+        return logService.search(principal, level, robot, process, jobId, folderId, limit);
     }
 
     /**
      * Kiriman berkelompok dari robot.
      *
-     * <p>Badan permintaannya dibaca sebagai Map dan medan {@code lines}
-     * diserahkan apa adanya ke service. Bentuk isinya bermacam-macam antar
-     * versi robot, dan service yang memutuskan mana yang bisa dipakai.
+     * <p>Badannya dibaca longgar: bentuk isinya bermacam-macam antar versi
+     * robot, dan layanannya yang memutuskan baris mana yang bisa dipakai.
      */
-    @PostMapping("/logs")
-    public Map<String, Object> tulis(@RequestBody(required = false) Map<String, Object> body) {
-        return service.tulis(tenant(), body == null ? null : body.get("lines"));
+    @PostMapping
+    public LogWriteResponse write(@AuthenticationPrincipal ForgeHubPrincipal principal,
+                                  @RequestBody(required = false) Map<String, Object> body) {
+        return logService.write(principal, LogBatchRequest.fromBody(body));
     }
 
-    @DeleteMapping("/logs")
-    public Map<String, Object> bersihkan(
-            @RequestParam(name = "olderThanDays", required = false) Integer hari) {
-
-        return service.bersihkan(tenant(), hari);
-    }
-
-    // -----------------------------------------------------------------
-    // Peringatan
-    // -----------------------------------------------------------------
-
-    /** {@code severity} boleh lebih dari satu, sama seperti {@code level} pada catatan. */
-    @GetMapping("/alerts")
-    public List<Map<String, Object>> peringatan(
-            @RequestParam(required = false) String unread,
-            @RequestParam(required = false) List<String> severity,
-            @RequestParam(required = false) Integer limit) {
-
-        return service.peringatan(tenant(), unread, severity, limit);
-    }
-
-    /** Jumlah yang belum dibaca dan delapan yang terbaru, untuk lonceng di bilah atas. */
-    @GetMapping("/alerts/summary")
-    public Map<String, Object> ringkasanPeringatan() {
-        return service.ringkasanPeringatan(tenant());
-    }
-
-    @PostMapping("/alerts/{id}/read")
-    public Map<String, Object> tandaiDibaca(@PathVariable long id) {
-        return service.tandaiDibaca(tenant(), id);
-    }
-
-    @PostMapping("/alerts/read-all")
-    public Map<String, Object> tandaiSemua() {
-        return service.tandaiSemuaDibaca(tenant());
+    @DeleteMapping
+    public DeletedCountResponse purgeOlderThan(@AuthenticationPrincipal ForgeHubPrincipal principal,
+                                               @RequestParam(name = "olderThanDays", required = false) Integer days) {
+        return logService.purgeOlderThan(principal, days);
     }
 }

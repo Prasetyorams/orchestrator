@@ -20,15 +20,16 @@ public enum AssetType {
      * Sebelumnya syaratnya ditulis ulang di tiga tempat, dan satu tempat yang
      * lupa akan menaburkan kata sandi ke layar tanpa ada yang menyadarinya.
      */
-    public boolean rahasia() {
+    public boolean isSecret() {
         return this == Credential || this == Secret;
     }
 
-    public static AssetType dari(String teks) {
-        if (teks == null || teks.isBlank()) return null;
+    /** Tanpa peduli huruf besar-kecil; null kalau tidak dikenal. */
+    public static AssetType parse(String text) {
+        if (text == null || text.isBlank()) return null;
 
-        for (AssetType t : values()) {
-            if (t.name().equalsIgnoreCase(teks.trim())) return t;
+        for (AssetType type : values()) {
+            if (type.name().equalsIgnoreCase(text.trim())) return type;
         }
 
         return null;

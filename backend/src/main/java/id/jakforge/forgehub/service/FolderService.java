@@ -1,12 +1,21 @@
 package id.jakforge.forgehub.service;
 
 import id.jakforge.forgehub.common.ApiException;
-import id.jakforge.forgehub.dto.Permintaan;
-import id.jakforge.forgehub.repository.Db;
+import id.jakforge.forgehub.common.Uuids;
+import id.jakforge.forgehub.dto.request.AssignRobotRequest;
+import id.jakforge.forgehub.dto.request.AssignUserRequest;
+import id.jakforge.forgehub.dto.request.FolderRequest;
+import id.jakforge.forgehub.dto.response.CreatedResponse;
+import id.jakforge.forgehub.dto.response.FolderMembersResponse;
+import id.jakforge.forgehub.dto.response.FolderTreeResponse;
+import id.jakforge.forgehub.model.FolderAccess;
 import id.jakforge.forgehub.repository.FolderRepository;
+import id.jakforge.forgehub.repository.RobotRepository;
+import id.jakforge.forgehub.repository.UserRepository;
 import id.jakforge.forgehub.security.ForgeHubPrincipal;
-import id.jakforge.forgehub.security.Izin;
-import id.jakforge.forgehub.security.PemeriksaIzin;
+import id.jakforge.forgehub.security.PermissionChecker;
+import id.jakforge.forgehub.security.Permissions;
+import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,125 +23,40 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import static id.jakforge.forgehub.service.FolderAccessService.FOLDER_NOT_FOUND;
+import static id.jakforge.forgehub.service.FolderAccessService.OWNER_ID_COLUMN;
+
 /**
- * Aturan tentang folder: siapa melihat apa, dan bentuk pohonnya.
+ * Aturan tentang folder: bentuk pohonnya, dan siapa ditugaskan ke mana.
  *
- * <p>HAK di sini sederhana, dan sengaja begitu:
- *
- * <ul>
- *   <li>Peran yang boleh MENUGASKAN orang ke folder (folders.update) melihat
- *       semua folder bersama: ia toh bisa menugaskan dirinya sendiri ke mana
- *       pun, jadi menyembunyikan folder darinya tidak melindungi apa-apa.
- *       Administrator termasuk di sini.</li>
- *   <li>Pengguna lain hanya melihat folder tempat ia ditugaskan, ditambah
- *       Folder Saya miliknya sendiri.</li>
- *   <li>Folder Saya hanya terlihat oleh pemiliknya di bilah folder.
- *       Pengelola folder tetap bisa membukanya dari halaman pengelolaan,
- *       karena harus ada yang bisa membereskannya kalau pemiliknya sudah
- *       pergi.</li>
- *   <li>Membuat, mengubah, dan menghapus folder masing-masing butuh
- *       folders.create, folders.update, dan folders.delete.</li>
- * </ul>
- *
- * <p>Pembatasan itu berlaku untuk permintaan yang MENYEBUT folder — dasbor
- * selalu menyebutnya. Permintaan tanpa folder, yang dikirim Studio dan
- * JakRunner, tetap menjangkau seluruh penyewa seperti sebelum folder ada:
- * robot mencari aset dan antrean lewat nama, tanpa tahu foldernya.
+ * <p>Membuat, mengubah, dan menghapus folder masing-masing butuh
+ * folders.create, folders.update, dan folders.delete. Siapa boleh MEMBUKA
+ * folder mana ada di {@link FolderAccessService}.
  */
 @Service
+@RequiredArgsConstructor
 public class FolderService {
 
-    /** Batas panjang nama, mengikuti kolomnya di V4. */
-    private static final int PANJANG_NAMA = 120;
-    private static final int PANJANG_KETERANGAN = 400;
+    /** Batas panjang, mengikuti kolomnya di V4. */
+    static final int MAX_NAME_LENGTH = 120;
+    static final int MAX_DESCRIPTION_LENGTH = 400;
 
-    private final FolderRepository folders;
-    private final PemeriksaIzin izin;
+    private static final String ID_COLUMN = "id";
+    private static final String PARENT_ID_COLUMN = "parentId";
+    private static final String NAME_COLUMN = "name";
+    private static final String IS_DEFAULT_COLUMN = "isDefault";
+    private static final String ACCESSIBLE_FLAG = "accessible";
 
-    public FolderService(FolderRepository folders, PemeriksaIzin izin) {
-        this.folders = folders;
-        this.izin = izin;
-    }
-
-    /** Melihat dan mengatur semua folder bersama — lihat keterangan kelas. */
-    private boolean pengelola(ForgeHubPrincipal p) {
-        return izin.boleh(p, "folders.update");
-    }
-
-    private void pastikan(ForgeHubPrincipal p, String perlu) {
-        if (!izin.boleh(p, perlu)) throw Izin.tolak(perlu);
-    }
-
-    // -----------------------------------------------------------------
-    // Hak
-    // -----------------------------------------------------------------
-
-    /**
-     * Folder yang boleh dibuka seseorang, atau null yang berarti SEMUA.
-     *
-     * <p>null untuk pengelola folder, bukan himpunan berisi semua id: pemanggilnya
-     * tidak perlu menyaring apa pun, dan folder yang baru dibuat sedetik lalu
-     * tidak tertinggal di luar himpunan.
-     */
-    public Set<UUID> akses(ForgeHubPrincipal p) {
-        if (pengelola(p)) return null;
-
-        Set<UUID> hasil = new HashSet<>(folders.ditugaskan(p.tenantId(), p.userId()));
-
-        Map<String, Object> pribadi = folders.pribadi(p.tenantId(), p.userId());
-        if (pribadi != null) hasil.add(Db.uuid((String) pribadi.get("id")));
-
-        return hasil;
-    }
-
-    /**
-     * Folder dari parameter permintaan, sesudah diperiksa haknya.
-     *
-     * @return null kalau permintaannya tidak menyebut folder — artinya seluruh
-     *         penyewa, seperti sebelum folder ada.
-     */
-    public UUID saring(ForgeHubPrincipal p, String folderId) {
-        if (folderId == null || folderId.isBlank()) return null;
-
-        UUID id = Db.uuid(folderId);
-        if (id == null) throw ApiException.tidakAda("Folder tidak ada.");
-
-        periksa(p, id);
-
-        return id;
-    }
-
-    /**
-     * Folder itu, kalau ada dan boleh dibuka.
-     *
-     * <p>Folder pribadi orang lain dijawab "tidak ada", bukan "tidak berhak":
-     * jawaban kedua memberi tahu bahwa folder itu ada.
-     */
-    public Map<String, Object> periksa(ForgeHubPrincipal p, UUID id) {
-        Map<String, Object> folder = folders.satu(p.tenantId(), id);
-
-        if (folder == null) throw ApiException.tidakAda("Folder tidak ada.");
-        if (pengelola(p)) return folder;
-
-        Object pemilik = folder.get("ownerId");
-
-        if (pemilik != null) {
-            if (!p.userId().toString().equals(pemilik)) throw ApiException.tidakAda("Folder tidak ada.");
-            return folder;
-        }
-
-        if (!folders.ditugaskan(p.tenantId(), p.userId()).contains(id)) {
-            throw ApiException.tidakBerhak("Anda tidak ditugaskan ke folder ini.");
-        }
-
-        return folder;
-    }
+    private final FolderRepository folderRepository;
+    private final FolderAccessService folderAccessService;
+    private final PermissionChecker permissionChecker;
+    private final UserRepository userRepository;
+    private final RobotRepository robotRepository;
 
     // -----------------------------------------------------------------
     // Pohon
@@ -146,53 +70,52 @@ public class FolderService {
      * yang hanya ditugaskan ke "Keuangan / Tagihan" melihat "Tagihan" melayang
      * di akar, terlepas dari tempatnya di pohon.
      */
-    public Map<String, Object> daftar(ForgeHubPrincipal p) {
-        List<Map<String, Object>> semua = folders.semua(p.tenantId());
-        Set<UUID> boleh = akses(p);
+    public FolderTreeResponse getTree(ForgeHubPrincipal principal) {
+        List<Map<String, Object>> sharedFolders = folderRepository.findAllShared(principal.tenantId());
+        FolderAccess access = folderAccessService.accessibleFolders(principal);
 
-        List<Map<String, Object>> terlihat = new ArrayList<>();
+        List<Map<String, Object>> visibleFolders = new ArrayList<>();
 
-        if (boleh == null) {
-            for (Map<String, Object> f : semua) {
-                f.put("accessible", true);
-                terlihat.add(f);
+        if (access.allFolders()) {
+            for (Map<String, Object> folder : sharedFolders) {
+                folder.put(ACCESSIBLE_FLAG, true);
+                visibleFolders.add(folder);
             }
         } else {
-            Map<String, Map<String, Object>> perId = new HashMap<>();
-            for (Map<String, Object> f : semua) perId.put((String) f.get("id"), f);
+            Map<String, Map<String, Object>> foldersById = new HashMap<>();
+            for (Map<String, Object> folder : sharedFolders) foldersById.put(idOf(folder), folder);
 
-            Set<String> tampil = new HashSet<>();
+            Set<String> shownIds = new HashSet<>();
 
-            for (Map<String, Object> f : semua) {
-                if (!boleh.contains(Db.uuid((String) f.get("id")))) continue;
+            for (Map<String, Object> folder : sharedFolders) {
+                if (!access.allows(Uuids.parseOrNull(idOf(folder)))) continue;
 
                 // Naik sampai akar, menandai setiap leluhur supaya ikut tampil.
-                for (Map<String, Object> x = f; x != null; x = perId.get((String) x.get("parentId"))) {
-                    if (!tampil.add((String) x.get("id"))) break;
+                for (Map<String, Object> current = folder; current != null;
+                     current = foldersById.get((String) current.get(PARENT_ID_COLUMN))) {
+                    if (!shownIds.add(idOf(current))) break;
                 }
             }
 
-            for (Map<String, Object> f : semua) {
-                if (!tampil.contains((String) f.get("id"))) continue;
+            for (Map<String, Object> folder : sharedFolders) {
+                if (!shownIds.contains(idOf(folder))) continue;
 
-                f.put("accessible", boleh.contains(Db.uuid((String) f.get("id"))));
-                terlihat.add(f);
+                folder.put(ACCESSIBLE_FLAG, access.allows(Uuids.parseOrNull(idOf(folder))));
+                visibleFolders.add(folder);
             }
         }
 
-        Map<String, Object> hasil = new LinkedHashMap<>();
-        hasil.put("folders", terlihat);
-        hasil.put("personal", folders.pribadi(p.tenantId(), p.userId()));
-        hasil.put("canManage", izin.boleh(p, "folders.create"));
-
-        return hasil;
+        return new FolderTreeResponse(
+                visibleFolders,
+                folderRepository.findPersonal(principal.tenantId(), principal.userId()).orElse(null),
+                permissionChecker.isAllowed(principal, Permissions.FOLDERS_CREATE));
     }
 
     /** Halaman pengelolaan: semua folder, termasuk folder pribadi setiap orang. */
-    public List<Map<String, Object>> kelola(ForgeHubPrincipal p) {
-        pastikan(p, "folders.read");
+    public List<Map<String, Object>> findAllForManagement(ForgeHubPrincipal principal) {
+        permissionChecker.require(principal, Permissions.FOLDERS_READ);
 
-        return folders.kelola(p.tenantId());
+        return folderRepository.findAllForManagement(principal.tenantId());
     }
 
     /**
@@ -203,13 +126,13 @@ public class FolderService {
      * hanya memenuhi halaman pengelolaan.
      */
     @Transactional
-    public Map<String, Object> pribadi(ForgeHubPrincipal p) {
-        Map<String, Object> ada = folders.pribadi(p.tenantId(), p.userId());
-        if (ada != null) return ada;
+    public Map<String, Object> getOrCreatePersonalFolder(ForgeHubPrincipal principal) {
+        return folderRepository.findPersonal(principal.tenantId(), principal.userId()).orElseGet(() -> {
+            folderRepository.insertPersonal(principal.tenantId(), principal.userId());
 
-        folders.buatPribadi(p.tenantId(), p.userId());
-
-        return folders.pribadi(p.tenantId(), p.userId());
+            return folderRepository.findPersonal(principal.tenantId(), principal.userId())
+                    .orElseThrow(() -> new IllegalStateException("Folder Saya tidak tersimpan."));
+        });
     }
 
     // -----------------------------------------------------------------
@@ -217,33 +140,30 @@ public class FolderService {
     // -----------------------------------------------------------------
 
     @Transactional
-    public Map<String, Object> buat(ForgeHubPrincipal p, Permintaan.Folder minta) {
-        pastikan(p, "folders.create");
+    public CreatedResponse create(ForgeHubPrincipal principal, FolderRequest request) {
+        permissionChecker.require(principal, Permissions.FOLDERS_CREATE);
 
-        String nama = periksaNama(minta.name());
-        UUID induk = indukSah(p.tenantId(), minta.parentId());
+        String name = validateName(request.name());
+        UUID parentId = resolveParent(principal.tenantId(), request.parentId());
 
-        if (folders.namaDipakai(p.tenantId(), induk, nama, null)) {
-            throw ApiException.sudahAda("Folder '" + nama + "' sudah ada di tempat itu.");
+        if (folderRepository.isNameTaken(principal.tenantId(), parentId, name, null)) {
+            throw nameTaken(name);
         }
 
-        UUID id = Db.newId();
+        UUID folderId = UUID.randomUUID();
 
         try {
-            folders.buat(id, p.tenantId(), induk, nama, keterangan(minta.description()));
+            folderRepository.insert(folderId, principal.tenantId(), parentId, name,
+                    normalizeDescription(request.description()));
         } catch (DuplicateKeyException e) {
             // Orang lain membuat nama yang sama di antara pemeriksaan dan
             // penyimpanan. Jawabannya sama dengan pemeriksaan di atas.
-            throw ApiException.sudahAda("Folder '" + nama + "' sudah ada di tempat itu.");
+            throw nameTaken(name);
         }
 
-        if (induk != null) folders.salinPenugasan(p.tenantId(), induk, id);
+        if (parentId != null) folderRepository.copyAssignments(principal.tenantId(), parentId, folderId);
 
-        Map<String, Object> hasil = new LinkedHashMap<>();
-        hasil.put("ok", true);
-        hasil.put("id", id.toString());
-
-        return hasil;
+        return CreatedResponse.of(folderId);
     }
 
     /**
@@ -254,47 +174,46 @@ public class FolderService {
      * tidak boleh tersembunyi di dalam cabang lain.
      */
     @Transactional
-    public void ubah(ForgeHubPrincipal p, String idTeks, Permintaan.Folder minta) {
-        pastikan(p, "folders.update");
+    public void update(ForgeHubPrincipal principal, String folderIdText, FolderRequest request) {
+        permissionChecker.require(principal, Permissions.FOLDERS_UPDATE);
 
-        UUID id = uuid(idTeks);
-        Map<String, Object> folder = folders.satu(p.tenantId(), id);
+        UUID folderId = parseFolderId(folderIdText);
+        Map<String, Object> folder = findFolder(principal.tenantId(), folderId);
 
-        if (folder == null) throw ApiException.tidakAda("Folder tidak ada.");
-
-        if (folder.get("ownerId") != null) {
-            throw ApiException.salah("Folder Saya tidak bisa diganti nama atau dipindah.");
+        if (folder.get(OWNER_ID_COLUMN) != null) {
+            throw ApiException.badRequest("Folder Saya tidak bisa diganti nama atau dipindah.");
         }
 
         // Keterangan kosong berarti dihapus: dialog sunting selalu mengirimnya,
         // dan mengosongkan isiannya memang dimaksudkan untuk membuangnya.
-        String nama = minta.name() == null ? (String) folder.get("name") : periksaNama(minta.name());
-        String ket = keterangan(minta.description());
+        String name = request.name() == null ? (String) folder.get(NAME_COLUMN) : validateName(request.name());
+        String description = normalizeDescription(request.description());
 
-        UUID induk = Db.uuid((String) folder.get("parentId"));
+        UUID parentId = Uuids.parseOrNull((String) folder.get(PARENT_ID_COLUMN));
 
-        if (minta.gantiInduk()) {
-            UUID baru = indukSah(p.tenantId(), minta.parentId());
+        if (request.parentIdProvided()) {
+            UUID newParentId = resolveParent(principal.tenantId(), request.parentId());
 
-            if (Boolean.TRUE.equals(folder.get("isDefault")) && baru != null) {
-                throw ApiException.salah("Folder bawaan harus tetap di akar.");
+            if (Boolean.TRUE.equals(folder.get(IS_DEFAULT_COLUMN)) && newParentId != null) {
+                throw ApiException.badRequest("Folder bawaan harus tetap di akar.");
             }
 
-            if (baru != null && (baru.equals(id) || folders.keturunan(p.tenantId(), id).contains(baru))) {
-                throw ApiException.salah("Folder tidak bisa dipindah ke dalam dirinya sendiri.");
+            if (newParentId != null && (newParentId.equals(folderId)
+                    || folderRepository.findDescendantIds(principal.tenantId(), folderId).contains(newParentId))) {
+                throw ApiException.badRequest("Folder tidak bisa dipindah ke dalam dirinya sendiri.");
             }
 
-            induk = baru;
+            parentId = newParentId;
         }
 
-        if (folders.namaDipakai(p.tenantId(), induk, nama, id)) {
-            throw ApiException.sudahAda("Folder '" + nama + "' sudah ada di tempat itu.");
+        if (folderRepository.isNameTaken(principal.tenantId(), parentId, name, folderId)) {
+            throw nameTaken(name);
         }
 
         try {
-            folders.ubah(p.tenantId(), id, nama, ket, induk);
+            folderRepository.update(principal.tenantId(), folderId, name, description, parentId);
         } catch (DuplicateKeyException e) {
-            throw ApiException.sudahAda("Folder '" + nama + "' sudah ada di tempat itu.");
+            throw nameTaken(name);
         }
     }
 
@@ -310,31 +229,31 @@ public class FolderService {
      * bisa dibaca.
      */
     @Transactional
-    public void hapus(ForgeHubPrincipal p, String idTeks) {
-        pastikan(p, "folders.delete");
+    public void delete(ForgeHubPrincipal principal, String folderIdText) {
+        permissionChecker.require(principal, Permissions.FOLDERS_DELETE);
 
-        UUID id = uuid(idTeks);
-        Map<String, Object> folder = folders.satu(p.tenantId(), id);
+        UUID folderId = parseFolderId(folderIdText);
+        Map<String, Object> folder = findFolder(principal.tenantId(), folderId);
 
-        if (folder == null) throw ApiException.tidakAda("Folder tidak ada.");
-
-        if (Boolean.TRUE.equals(folder.get("isDefault"))) {
-            throw ApiException.salah("Folder bawaan tidak bisa dihapus.");
+        if (Boolean.TRUE.equals(folder.get(IS_DEFAULT_COLUMN))) {
+            throw ApiException.badRequest("Folder bawaan tidak bisa dihapus.");
         }
 
-        if (folders.adaAnak(p.tenantId(), id)) {
-            throw ApiException.salah("Folder '" + folder.get("name") + "' masih punya subfolder. Pindahkan atau hapus subfoldernya dulu.");
+        if (folderRepository.hasChildren(principal.tenantId(), folderId)) {
+            throw ApiException.badRequest("Folder '" + folder.get(NAME_COLUMN)
+                    + "' masih punya subfolder. Pindahkan atau hapus subfoldernya dulu.");
         }
 
-        if (folders.jumlahIsi(p.tenantId(), id) > 0) {
-            throw ApiException.salah("Folder '" + folder.get("name")
+        if (folderRepository.countContents(principal.tenantId(), folderId) > 0) {
+            throw ApiException.badRequest("Folder '" + folder.get(NAME_COLUMN)
                     + "' masih berisi proses, pemicu, antrean, aset, atau ember penyimpanan. Pindahkan atau hapus isinya dulu.");
         }
 
-        UUID induk = Db.uuid((String) folder.get("parentId"));
-        folders.pindahkanPekerjaan(p.tenantId(), id, induk != null ? induk : folders.bawaan(p.tenantId()));
+        UUID parentId = Uuids.parseOrNull((String) folder.get(PARENT_ID_COLUMN));
+        folderRepository.moveJobs(principal.tenantId(), folderId,
+                parentId != null ? parentId : folderRepository.findDefaultFolderId(principal.tenantId()));
 
-        folders.hapus(p.tenantId(), id);
+        folderRepository.delete(principal.tenantId(), folderId);
     }
 
     // -----------------------------------------------------------------
@@ -342,72 +261,63 @@ public class FolderService {
     // -----------------------------------------------------------------
 
     /** Pengguna dan robot yang ditugaskan; boleh dilihat siapa pun yang boleh membuka foldernya. */
-    public Map<String, Object> anggota(ForgeHubPrincipal p, String idTeks) {
-        UUID id = uuid(idTeks);
-        Map<String, Object> folder = periksa(p, id);
+    public FolderMembersResponse getMembers(ForgeHubPrincipal principal, String folderIdText) {
+        UUID folderId = parseFolderId(folderIdText);
+        Map<String, Object> folder = folderAccessService.requireAccessibleFolder(principal, folderId);
 
-        Map<String, Object> hasil = new LinkedHashMap<>();
-        hasil.put("folder", folder);
-        hasil.put("users", folders.pengguna(p.tenantId(), id));
-        hasil.put("robots", folders.robot(p.tenantId(), id));
-        hasil.put("canManageUsers", pengelola(p) && folder.get("ownerId") == null);
-        hasil.put("canManageRobots", bolehAturRobot(p, folder));
+        boolean canManageUsers = folderAccessService.canManageFolders(principal) && folder.get(OWNER_ID_COLUMN) == null;
+        boolean canManageRobots = canManageRobots(principal, folder);
 
         // Id pemilik tidak ikut keluar; yang perlu diketahui layar sudah ada di "personal".
-        folder.remove("ownerId");
+        folder.remove(OWNER_ID_COLUMN);
 
-        return hasil;
+        return new FolderMembersResponse(
+                folder,
+                folderRepository.findAssignedUsers(principal.tenantId(), folderId),
+                folderRepository.findAssignedRobots(principal.tenantId(), folderId),
+                canManageUsers,
+                canManageRobots);
     }
 
     @Transactional
-    public void tugaskanPengguna(ForgeHubPrincipal p, String idTeks, String username) {
-        pastikan(p, "folders.update");
+    public void assignUser(ForgeHubPrincipal principal, String folderIdText, AssignUserRequest request) {
+        permissionChecker.require(principal, Permissions.FOLDERS_UPDATE);
 
-        UUID id = folderBersama(p, idTeks);
-        UUID pengguna = folders.idPengguna(p.tenantId(), wajib(username, "username"));
+        UUID folderId = requireSharedFolder(principal, folderIdText);
+        UUID userId = userRepository.findIdByUsername(principal.tenantId(), request.username())
+                .orElseThrow(() -> ApiException.notFound("Pengguna tidak ada."));
 
-        if (pengguna == null) throw ApiException.tidakAda("Pengguna tidak ada.");
-
-        folders.tugaskanPengguna(p.tenantId(), id, pengguna);
+        folderRepository.assignUser(principal.tenantId(), folderId, userId);
     }
 
     @Transactional
-    public void lepasPengguna(ForgeHubPrincipal p, String idTeks, String username) {
-        pastikan(p, "folders.update");
+    public void unassignUser(ForgeHubPrincipal principal, String folderIdText, String username) {
+        permissionChecker.require(principal, Permissions.FOLDERS_UPDATE);
 
-        UUID id = folderBersama(p, idTeks);
-        UUID pengguna = folders.idPengguna(p.tenantId(), username);
+        UUID folderId = requireSharedFolder(principal, folderIdText);
+        UUID userId = userRepository.findIdByUsername(principal.tenantId(), username).orElse(null);
 
-        if (pengguna == null || folders.lepasPengguna(p.tenantId(), id, pengguna) == 0) {
-            throw ApiException.tidakAda("Pengguna itu tidak ditugaskan ke folder ini.");
+        if (userId == null || folderRepository.unassignUser(principal.tenantId(), folderId, userId) == 0) {
+            throw ApiException.notFound("Pengguna itu tidak ditugaskan ke folder ini.");
         }
     }
 
     @Transactional
-    public void tugaskanRobot(ForgeHubPrincipal p, String idTeks, String nama) {
-        UUID id = uuid(idTeks);
-        Map<String, Object> folder = periksa(p, id);
+    public void assignRobot(ForgeHubPrincipal principal, String folderIdText, AssignRobotRequest request) {
+        UUID folderId = requireRobotManagement(principal, folderIdText);
+        UUID robotId = robotRepository.findIdByName(principal.tenantId(), request.robotName())
+                .orElseThrow(() -> ApiException.notFound("Robot '" + request.robotName() + "' tidak ada."));
 
-        if (!bolehAturRobot(p, folder)) throw Izin.tolak("folders.update");
-
-        UUID robot = folders.idRobot(p.tenantId(), wajib(nama, "robotName"));
-
-        if (robot == null) throw ApiException.tidakAda("Robot '" + nama + "' tidak ada.");
-
-        folders.tugaskanRobot(p.tenantId(), id, robot);
+        folderRepository.assignRobot(principal.tenantId(), folderId, robotId);
     }
 
     @Transactional
-    public void lepasRobot(ForgeHubPrincipal p, String idTeks, String nama) {
-        UUID id = uuid(idTeks);
-        Map<String, Object> folder = periksa(p, id);
+    public void unassignRobot(ForgeHubPrincipal principal, String folderIdText, String robotName) {
+        UUID folderId = requireRobotManagement(principal, folderIdText);
+        UUID robotId = robotRepository.findIdByName(principal.tenantId(), robotName).orElse(null);
 
-        if (!bolehAturRobot(p, folder)) throw Izin.tolak("folders.update");
-
-        UUID robot = folders.idRobot(p.tenantId(), nama);
-
-        if (robot == null || folders.lepasRobot(p.tenantId(), id, robot) == 0) {
-            throw ApiException.tidakAda("Robot itu tidak ditugaskan ke folder ini.");
+        if (robotId == null || folderRepository.unassignRobot(principal.tenantId(), folderId, robotId) == 0) {
+            throw ApiException.notFound("Robot itu tidak ditugaskan ke folder ini.");
         }
     }
 
@@ -416,45 +326,61 @@ public class FolderService {
      * pemiliknya: itu tempat kerja pribadinya, dan menunggu Administrator
      * hanya untuk menjalankan prosesnya sendiri tidak masuk akal.
      */
-    private boolean bolehAturRobot(ForgeHubPrincipal p, Map<String, Object> folder) {
-        Object pemilik = folder.get("ownerId");
+    private boolean canManageRobots(ForgeHubPrincipal principal, Map<String, Object> folder) {
+        Object ownerId = folder.get(OWNER_ID_COLUMN);
 
-        if (pemilik != null) return p.userId().toString().equals(pemilik) || pengelola(p);
+        if (ownerId != null) {
+            return principal.userId().toString().equals(ownerId) || folderAccessService.canManageFolders(principal);
+        }
 
-        return pengelola(p);
+        return folderAccessService.canManageFolders(principal);
+    }
+
+    private UUID requireRobotManagement(ForgeHubPrincipal principal, String folderIdText) {
+        UUID folderId = parseFolderId(folderIdText);
+        Map<String, Object> folder = folderAccessService.requireAccessibleFolder(principal, folderId);
+
+        if (!canManageRobots(principal, folder)) throw PermissionChecker.denied(Permissions.FOLDERS_UPDATE);
+
+        return folderId;
     }
 
     // -----------------------------------------------------------------
     // Alat
     // -----------------------------------------------------------------
 
-    private UUID folderBersama(ForgeHubPrincipal p, String idTeks) {
-        UUID id = uuid(idTeks);
-        Map<String, Object> folder = folders.satu(p.tenantId(), id);
+    private Map<String, Object> findFolder(UUID tenantId, UUID folderId) {
+        return folderRepository.findById(tenantId, folderId).orElseThrow(() -> ApiException.notFound(FOLDER_NOT_FOUND));
+    }
 
-        if (folder == null) throw ApiException.tidakAda("Folder tidak ada.");
+    private UUID requireSharedFolder(ForgeHubPrincipal principal, String folderIdText) {
+        UUID folderId = parseFolderId(folderIdText);
+        Map<String, Object> folder = findFolder(principal.tenantId(), folderId);
 
-        if (folder.get("ownerId") != null) {
-            throw ApiException.salah("Folder Saya hanya milik pemiliknya; pengguna lain tidak bisa ditugaskan ke sana.");
+        if (folder.get(OWNER_ID_COLUMN) != null) {
+            throw ApiException.badRequest(
+                    "Folder Saya hanya milik pemiliknya; pengguna lain tidak bisa ditugaskan ke sana.");
         }
 
-        return id;
+        return folderId;
     }
 
     /** Induk yang diminta: harus ada, dan bukan folder pribadi. */
-    private UUID indukSah(UUID tenantId, String parentId) {
-        if (parentId == null) return null;
+    private UUID resolveParent(UUID tenantId, String parentIdText) {
+        if (parentIdText == null) return null;
 
-        UUID induk = Db.uuid(parentId);
-        Map<String, Object> folder = induk == null ? null : folders.satu(tenantId, induk);
+        UUID parentId = Uuids.parseOrNull(parentIdText);
+        Map<String, Object> parent = parentId == null
+                ? null
+                : folderRepository.findById(tenantId, parentId).orElse(null);
 
-        if (folder == null) throw ApiException.tidakAda("Folder induk tidak ada.");
+        if (parent == null) throw ApiException.notFound("Folder induk tidak ada.");
 
-        if (folder.get("ownerId") != null) {
-            throw ApiException.salah("Folder Saya tidak bisa punya subfolder.");
+        if (parent.get(OWNER_ID_COLUMN) != null) {
+            throw ApiException.badRequest("Folder Saya tidak bisa punya subfolder.");
         }
 
-        return induk;
+        return parentId;
     }
 
     /**
@@ -463,43 +389,46 @@ public class FolderService {
      * <p>Garis miring dipakai untuk menuliskan jalurnya — "Keuangan / Tagihan"
      * — dan nama yang memuatnya membuat jalur itu terbaca sebagai folder lain.
      */
-    private static String periksaNama(String nama) {
-        if (nama == null || nama.isBlank()) throw ApiException.salah("Nama folder wajib diisi.");
+    private static String validateName(String name) {
+        if (name == null || name.isBlank()) throw ApiException.badRequest("Nama folder wajib diisi.");
 
-        String bersih = nama.trim();
+        String trimmed = name.trim();
 
-        if (bersih.length() > PANJANG_NAMA) {
-            throw ApiException.salah("Nama folder paling panjang " + PANJANG_NAMA + " karakter.");
+        if (trimmed.length() > MAX_NAME_LENGTH) {
+            throw ApiException.badRequest("Nama folder paling panjang " + MAX_NAME_LENGTH + " karakter.");
         }
 
-        if (bersih.contains("/") || bersih.contains("\\")) {
-            throw ApiException.salah("Nama folder tidak boleh memuat garis miring.");
+        if (trimmed.contains("/") || trimmed.contains("\\")) {
+            throw ApiException.badRequest("Nama folder tidak boleh memuat garis miring.");
         }
 
-        return bersih;
+        return trimmed;
     }
 
-    private static String keterangan(String teks) {
-        if (teks == null) return null;
+    private static String normalizeDescription(String description) {
+        if (description == null) return null;
 
-        String bersih = teks.trim();
-        if (bersih.isEmpty()) return null;
+        String trimmed = description.trim();
+        if (trimmed.isEmpty()) return null;
 
-        if (bersih.length() > PANJANG_KETERANGAN) {
-            throw ApiException.salah("Keterangan paling panjang " + PANJANG_KETERANGAN + " karakter.");
+        if (trimmed.length() > MAX_DESCRIPTION_LENGTH) {
+            throw ApiException.badRequest("Keterangan paling panjang " + MAX_DESCRIPTION_LENGTH + " karakter.");
         }
 
-        return bersih;
+        return trimmed;
     }
 
-    private static String wajib(String nilai, String medan) {
-        if (nilai == null || nilai.isBlank()) throw ApiException.salah(medan + " wajib diisi.");
-        return nilai.trim();
+    private static ApiException nameTaken(String name) {
+        return ApiException.conflict("Folder '" + name + "' sudah ada di tempat itu.");
     }
 
-    private static UUID uuid(String teks) {
-        UUID id = Db.uuid(teks);
-        if (id == null) throw ApiException.tidakAda("Folder tidak ada.");
-        return id;
+    private static UUID parseFolderId(String folderIdText) {
+        UUID folderId = Uuids.parseOrNull(folderIdText);
+        if (folderId == null) throw ApiException.notFound(FOLDER_NOT_FOUND);
+        return folderId;
+    }
+
+    private static String idOf(Map<String, Object> folder) {
+        return (String) folder.get(ID_COLUMN);
     }
 }

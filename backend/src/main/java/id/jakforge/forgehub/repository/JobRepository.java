@@ -1,11 +1,13 @@
 package id.jakforge.forgehub.repository;
 
 import id.jakforge.forgehub.model.JobState;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -21,84 +23,83 @@ import java.util.UUID;
  * oleh kolom yang benar-benar dipilih di sini.
  */
 @Repository
+@RequiredArgsConstructor
 public class JobRepository {
 
-    private static final String KOLOM_DAFTAR = """
+    private static final String LIST_COLUMNS = """
             id, process_name, robot_name, machine_name, state, source, priority,
             progress, info, created_at, started_at, ended_at, folder_id
             """;
 
-    private static final String KOLOM_LENGKAP = """
+    private static final String DETAIL_COLUMNS = """
             id, process_name, robot_name, machine_name, state, source, priority,
             progress, info, input_json, output_json, created_at, started_at, ended_at, folder_id
             """;
 
-    private final Db db;
-
-    public JobRepository(Db db) {
-        this.db = db;
-    }
+    private final Database database;
 
     /** @param folderId null berarti seluruh penyewa. */
-    public List<Map<String, Object>> cari(UUID tenantId, String state, String process, UUID folderId, int batas) {
+    public List<Map<String, Object>> search(UUID tenantId, String state, String processName, UUID folderId,
+                                            int limit) {
         // Penyaring dirangkai, bukan dijabarkan jadi empat kueri terpisah.
         // Halaman detail proses memerlukan "jalan milik proses ini saja", dan
         // menambahkannya sebagai cabang baru berarti empat kombinasi yang harus
         // dijaga tetap sama isinya.
-        List<String> where = new ArrayList<>();
+        List<String> conditions = new ArrayList<>();
         List<Object> args = new ArrayList<>();
 
-        where.add("tenant_id = ?");
+        conditions.add("tenant_id = ?");
         args.add(tenantId);
 
         if (state != null && !state.isBlank()) {
-            where.add("state = ?");
+            conditions.add("state = ?");
             args.add(state);
         }
 
-        if (process != null && !process.isBlank()) {
-            where.add("process_name = ?");
-            args.add(process);
+        if (processName != null && !processName.isBlank()) {
+            conditions.add("process_name = ?");
+            args.add(processName);
         }
 
         if (folderId != null) {
-            where.add("folder_id = ?");
+            conditions.add("folder_id = ?");
             args.add(folderId);
         }
 
-        args.add(batas);
+        args.add(limit);
 
-        return db.rows("""
+        return database.queryRows("""
                 SELECT %s
                   FROM jobs
                  WHERE %s
                  ORDER BY created_at DESC
                  LIMIT ?
-                """.formatted(KOLOM_DAFTAR, String.join(" AND ", where)), args.toArray());
+                """.formatted(LIST_COLUMNS, String.join(" AND ", conditions)), args.toArray());
     }
 
-    public Map<String, Object> satu(UUID tenantId, UUID id) {
-        return db.row("SELECT %s FROM jobs WHERE tenant_id = ? AND id = ?".formatted(KOLOM_LENGKAP),
-                tenantId, id);
+    public Optional<Map<String, Object>> findById(UUID tenantId, UUID jobId) {
+        return database.queryRow("SELECT %s FROM jobs WHERE tenant_id = ? AND id = ?".formatted(DETAIL_COLUMNS),
+                tenantId, jobId);
     }
 
-    public String namaProses(UUID tenantId, UUID id) {
-        Object v = db.scalar("SELECT process_name FROM jobs WHERE tenant_id = ? AND id = ?", tenantId, id);
-        return v == null ? null : String.valueOf(v);
+    public Optional<String> findProcessName(UUID tenantId, UUID jobId) {
+        return database.queryScalar("SELECT process_name FROM jobs WHERE tenant_id = ? AND id = ?", tenantId, jobId)
+                .map(String::valueOf);
     }
 
     /**
      * @param folderId folder PROSESNYA. Nama proses unik per folder, jadi
      *                 folder tidak bisa lagi disimpulkan dari nama saja.
      */
-    public void buat(UUID id, UUID tenantId, UUID folderId, String process, String robot, String machine,
-                     String source, String priority, String info, String inputJson) {
-        db.exec("""
+    public void insert(UUID jobId, UUID tenantId, UUID folderId, String processName, String robotName,
+                       String machineName, String source, String priority, String info, String inputJson) {
+        database.update("""
                 INSERT INTO jobs
                     (id, tenant_id, folder_id, process_name, robot_name, machine_name, state, source,
                      priority, progress, info, input_json, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, 0, ?, ?, now())
-                """, id, tenantId, folderId, process, robot, machine, source, priority, info, inputJson);
+                """, jobId, tenantId, folderId, processName, robotName, machineName, source, priority, info,
+                inputJson);
     }
 
     /**
@@ -116,8 +117,8 @@ public class JobRepository {
      * Pekerjaan yang menyebut nama robotnya langsung tetap diambil di mana pun
      * foldernya: yang memilih robot itu sudah menyatakan maksudnya.
      */
-    public Map<String, Object> ambilBerikutnya(UUID tenantId, String robot) {
-        List<Map<String, Object>> diambil = db.rows("""
+    public Optional<Map<String, Object>> claimNext(UUID tenantId, String robotName) {
+        return database.queryRows("""
                 UPDATE jobs
                    SET state = 'RUNNING',
                        robot_name = ?,
@@ -145,9 +146,7 @@ public class JobRepository {
                         FOR UPDATE SKIP LOCKED)
              RETURNING id, process_name, robot_name, state, priority, input_json,
                        created_at, started_at
-                """, robot, tenantId, robot, robot);
-
-        return diambil.isEmpty() ? null : diambil.get(0);
+                """, robotName, tenantId, robotName, robotName).stream().findFirst();
     }
 
     /**
@@ -157,9 +156,9 @@ public class JobRepository {
      * yang sudah ada. Robot melaporkan kemajuan berkali-kali dan hanya mengisi
      * sebagian medan tiap kali.
      */
-    public void ubahKeadaan(UUID tenantId, UUID id, JobState state, int progress,
+    public void updateState(UUID tenantId, UUID jobId, JobState state, int progress,
                             String info, String outputJson) {
-        db.exec("""
+        database.update("""
                 UPDATE jobs
                    SET state = ?,
                        progress = ?,
@@ -167,7 +166,7 @@ public class JobRepository {
                        output_json = COALESCE(?, output_json),
                        ended_at = CASE WHEN ? THEN now() ELSE ended_at END
                  WHERE tenant_id = ? AND id = ?
-                """, state.name(), progress, info, outputJson, state.selesai(), tenantId, id);
+                """, state.name(), progress, info, outputJson, state.isFinished(), tenantId, jobId);
     }
 
     /**
@@ -178,18 +177,18 @@ public class JobRepository {
      * berikutnya. Yang masih PENDING belum dipegang siapa pun, jadi boleh
      * langsung berhenti.
      */
-    public int hentikan(UUID tenantId, UUID id) {
-        return db.exec("""
+    public int requestStop(UUID tenantId, UUID jobId) {
+        return database.update("""
                 UPDATE jobs
                    SET state = CASE WHEN state = 'PENDING' THEN 'STOPPED' ELSE 'STOPPING' END,
                        info = 'Diminta berhenti.',
                        ended_at = CASE WHEN state = 'PENDING' THEN now() ELSE ended_at END
                  WHERE tenant_id = ? AND id = ? AND state IN ('PENDING', 'RUNNING')
-                """, tenantId, id);
+                """, tenantId, jobId);
     }
 
-    public int hapus(UUID tenantId, UUID id) {
-        return db.exec("DELETE FROM jobs WHERE tenant_id = ? AND id = ?", tenantId, id);
+    public int delete(UUID tenantId, UUID jobId) {
+        return database.update("DELETE FROM jobs WHERE tenant_id = ? AND id = ?", tenantId, jobId);
     }
 
     /**
@@ -199,9 +198,11 @@ public class JobRepository {
      * BENAR-BENAR berubah. Memilih dulu lalu memperbarui membuka celah:
      * pekerjaan yang selesai di antara kedua langkah tetap mendapat peringatan
      * "terputus" padahal berhasil.
+     *
+     * @param silenceSeconds berapa lama robotnya diam sebelum dianggap terputus
      */
-    public List<Map<String, Object>> gagalkanYangTerputus(int detik) {
-        return db.rows("""
+    public List<Map<String, Object>> markJobsOfSilentRobotsFaulted(int silenceSeconds) {
+        return database.queryRows("""
                 UPDATE jobs j
                    SET state = 'FAULTED',
                        info = 'Robot ' || COALESCE(j.robot_name, '?')
@@ -214,9 +215,9 @@ public class JobRepository {
                          WHERE j2.state = 'RUNNING'
                            AND (r.last_heartbeat_at IS NULL
                                 OR now() - r.last_heartbeat_at > make_interval(secs => ?))
-                         FOR UPDATE OF j2 SKIP LOCKED) AS pilih
-                 WHERE j.id = pilih.id AND j.state = 'RUNNING'
+                         FOR UPDATE OF j2 SKIP LOCKED) AS stale
+                 WHERE j.id = stale.id AND j.state = 'RUNNING'
              RETURNING j.id, j.tenant_id, j.process_name, j.robot_name
-                """, detik);
+                """, silenceSeconds);
     }
 }

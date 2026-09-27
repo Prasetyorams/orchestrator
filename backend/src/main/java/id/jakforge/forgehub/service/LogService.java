@@ -1,27 +1,34 @@
 package id.jakforge.forgehub.service;
 
 import id.jakforge.forgehub.common.ApiException;
-import id.jakforge.forgehub.common.Badan;
+import id.jakforge.forgehub.common.PageLimits;
+import id.jakforge.forgehub.common.RequestBodies;
+import id.jakforge.forgehub.common.Uuids;
+import id.jakforge.forgehub.dto.request.LogBatchRequest;
+import id.jakforge.forgehub.dto.response.DeletedCountResponse;
+import id.jakforge.forgehub.dto.response.LogWriteResponse;
 import id.jakforge.forgehub.model.LogLevel;
 import id.jakforge.forgehub.model.Severity;
-import id.jakforge.forgehub.repository.Db;
+import id.jakforge.forgehub.repository.AlertRepository;
 import id.jakforge.forgehub.repository.LogRepository;
+import id.jakforge.forgehub.security.ForgeHubPrincipal;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.EnumSet;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** Aturan tentang catatan dan peringatan. */
+/** Aturan tentang catatan jalannya automasi. */
 @Service
+@RequiredArgsConstructor
 public class LogService {
 
-    private static final int BATAS_BAWAAN = 200;
+    static final int DEFAULT_PAGE_SIZE = 200;
 
     /**
      * Batas atas satu permintaan.
@@ -30,54 +37,54 @@ public class LogService {
      * "melihat catatan", melainkan mengunduh basis data lewat pintu yang tidak
      * dirancang untuk itu.
      */
-    private static final int BATAS_MAKS = 2000;
+    static final int MAX_PAGE_SIZE = 2000;
 
     /** Batas baris per kiriman dari robot. */
-    private static final int MAKS_BARIS_KIRIMAN = 1000;
+    static final int MAX_LINES_PER_BATCH = 1000;
 
-    private final LogRepository catatan;
+    /** Batas terkecil umur catatan yang boleh dibuang, dalam hari. */
+    static final int MIN_PURGE_AGE_DAYS = 1;
 
-    public LogService(LogRepository catatan) {
-        this.catatan = catatan;
-    }
+    private static final String ALERT_SOURCE = "logs";
+    private static final String UNKNOWN_ROBOT = "robot";
 
-    // -----------------------------------------------------------------
-    // Catatan
-    // -----------------------------------------------------------------
+    private final LogRepository logRepository;
+    private final AlertRepository alertRepository;
+    private final FolderAccessService folderAccessService;
 
     /**
-     * @param level tingkat yang ingin dilihat — satu atau lebih, dari
-     *              {@code ?level=INFO,WARN} maupun {@code ?level=INFO&level=WARN}.
-     *              Kosong berarti semua tingkat.
+     * @param levels tingkat yang ingin dilihat — satu atau lebih, dari
+     *               {@code ?level=INFO,WARN} maupun {@code ?level=INFO&level=WARN}.
+     *               Kosong berarti semua tingkat.
      */
-    public List<Map<String, Object>> cari(UUID tenantId, List<String> level, String robot,
-                                          String process, String jobId, UUID folderId, Integer batas) {
-
+    public List<Map<String, Object>> search(ForgeHubPrincipal principal, List<String> levels, String robotName,
+                                            String processName, String jobId, String folderId, Integer limit) {
+        UUID folder = folderAccessService.resolveFolderFilter(principal, folderId);
         UUID job = null;
 
         if (jobId != null && !jobId.isBlank()) {
-            job = Db.uuid(jobId);
+            job = Uuids.parseOrNull(jobId);
 
             // Id yang bukan UUID tidak akan pernah cocok dengan apa pun. Yang
             // dikembalikan daftar kosong, bukan galat penguraian dari basis data.
-            if (job == null) return Db.kosong();
+            if (job == null) return List.of();
         }
 
-        Set<LogLevel> diminta = tingkatDiminta(level);
+        Set<LogLevel> requestedLevels = parseRequestedLevels(levels);
 
-        // Tingkat rincian tidak pernah ditampilkan (lihat LogLevel.rincian).
+        // Tingkat rincian tidak pernah ditampilkan (lihat LogLevel.isVerbose).
         // Yang HANYA meminta rincian memang tidak mendapat apa-apa; yang
         // memintanya bersama tingkat lain mendapat tingkat lain itu saja.
-        if (!diminta.isEmpty() && diminta.stream().allMatch(LogLevel::rincian)) return Db.kosong();
+        if (!requestedLevels.isEmpty() && requestedLevels.stream().allMatch(LogLevel::isVerbose)) return List.of();
 
-        Set<String> ejaan = new LinkedHashSet<>();
+        Set<String> storedSpellings = new LinkedHashSet<>();
 
-        for (LogLevel t : diminta) {
-            if (!t.rincian()) ejaan.addAll(t.ejaan());
+        for (LogLevel level : requestedLevels) {
+            if (!level.isVerbose()) storedSpellings.addAll(level.storedSpellings());
         }
 
-        return catatan.cari(tenantId, ejaan, robot, process, job, folderId,
-                Batas.antara(batas, BATAS_BAWAAN, BATAS_MAKS));
+        return logRepository.search(principal.tenantId(), storedSpellings, robotName, processName, job, folder,
+                PageLimits.clamp(limit, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
     }
 
     /**
@@ -87,92 +94,89 @@ public class LogService {
      * {@code ?level=INFO,WARN} harus tetap berarti dua tingkat walaupun
      * parameternya kelak dibaca sebagai satu untai.
      */
-    static Set<LogLevel> tingkatDiminta(List<String> mentah) {
-        Set<LogLevel> hasil = EnumSet.noneOf(LogLevel.class);
-        if (mentah == null) return hasil;
+    static Set<LogLevel> parseRequestedLevels(List<String> rawLevels) {
+        Set<LogLevel> levels = EnumSet.noneOf(LogLevel.class);
+        if (rawLevels == null) return levels;
 
-        for (String bagian : mentah) {
-            if (bagian == null) continue;
+        for (String rawLevel : rawLevels) {
+            if (rawLevel == null) continue;
 
-            for (String teks : bagian.split(",")) {
-                if (teks.isBlank()) continue;
+            for (String text : rawLevel.split(",")) {
+                if (text.isBlank()) continue;
 
-                LogLevel tingkat = LogLevel.kenali(teks);
+                LogLevel level = LogLevel.parseStrict(text);
 
-                if (tingkat == null) {
-                    throw ApiException.salah("Tingkat catatan tidak dikenal: '" + teks.trim() + "'.");
+                if (level == null) {
+                    throw ApiException.badRequest("Tingkat catatan tidak dikenal: '" + text.trim() + "'.");
                 }
 
-                hasil.add(tingkat);
+                levels.add(level);
             }
         }
 
-        return hasil;
+        return levels;
     }
 
     /**
      * Tulis sekelompok baris dari robot.
      *
-     * <p>Baris yang cacat DILEWAT, bukan menggagalkan seluruh kiriman: satu
+     * <p>Baris yang cacat DILEWATI, bukan menggagalkan seluruh kiriman: satu
      * salah ketik pada satu baris tidak boleh membuang sembilan ratus baris
      * lain, dan yang hilang kemudian justru catatan di sekitar kegagalan yang
      * sedang dicari orang.
      */
     @Transactional
     @SuppressWarnings("unchecked")
-    public Map<String, Object> tulis(UUID tenantId, Object mentah) {
-        if (!(mentah instanceof List<?> baris)) {
-            throw ApiException.salah("Butuh { \"lines\": [ ... ] }.");
+    public LogWriteResponse write(ForgeHubPrincipal principal, LogBatchRequest request) {
+        if (request.lines() == null) {
+            throw ApiException.badRequest("Butuh { \"lines\": [ ... ] }.");
         }
 
-        if (baris.size() > MAKS_BARIS_KIRIMAN) {
-            throw ApiException.salah(
-                    "Terlalu banyak baris dalam satu kiriman. Batasnya " + MAKS_BARIS_KIRIMAN + ".");
+        if (request.lines().size() > MAX_LINES_PER_BATCH) {
+            throw ApiException.badRequest(
+                    "Terlalu banyak baris dalam satu kiriman. Batasnya " + MAX_LINES_PER_BATCH + ".");
         }
 
-        int ditulis = 0;
-        int dilewati = 0;
+        UUID tenantId = principal.tenantId();
+        int written = 0;
+        int skipped = 0;
 
-        for (Object o : baris) {
-            if (!(o instanceof Map)) continue;
+        for (Object item : request.lines()) {
+            if (!(item instanceof Map)) continue;
 
-            Map<String, Object> b = (Map<String, Object>) o;
+            Map<String, Object> line = (Map<String, Object>) item;
 
-            String pesan = Badan.teks(b, "message");
-            if (pesan == null || pesan.isBlank()) continue;
+            String message = RequestBodies.text(line, "message");
+            if (message == null || message.isBlank()) continue;
 
-            LogLevel tingkat = LogLevel.dari(Badan.teks(b, "level"));
+            LogLevel level = LogLevel.parseOrInfo(RequestBodies.text(line, "level"));
 
-            // TRACE dan DEBUG tidak disimpan — lihat LogLevel.rincian. Ditolak
+            // TRACE dan DEBUG tidak disimpan — lihat LogLevel.isVerbose. Ditolak
             // di sini, bukan hanya disembunyikan saat dibaca: jejak per-activity
             // yang tidak pernah ditampilkan hanya memenuhi tabel dan
             // memperlambat setiap pencarian.
-            if (tingkat.rincian()) {
-                dilewati++;
+            if (level.isVerbose()) {
+                skipped++;
                 continue;
             }
 
-            catatan.tulis(tenantId, tingkat, pesan,
-                    Badan.teks(b, "robotName"), Badan.teks(b, "machineName"),
-                    Badan.teks(b, "processName"), Db.uuid(Badan.teks(b, "jobId")),
-                    Badan.teks(b, "loggedAt"));
+            logRepository.insert(tenantId, level, message,
+                    RequestBodies.text(line, "robotName"), RequestBodies.text(line, "machineName"),
+                    RequestBodies.text(line, "processName"), Uuids.parseOrNull(RequestBodies.text(line, "jobId")),
+                    RequestBodies.text(line, "loggedAt"));
 
-            ditulis++;
+            written++;
 
             // Kesalahan dari robot juga menjadi peringatan. Log dibaca kalau ada
             // yang sengaja mencarinya; peringatan muncul sendiri.
-            if (tingkat.gawat()) {
-                catatan.catatPeringatan(tenantId, Severity.Error,
-                        "Kesalahan pada " + Badan.teks(b, "robotName", "robot"), pesan, "logs");
+            if (level.raisesAlert()) {
+                alertRepository.insert(tenantId, Severity.Error,
+                        "Kesalahan pada " + RequestBodies.text(line, "robotName", UNKNOWN_ROBOT), message,
+                        ALERT_SOURCE);
             }
         }
 
-        Map<String, Object> hasil = new LinkedHashMap<>();
-        hasil.put("ok", true);
-        hasil.put("written", ditulis);
-        hasil.put("skipped", dilewati);
-
-        return hasil;
+        return new LogWriteResponse(true, written, skipped);
     }
 
     /**
@@ -182,86 +186,11 @@ public class LogService {
      * yang tidak bisa dibatalkan, dan bentuk yang paling mudah dijalankan tanpa
      * sengaja.
      */
-    public Map<String, Object> bersihkan(UUID tenantId, Integer hari) {
-        if (hari == null || hari < 1) {
-            throw ApiException.salah("Parameter 'olderThanDays' wajib diisi dan minimal 1.");
+    public DeletedCountResponse purgeOlderThan(ForgeHubPrincipal principal, Integer days) {
+        if (days == null || days < MIN_PURGE_AGE_DAYS) {
+            throw ApiException.badRequest("Parameter 'olderThanDays' wajib diisi dan minimal 1.");
         }
 
-        Map<String, Object> hasil = new LinkedHashMap<>();
-        hasil.put("ok", true);
-        hasil.put("deleted", catatan.buangLebihTuaDari(tenantId, hari));
-
-        return hasil;
-    }
-
-    // -----------------------------------------------------------------
-    // Peringatan
-    // -----------------------------------------------------------------
-
-    /**
-     * @param severity tingkat yang ingin dilihat — Info, Warning, Error; satu
-     *                 atau lebih. Kosong berarti semua tingkat.
-     */
-    public List<Map<String, Object>> peringatan(UUID tenantId, String unread, List<String> severity,
-                                                Integer batas) {
-        // Menerima "1" maupun "true": dasbor lama mengirim "1", dan klien lain
-        // yang menulis "true" tidak boleh diam-diam melihat seluruh daftar.
-        boolean hanyaBelumDibaca = "1".equals(unread) || "true".equalsIgnoreCase(unread);
-
-        return catatan.peringatan(tenantId, hanyaBelumDibaca, tingkatPeringatan(severity),
-                Batas.antara(batas, 50, 500));
-    }
-
-    /** Sama seperti {@link #tingkatDiminta}, untuk tingkat peringatan. */
-    static List<String> tingkatPeringatan(List<String> mentah) {
-        Set<Severity> hasil = EnumSet.noneOf(Severity.class);
-        if (mentah == null) return List.of();
-
-        for (String bagian : mentah) {
-            if (bagian == null) continue;
-
-            for (String teks : bagian.split(",")) {
-                if (teks.isBlank()) continue;
-
-                Severity tingkat = Severity.dari(teks);
-
-                if (tingkat == null) {
-                    throw ApiException.salah("Tingkat peringatan tidak dikenal: '" + teks.trim() + "'.");
-                }
-
-                hasil.add(tingkat);
-            }
-        }
-
-        return hasil.stream().map(Severity::nilai).toList();
-    }
-
-    public Map<String, Object> tandaiDibaca(UUID tenantId, long id) {
-        Map<String, Object> hasil = new LinkedHashMap<>();
-        hasil.put("ok", true);
-        hasil.put("changed", catatan.tandaiDibaca(tenantId, id));
-
-        return hasil;
-    }
-
-    /**
-     * Isi lonceng di bilah atas: jumlah yang belum dibaca dan beberapa yang
-     * terbaru. Terpisah dari dasbor supaya lonceng bekerja di halaman mana
-     * pun — dasbor kini milik satu folder, sedangkan peringatan milik penyewa.
-     */
-    public Map<String, Object> ringkasanPeringatan(UUID tenantId) {
-        Map<String, Object> hasil = new LinkedHashMap<>();
-        hasil.put("unread", catatan.belumDibaca(tenantId));
-        hasil.put("recent", catatan.peringatan(tenantId, false, 8));
-
-        return hasil;
-    }
-
-    public Map<String, Object> tandaiSemuaDibaca(UUID tenantId) {
-        Map<String, Object> hasil = new LinkedHashMap<>();
-        hasil.put("ok", true);
-        hasil.put("changed", catatan.tandaiSemuaDibaca(tenantId));
-
-        return hasil;
+        return new DeletedCountResponse(true, logRepository.deleteOlderThan(principal.tenantId(), days));
     }
 }

@@ -22,7 +22,7 @@ public enum JobState {
     STOPPED;
 
     /** Sudah berakhir; tidak akan berubah lagi sendiri. */
-    public boolean selesai() {
+    public boolean isFinished() {
         return this == SUCCESSFUL || this == FAULTED || this == STOPPED;
     }
 
@@ -32,11 +32,11 @@ public enum JobState {
      * <p>Mengembalikan null, bukan melempar: keadaan tak dikenal adalah
      * permintaan yang salah bentuk (400), bukan kerusakan server (500).
      */
-    public static JobState dari(String teks) {
-        if (teks == null || teks.isBlank()) return null;
+    public static JobState parse(String text) {
+        if (text == null || text.isBlank()) return null;
 
         try {
-            return valueOf(teks.trim().toUpperCase(Locale.ROOT));
+            return valueOf(text.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             return null;
         }

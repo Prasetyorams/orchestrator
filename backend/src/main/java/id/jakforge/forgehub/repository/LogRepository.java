@@ -1,85 +1,75 @@
 package id.jakforge.forgehub.repository;
 
 import id.jakforge.forgehub.model.LogLevel;
-import id.jakforge.forgehub.model.Severity;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 /**
- * Catatan dan peringatan.
+ * Catatan jalannya automasi — dari robot, dan dari ForgeHub sendiri.
  *
- * <p>Dua tabel, satu repository, karena keduanya adalah jejak kejadian dan
- * hampir setiap kesalahan menulis ke keduanya sekaligus: log untuk yang
- * mencarinya, peringatan untuk yang tidak.
+ * <p>Peringatan ada di {@link AlertRepository}: hampir setiap kesalahan menulis
+ * ke keduanya sekaligus — catatan untuk yang mencarinya, peringatan untuk yang
+ * tidak.
  */
 @Repository
+@RequiredArgsConstructor
 public class LogRepository {
 
-    private final Db db;
-
-    public LogRepository(Db db) {
-        this.db = db;
-    }
-
-    // -----------------------------------------------------------------
-    // Catatan
-    // -----------------------------------------------------------------
+    private final Database database;
 
     /**
-     * @param tingkat nama tingkat yang boleh tampil, persis seperti tersimpan.
-     *                Kosong berarti semua tingkat — selain rincian, yang
-     *                SELALU disaring.
-     */
-    /**
+     * @param levels   nama tingkat yang boleh tampil, persis seperti tersimpan.
+     *                 Kosong berarti semua tingkat — selain rincian, yang
+     *                 SELALU disaring.
      * @param folderId null berarti seluruh penyewa. Catatan tidak menyimpan
      *                 foldernya: catatan sebuah pekerjaan milik folder
      *                 pekerjaannya, dan catatan tanpa pekerjaan — yang ditulis
      *                 ForgeHub sendiri — milik folder prosesnya.
      */
-    public List<Map<String, Object>> cari(UUID tenantId, Collection<String> tingkat, String robot,
-                                          String process, UUID jobId, UUID folderId, int batas) {
-        List<String> where = new ArrayList<>();
+    public List<Map<String, Object>> search(UUID tenantId, Collection<String> levels, String robotName,
+                                            String processName, UUID jobId, UUID folderId, int limit) {
+        List<String> conditions = new ArrayList<>();
         List<Object> args = new ArrayList<>();
 
-        where.add("tenant_id = ?");
+        conditions.add("tenant_id = ?");
         args.add(tenantId);
 
         // Baris TRACE/DEBUG tidak lagi diterima, tapi yang tersimpan SEBELUM
         // aturan itu — termasuk hasil pindahan dari ForgeHub .NET — masih ada
         // di tabel. Disaring di sini supaya ketiga tampilan log (Catatan,
         // detail proses, detail pekerjaan) sama-sama tidak menampilkannya.
-        List<String> rincian = LogLevel.namaRincian();
-        where.add("level NOT IN (" + tandaTanya(rincian.size()) + ")");
-        args.addAll(rincian);
+        List<String> verboseLevels = LogLevel.verboseLevelNames();
+        conditions.add("level NOT IN (" + Database.placeholders(verboseLevels.size()) + ")");
+        args.addAll(verboseLevels);
 
-        if (tingkat != null && !tingkat.isEmpty()) {
-            where.add("level IN (" + tandaTanya(tingkat.size()) + ")");
-            args.addAll(tingkat);
+        if (levels != null && !levels.isEmpty()) {
+            conditions.add("level IN (" + Database.placeholders(levels.size()) + ")");
+            args.addAll(levels);
         }
 
-        if (robot != null && !robot.isBlank()) {
-            where.add("robot_name = ?");
-            args.add(robot);
+        if (robotName != null && !robotName.isBlank()) {
+            conditions.add("robot_name = ?");
+            args.add(robotName);
         }
 
-        if (process != null && !process.isBlank()) {
-            where.add("process_name = ?");
-            args.add(process);
+        if (processName != null && !processName.isBlank()) {
+            conditions.add("process_name = ?");
+            args.add(processName);
         }
 
         if (jobId != null) {
-            where.add("job_id = ?");
+            conditions.add("job_id = ?");
             args.add(jobId);
         }
 
         if (folderId != null) {
-            where.add("""
+            conditions.add("""
                     (job_id IN (SELECT j.id FROM jobs j WHERE j.tenant_id = ? AND j.folder_id = ?)
                      OR (job_id IS NULL
                          AND process_name IN (SELECT p.name FROM processes p
@@ -90,15 +80,15 @@ public class LogRepository {
             args.add(folderId);
         }
 
-        args.add(batas);
+        args.add(limit);
 
-        return db.rows("""
+        return database.queryRows("""
                 SELECT id, level, message, robot_name, machine_name, process_name, job_id, logged_at
                   FROM logs
                  WHERE %s
                  ORDER BY id DESC
                  LIMIT ?
-                """.formatted(String.join(" AND ", where)), args.toArray());
+                """.formatted(String.join(" AND ", conditions)), args.toArray());
     }
 
     /**
@@ -107,82 +97,26 @@ public class LogRepository {
      * <p>loggedAt yang tidak dikirim diisi waktu server. Robot yang jamnya
      * meleset tetap menghasilkan catatan yang urut menurut kedatangannya.
      */
-    public void tulis(UUID tenantId, LogLevel level, String pesan, String robot, String mesin,
-                      String proses, UUID jobId, String waktu) {
-        db.exec("""
+    public void insert(UUID tenantId, LogLevel level, String message, String robotName, String machineName,
+                       String processName, UUID jobId, String loggedAt) {
+        database.update("""
                 INSERT INTO logs (tenant_id, level, message, robot_name, machine_name,
                                   process_name, job_id, logged_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?::timestamptz, now()))
-                """, tenantId, level.name(), pesan, robot, mesin, proses, jobId, waktu);
+                """, tenantId, level.name(), message, robotName, machineName, processName, jobId, loggedAt);
     }
 
     /** Baris tanpa robot: dipakai saat ForgeHub sendiri yang mencatat. */
-    public void tulisSistem(UUID tenantId, String pesan, String proses, UUID jobId) {
-        db.exec("""
+    public void insertSystemEntry(UUID tenantId, String message, String processName, UUID jobId) {
+        database.update("""
                 INSERT INTO logs (tenant_id, level, message, process_name, job_id, logged_at)
                 VALUES (?, 'INFO', ?, ?, ?, now())
-                """, tenantId, pesan, proses, jobId);
+                """, tenantId, message, processName, jobId);
     }
 
-    public int buangLebihTuaDari(UUID tenantId, int hari) {
-        return db.exec("""
+    public int deleteOlderThan(UUID tenantId, int days) {
+        return database.update("""
                 DELETE FROM logs WHERE tenant_id = ? AND logged_at < now() - make_interval(days => ?)
-                """, tenantId, hari);
-    }
-
-
-    // -----------------------------------------------------------------
-    // Peringatan
-    // -----------------------------------------------------------------
-
-    public List<Map<String, Object>> peringatan(UUID tenantId, boolean hanyaBelumDibaca, int batas) {
-        return peringatan(tenantId, hanyaBelumDibaca, List.of(), batas);
-    }
-
-    /** @param tingkat nilai severity yang boleh tampil; kosong berarti semua. */
-    public List<Map<String, Object>> peringatan(UUID tenantId, boolean hanyaBelumDibaca,
-                                                Collection<String> tingkat, int batas) {
-        List<Object> args = new ArrayList<>(List.of(tenantId, hanyaBelumDibaca));
-        String saringTingkat = "";
-
-        if (!tingkat.isEmpty()) {
-            saringTingkat = " AND severity IN (" + tandaTanya(tingkat.size()) + ")";
-            args.addAll(tingkat);
-        }
-
-        args.add(batas);
-
-        return db.rows("""
-                SELECT id, severity, title, message, source, is_read, created_at
-                  FROM alerts
-                 WHERE tenant_id = ? AND (NOT ? OR NOT is_read)%s
-                 ORDER BY id DESC
-                 LIMIT ?
-                """.formatted(saringTingkat), args.toArray());
-    }
-
-    public void catatPeringatan(UUID tenantId, Severity tingkat, String judul,
-                                String pesan, String sumber) {
-        db.exec("""
-                INSERT INTO alerts (tenant_id, severity, title, message, source, is_read, created_at)
-                VALUES (?, ?, ?, ?, ?, FALSE, now())
-                """, tenantId, tingkat.nilai(), judul, pesan, sumber);
-    }
-
-    public int tandaiDibaca(UUID tenantId, long id) {
-        return db.exec("UPDATE alerts SET is_read = TRUE WHERE tenant_id = ? AND id = ?", tenantId, id);
-    }
-
-    public int tandaiSemuaDibaca(UUID tenantId) {
-        return db.exec("UPDATE alerts SET is_read = TRUE WHERE tenant_id = ? AND NOT is_read", tenantId);
-    }
-
-    public long belumDibaca(UUID tenantId) {
-        return db.count("SELECT count(*) FROM alerts WHERE tenant_id = ? AND NOT is_read", tenantId);
-    }
-
-    /** "?, ?, ?" — nilainya tetap dikirim sebagai parameter, tidak pernah ditempel ke SQL. */
-    private static String tandaTanya(int jumlah) {
-        return String.join(", ", Collections.nCopies(jumlah, "?"));
+                """, tenantId, days);
     }
 }

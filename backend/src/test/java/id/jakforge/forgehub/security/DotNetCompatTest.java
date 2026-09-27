@@ -133,18 +133,18 @@ class DotNetCompatTest {
         assertEquals(null, box.protect(""));
 
         // Satu bita diubah: tag GCM harus menolaknya.
-        StringBuilder rusak = new StringBuilder(PACKED_B64);
-        rusak.setCharAt(40, rusak.charAt(40) == 'A' ? 'B' : 'A');
-        assertEquals(null, box.unprotect(rusak.toString()));
+        StringBuilder tampered = new StringBuilder(PACKED_B64);
+        tampered.setCharAt(40, tampered.charAt(40) == 'A' ? 'B' : 'A');
+        assertEquals(null, box.unprotect(tampered.toString()));
     }
 
     @Test
     @DisplayName("kunci lain tidak bisa membuka paket yang sama")
     void differentKeyCannotOpen(@org.junit.jupiter.api.io.TempDir Path dir) throws IOException {
-        Path lain = dir.resolve("lain.key");
-        Files.writeString(lain, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
+        Path otherKey = dir.resolve("other.key");
+        Files.writeString(otherKey, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
 
-        assertEquals(null, new SecretBox(lain.toString()).unprotect(PACKED_B64),
+        assertEquals(null, new SecretBox(otherKey.toString()).unprotect(PACKED_B64),
                 "Kalau ini berhasil, kuncinya tidak benar-benar dipakai.");
     }
 

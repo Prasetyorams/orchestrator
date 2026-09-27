@@ -1,9 +1,16 @@
 package id.jakforge.forgehub.service;
 
 import id.jakforge.forgehub.common.ApiException;
-import id.jakforge.forgehub.dto.Permintaan;
+import id.jakforge.forgehub.dto.request.AssignRobotRequest;
+import id.jakforge.forgehub.dto.request.AssignUserRequest;
+import id.jakforge.forgehub.dto.request.FolderRequest;
+import id.jakforge.forgehub.dto.response.CreatedResponse;
 import id.jakforge.forgehub.repository.FolderRepository;
+import id.jakforge.forgehub.repository.RobotRepository;
+import id.jakforge.forgehub.repository.UserRepository;
 import id.jakforge.forgehub.security.ForgeHubPrincipal;
+import id.jakforge.forgehub.security.PermissionChecker;
+import id.jakforge.forgehub.support.TestProperties;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
@@ -15,6 +22,8 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -41,373 +50,421 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class FolderServiceTest {
 
-    private final UUID penyewa = UUID.randomUUID();
+    private final UUID tenantId = UUID.randomUUID();
 
-    private final ForgeHubPrincipal admin =
-            new ForgeHubPrincipal(UUID.randomUUID(), penyewa, "FH_Admin", "Administrator");
-    private final ForgeHubPrincipal budi =
-            new ForgeHubPrincipal(UUID.randomUUID(), penyewa, "budi", "Automation User");
+    private final ForgeHubPrincipal administrator =
+            new ForgeHubPrincipal(UUID.randomUUID(), tenantId, "FH_Admin", "Administrator");
+    private final ForgeHubPrincipal automationUser =
+            new ForgeHubPrincipal(UUID.randomUUID(), tenantId, "budi", "Automation User");
 
-    private final FolderPalsu tabel = new FolderPalsu();
     // Administrator boleh segalanya; Automation User tidak punya izin folder apa pun.
-    private final FolderService layanan =
-            new FolderService(tabel, (p, izin) -> "Administrator".equals(p.role()));
+    private final PermissionChecker administratorOnly = (principal, permission) ->
+            "Administrator".equals(principal.role());
 
-    private final UUID shared = tabel.tambah(null, "Shared", true, null);
-    private final UUID keuangan = tabel.tambah(null, "Keuangan", false, null);
-    private final UUID tagihan = tabel.tambah(keuangan, "Tagihan", false, null);
-    private final UUID arsip = tabel.tambah(tagihan, "Arsip", false, null);
-    private final UUID gudang = tabel.tambah(null, "Gudang", false, null);
+    private final FakeFolderRepository folders = new FakeFolderRepository();
+    private final FakeUserRepository users = new FakeUserRepository();
+    private final FakeRobotRepository robots = new FakeRobotRepository();
+
+    private final FolderAccessService folderAccess = new FolderAccessService(folders, administratorOnly);
+    private final FolderService folderService =
+            new FolderService(folders, folderAccess, administratorOnly, users, robots);
+
+    private final UUID sharedFolder = folders.add(null, "Shared", true, null);
+    private final UUID financeFolder = folders.add(null, "Keuangan", false, null);
+    private final UUID invoicesFolder = folders.add(financeFolder, "Tagihan", false, null);
+    private final UUID archiveFolder = folders.add(invoicesFolder, "Arsip", false, null);
+    private final UUID warehouseFolder = folders.add(null, "Gudang", false, null);
 
     {
-        tabel.pengguna.add(tagihan + "/" + budi.userId());
+        folders.userAssignments.add(invoicesFolder + "/" + automationUser.userId());
     }
 
     // ---------- pohon ----------
 
     @Test
     @DisplayName("Administrator melihat semua folder bersama, semuanya bisa dibuka")
-    void adminMelihatSemua() {
-        List<Map<String, Object>> folder = daftar(admin);
+    void administratorSeesAllFolders() {
+        List<Map<String, Object>> tree = treeOf(administrator);
 
-        assertEquals(5, folder.size());
-        assertTrue(folder.stream().allMatch(f -> Boolean.TRUE.equals(f.get("accessible"))));
+        assertEquals(5, tree.size());
+        assertTrue(tree.stream().allMatch(folder -> Boolean.TRUE.equals(folder.get("accessible"))));
     }
 
     @Test
     @DisplayName("pengguna lain melihat foldernya beserta leluhurnya, leluhur itu tidak bisa dibuka")
-    void penggunaMelihatCabangnya() {
-        Map<String, Boolean> terlihat = new HashMap<>();
-        for (Map<String, Object> f : daftar(budi)) terlihat.put((String) f.get("name"), (Boolean) f.get("accessible"));
+    void userSeesBranchWithAncestors() {
+        Map<String, Boolean> visible = new HashMap<>();
+        for (Map<String, Object> folder : treeOf(automationUser)) {
+            visible.put((String) folder.get("name"), (Boolean) folder.get("accessible"));
+        }
 
-        assertEquals(Map.of("Keuangan", false, "Tagihan", true), terlihat);
+        assertEquals(Map.of("Keuangan", false, "Tagihan", true), visible);
     }
 
     @Test
     @DisplayName("Folder Saya milik sendiri ikut; milik orang lain tidak pernah muncul di pohon")
-    void folderPribadi() {
-        layanan.pribadi(budi);
+    void personalFolderOnlyForOwner() {
+        folderService.getOrCreatePersonalFolder(automationUser);
 
-        assertEquals("Folder Saya", ((Map<?, ?>) layanan.daftar(budi).get("personal")).get("name"));
-        assertNull(layanan.daftar(admin).get("personal"));
-        assertTrue(daftar(admin).stream().noneMatch(f -> "Folder Saya".equals(f.get("name"))));
+        assertEquals("Folder Saya", folderService.getTree(automationUser).personal().get("name"));
+        assertNull(folderService.getTree(administrator).personal());
+        assertTrue(treeOf(administrator).stream().noneMatch(folder -> "Folder Saya".equals(folder.get("name"))));
     }
 
     // ---------- hak ----------
 
     @Test
     @DisplayName("folder yang tidak ditugaskan ditolak 403; Folder Saya orang lain dijawab 404")
-    void hakMembuka() {
-        assertStatus(HttpStatus.FORBIDDEN, () -> layanan.saring(budi, gudang.toString()));
-        assertStatus(HttpStatus.FORBIDDEN, () -> layanan.saring(budi, keuangan.toString()));
-        assertEquals(tagihan, layanan.saring(budi, tagihan.toString()));
+    void accessRules() {
+        assertStatus(HttpStatus.FORBIDDEN, () -> folderAccess.resolveFolderFilter(automationUser, warehouseFolder.toString()));
+        assertStatus(HttpStatus.FORBIDDEN, () -> folderAccess.resolveFolderFilter(automationUser, financeFolder.toString()));
+        assertEquals(invoicesFolder, folderAccess.resolveFolderFilter(automationUser, invoicesFolder.toString()));
 
-        UUID milikAdmin = UUID.fromString((String) layanan.pribadi(admin).get("id"));
-        assertStatus(HttpStatus.NOT_FOUND, () -> layanan.saring(budi, milikAdmin.toString()));
+        UUID administratorsFolder = UUID.fromString(
+                (String) folderService.getOrCreatePersonalFolder(administrator).get("id"));
+        assertStatus(HttpStatus.NOT_FOUND,
+                () -> folderAccess.resolveFolderFilter(automationUser, administratorsFolder.toString()));
 
-        UUID milikBudi = UUID.fromString((String) layanan.pribadi(budi).get("id"));
-        assertEquals(milikBudi, layanan.saring(budi, milikBudi.toString()));
+        UUID usersOwnFolder = UUID.fromString((String) folderService.getOrCreatePersonalFolder(automationUser).get("id"));
+        assertEquals(usersOwnFolder, folderAccess.resolveFolderFilter(automationUser, usersOwnFolder.toString()));
     }
 
     @Test
     @DisplayName("tanpa folder berarti seluruh penyewa; id yang rusak dijawab 404")
-    void tanpaFolder() {
-        assertNull(layanan.saring(budi, null));
-        assertNull(layanan.saring(budi, " "));
-        assertStatus(HttpStatus.NOT_FOUND, () -> layanan.saring(budi, "bukan-uuid"));
+    void noFolderMeansWholeTenant() {
+        assertNull(folderAccess.resolveFolderFilter(automationUser, null));
+        assertNull(folderAccess.resolveFolderFilter(automationUser, " "));
+        assertStatus(HttpStatus.NOT_FOUND, () -> folderAccess.resolveFolderFilter(automationUser, "bukan-uuid"));
     }
 
     // ---------- membuat dan mengubah ----------
 
     @Test
-    @DisplayName("hanya Administrator yang membuat folder")
-    void buatHanyaAdmin() {
-        assertStatus(HttpStatus.FORBIDDEN, () -> layanan.buat(budi, folder("Baru", null)));
+    @DisplayName("hanya peran dengan folders.create yang membuat folder")
+    void onlyPermittedRoleCreatesFolders() {
+        assertStatus(HttpStatus.FORBIDDEN, () -> folderService.create(automationUser, folderRequest("Baru", null)));
     }
 
     @Test
     @DisplayName("subfolder baru mewarisi pengguna dan robot induknya")
-    void subfolderMewarisi() {
-        tabel.robot.add(tagihan + "/" + UUID.randomUUID());
+    void subfolderInheritsAssignments() {
+        folders.robotAssignments.add(invoicesFolder + "/" + UUID.randomUUID());
 
-        Map<String, Object> hasil = layanan.buat(admin, folder("Bulanan", tagihan.toString()));
-        UUID baru = UUID.fromString((String) hasil.get("id"));
+        CreatedResponse created = folderService.create(administrator, folderRequest("Bulanan", invoicesFolder.toString()));
+        UUID newFolder = UUID.fromString(created.id());
 
-        assertTrue(tabel.pengguna.contains(baru + "/" + budi.userId()));
-        assertEquals(1, tabel.robot.stream().filter(r -> r.startsWith(baru + "/")).count());
+        assertTrue(folders.userAssignments.contains(newFolder + "/" + automationUser.userId()));
+        assertEquals(1, folders.robotAssignments.stream().filter(robot -> robot.startsWith(newFolder + "/")).count());
     }
 
     @Test
     @DisplayName("nama kembar di tempat yang sama ditolak 409, tanpa membedakan huruf besar")
-    void namaKembar() {
-        assertStatus(HttpStatus.CONFLICT, () -> layanan.buat(admin, folder("keuangan", null)));
+    void duplicateNameIsConflict() {
+        assertStatus(HttpStatus.CONFLICT, () -> folderService.create(administrator, folderRequest("keuangan", null)));
 
         // Di induk lain, nama yang sama boleh.
-        layanan.buat(admin, folder("Keuangan", gudang.toString()));
+        folderService.create(administrator, folderRequest("Keuangan", warehouseFolder.toString()));
     }
 
     @Test
     @DisplayName("nama dengan garis miring ditolak: garis miring dipakai untuk menuliskan jalur")
-    void garisMiring() {
-        assertStatus(HttpStatus.BAD_REQUEST, () -> layanan.buat(admin, folder("A/B", null)));
+    void slashInNameIsRejected() {
+        assertStatus(HttpStatus.BAD_REQUEST, () -> folderService.create(administrator, folderRequest("A/B", null)));
     }
 
     @Test
     @DisplayName("folder tidak bisa dipindah ke dalam cabangnya sendiri")
-    void pindahKeCabangSendiri() {
-        assertStatus(HttpStatus.BAD_REQUEST,
-                () -> layanan.ubah(admin, keuangan.toString(), folder("Keuangan", arsip.toString())));
-        assertStatus(HttpStatus.BAD_REQUEST,
-                () -> layanan.ubah(admin, keuangan.toString(), folder("Keuangan", keuangan.toString())));
+    void cannotMoveIntoOwnBranch() {
+        assertStatus(HttpStatus.BAD_REQUEST, () -> folderService.update(administrator, financeFolder.toString(),
+                folderRequest("Keuangan", archiveFolder.toString())));
+        assertStatus(HttpStatus.BAD_REQUEST, () -> folderService.update(administrator, financeFolder.toString(),
+                folderRequest("Keuangan", financeFolder.toString())));
 
-        layanan.ubah(admin, arsip.toString(), folder("Arsip", gudang.toString()));
-        assertEquals(gudang.toString(), tabel.folder.get(arsip).get("parentId"));
+        folderService.update(administrator, archiveFolder.toString(), folderRequest("Arsip", warehouseFolder.toString()));
+        assertEquals(warehouseFolder.toString(), folders.rows.get(archiveFolder).get("parentId"));
     }
 
     @Test
     @DisplayName("folder bawaan boleh berganti nama tapi tetap di akar")
-    void bawaanDiAkar() {
-        assertStatus(HttpStatus.BAD_REQUEST,
-                () -> layanan.ubah(admin, shared.toString(), folder("Shared", gudang.toString())));
+    void defaultFolderStaysAtRoot() {
+        assertStatus(HttpStatus.BAD_REQUEST, () -> folderService.update(administrator, sharedFolder.toString(),
+                folderRequest("Shared", warehouseFolder.toString())));
 
-        layanan.ubah(admin, shared.toString(), folder("Bersama", null));
-        assertEquals("Bersama", tabel.folder.get(shared).get("name"));
+        folderService.update(administrator, sharedFolder.toString(), folderRequest("Bersama", null));
+        assertEquals("Bersama", folders.rows.get(sharedFolder).get("name"));
+    }
+
+    @Test
+    @DisplayName("parentId yang tidak disebut membiarkan foldernya di tempatnya")
+    void missingParentIdKeepsParent() {
+        folderService.update(administrator, archiveFolder.toString(),
+                FolderRequest.fromBody(Map.<String, Object>of("name", "Arsip Lama")));
+
+        assertEquals("Arsip Lama", folders.rows.get(archiveFolder).get("name"));
+        assertEquals(invoicesFolder.toString(), folders.rows.get(archiveFolder).get("parentId"));
     }
 
     // ---------- menghapus ----------
 
     @Test
     @DisplayName("folder bawaan, folder bersubfolder, dan folder berisi tidak bisa dihapus")
-    void hapusDitolak() {
-        assertStatus(HttpStatus.BAD_REQUEST, () -> layanan.hapus(admin, shared.toString()));
-        assertStatus(HttpStatus.BAD_REQUEST, () -> layanan.hapus(admin, tagihan.toString()));
+    void deleteIsRejected() {
+        assertStatus(HttpStatus.BAD_REQUEST, () -> folderService.delete(administrator, sharedFolder.toString()));
+        assertStatus(HttpStatus.BAD_REQUEST, () -> folderService.delete(administrator, invoicesFolder.toString()));
 
-        tabel.isi.put(gudang, 2L);
-        assertStatus(HttpStatus.BAD_REQUEST, () -> layanan.hapus(admin, gudang.toString()));
+        folders.contentCounts.put(warehouseFolder, 2L);
+        assertStatus(HttpStatus.BAD_REQUEST, () -> folderService.delete(administrator, warehouseFolder.toString()));
     }
 
     @Test
     @DisplayName("folder kosong terhapus, dan riwayat pekerjaannya pindah ke induknya")
-    void hapusKosong() {
-        layanan.hapus(admin, arsip.toString());
+    void emptyFolderIsDeletedAndJobsMoveToParent() {
+        folderService.delete(administrator, archiveFolder.toString());
 
-        assertFalse(tabel.folder.containsKey(arsip));
-        assertEquals(List.of(arsip + "->" + tagihan), tabel.pekerjaanDipindah);
+        assertFalse(folders.rows.containsKey(archiveFolder));
+        assertEquals(List.of(archiveFolder + "->" + invoicesFolder), folders.movedJobs);
     }
 
     @Test
     @DisplayName("riwayat folder akar pindah ke folder bawaan")
-    void hapusAkar() {
-        layanan.hapus(admin, gudang.toString());
+    void rootFolderJobsMoveToDefaultFolder() {
+        folderService.delete(administrator, warehouseFolder.toString());
 
-        assertEquals(List.of(gudang + "->" + shared), tabel.pekerjaanDipindah);
+        assertEquals(List.of(warehouseFolder + "->" + sharedFolder), folders.movedJobs);
     }
 
     // ---------- penugasan ----------
 
     @Test
-    @DisplayName("robot Folder Saya diatur pemiliknya sendiri, robot folder bersama hanya oleh Administrator")
-    void aturRobot() {
-        tabel.idRobot.put("PC-Budi", UUID.randomUUID());
-        String pribadi = (String) layanan.pribadi(budi).get("id");
+    @DisplayName("robot Folder Saya diatur pemiliknya sendiri, robot folder bersama hanya oleh pengelola folder")
+    void personalFolderRobotsManagedByOwner() {
+        robots.idsByName.put("PC-Budi", UUID.randomUUID());
+        String personalFolder = (String) folderService.getOrCreatePersonalFolder(automationUser).get("id");
 
-        layanan.tugaskanRobot(budi, pribadi, "PC-Budi");
-        assertTrue(tabel.robot.contains(pribadi + "/" + tabel.idRobot.get("PC-Budi")));
+        folderService.assignRobot(automationUser, personalFolder, new AssignRobotRequest("PC-Budi"));
+        assertTrue(folders.robotAssignments.contains(personalFolder + "/" + robots.idsByName.get("PC-Budi")));
 
-        assertStatus(HttpStatus.FORBIDDEN, () -> layanan.tugaskanRobot(budi, tagihan.toString(), "PC-Budi"));
+        assertStatus(HttpStatus.FORBIDDEN, () ->
+                folderService.assignRobot(automationUser, invoicesFolder.toString(), new AssignRobotRequest("PC-Budi")));
     }
 
     @Test
     @DisplayName("pengguna tidak bisa ditugaskan ke Folder Saya orang lain")
-    void penggunaKeFolderPribadi() {
-        tabel.idPengguna.put("budi", budi.userId());
-        String pribadi = (String) layanan.pribadi(admin).get("id");
+    void cannotAssignUserToPersonalFolder() {
+        users.idsByUsername.put("budi", automationUser.userId());
+        String personalFolder = (String) folderService.getOrCreatePersonalFolder(administrator).get("id");
 
-        assertStatus(HttpStatus.BAD_REQUEST, () -> layanan.tugaskanPengguna(admin, pribadi, "budi"));
+        assertStatus(HttpStatus.BAD_REQUEST, () ->
+                folderService.assignUser(administrator, personalFolder, new AssignUserRequest("budi")));
+    }
+
+    @Test
+    @DisplayName("menugaskan pengguna yang tidak ada dijawab 404")
+    void assigningUnknownUserIsNotFound() {
+        assertStatus(HttpStatus.NOT_FOUND, () ->
+                folderService.assignUser(administrator, invoicesFolder.toString(), new AssignUserRequest("siapa")));
     }
 
     // ---------- alat ----------
 
-    private List<Map<String, Object>> daftar(ForgeHubPrincipal p) {
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> folder = (List<Map<String, Object>>) layanan.daftar(p).get("folders");
-        return folder;
+    private List<Map<String, Object>> treeOf(ForgeHubPrincipal principal) {
+        return folderService.getTree(principal).folders();
     }
 
-    private static Permintaan.Folder folder(String nama, String induk) {
+    private static FolderRequest folderRequest(String name, String parentId) {
         Map<String, Object> body = new HashMap<>();
-        body.put("name", nama);
-        body.put("parentId", induk);
-        return Permintaan.Folder.dari(body);
+        body.put("name", name);
+        body.put("parentId", parentId);
+        return FolderRequest.fromBody(body);
     }
 
-    private static void assertStatus(HttpStatus status, Executable aksi) {
-        assertEquals(status, assertThrows(ApiException.class, aksi).status());
+    private static void assertStatus(HttpStatus status, Executable action) {
+        assertEquals(status, assertThrows(ApiException.class, action).status());
     }
 
     /**
      * Tabel folder di memori, meniru kueri FolderRepository yang dipakai
-     * layanannya. Baris berbentuk seperti keluaran Db: id sebagai teks.
+     * layanannya. Baris berbentuk seperti keluaran Database: id sebagai teks.
      */
-    private static final class FolderPalsu extends FolderRepository {
+    private static final class FakeFolderRepository extends FolderRepository {
 
-        final Map<UUID, Map<String, Object>> folder = new LinkedHashMap<>();
-        final Set<String> pengguna = new HashSet<>();
-        final Set<String> robot = new HashSet<>();
-        final Map<UUID, Long> isi = new HashMap<>();
-        final Map<String, UUID> idPengguna = new HashMap<>();
-        final Map<String, UUID> idRobot = new HashMap<>();
-        final List<String> pekerjaanDipindah = new ArrayList<>();
+        final Map<UUID, Map<String, Object>> rows = new LinkedHashMap<>();
+        final Set<String> userAssignments = new HashSet<>();
+        final Set<String> robotAssignments = new HashSet<>();
+        final Map<UUID, Long> contentCounts = new HashMap<>();
+        final List<String> movedJobs = new ArrayList<>();
 
-        FolderPalsu() {
+        FakeFolderRepository() {
             super(null);
         }
 
-        UUID tambah(UUID induk, String nama, boolean bawaan, UUID pemilik) {
-            UUID id = UUID.randomUUID();
+        UUID add(UUID parentId, String name, boolean isDefault, UUID ownerId) {
+            UUID folderId = UUID.randomUUID();
 
-            Map<String, Object> f = new LinkedHashMap<>();
-            f.put("id", id.toString());
-            f.put("parentId", induk == null ? null : induk.toString());
-            f.put("name", nama);
-            f.put("description", null);
-            f.put("isDefault", bawaan);
-            f.put("personal", pemilik != null);
-            f.put("ownerId", pemilik == null ? null : pemilik.toString());
-            folder.put(id, f);
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", folderId.toString());
+            row.put("parentId", parentId == null ? null : parentId.toString());
+            row.put("name", name);
+            row.put("description", null);
+            row.put("isDefault", isDefault);
+            row.put("personal", ownerId != null);
+            row.put("ownerId", ownerId == null ? null : ownerId.toString());
+            rows.put(folderId, row);
 
-            return id;
+            return folderId;
         }
 
-        private static Map<String, Object> tanpaPemilik(Map<String, Object> f) {
-            Map<String, Object> salin = new LinkedHashMap<>(f);
-            salin.remove("ownerId");
-            return salin;
-        }
-
-        @Override
-        public List<Map<String, Object>> semua(UUID tenantId) {
-            return folder.values().stream().filter(f -> f.get("ownerId") == null)
-                    .map(FolderPalsu::tanpaPemilik).toList();
+        private static Map<String, Object> withoutOwner(Map<String, Object> row) {
+            Map<String, Object> copy = new LinkedHashMap<>(row);
+            copy.remove("ownerId");
+            return copy;
         }
 
         @Override
-        public Map<String, Object> pribadi(UUID tenantId, UUID userId) {
-            return folder.values().stream().filter(f -> userId.toString().equals(f.get("ownerId")))
-                    .findFirst().map(FolderPalsu::tanpaPemilik).orElse(null);
+        public List<Map<String, Object>> findAllShared(UUID tenantId) {
+            return rows.values().stream().filter(row -> row.get("ownerId") == null)
+                    .map(FakeFolderRepository::withoutOwner).toList();
         }
 
         @Override
-        public Map<String, Object> satu(UUID tenantId, UUID id) {
-            Map<String, Object> f = folder.get(id);
-            return f == null ? null : new LinkedHashMap<>(f);
+        public Optional<Map<String, Object>> findPersonal(UUID tenantId, UUID userId) {
+            return rows.values().stream().filter(row -> userId.toString().equals(row.get("ownerId")))
+                    .findFirst().map(FakeFolderRepository::withoutOwner);
         }
 
         @Override
-        public Set<UUID> ditugaskan(UUID tenantId, UUID userId) {
-            Set<UUID> hasil = new HashSet<>();
-            for (String p : pengguna) {
-                if (p.endsWith("/" + userId)) hasil.add(UUID.fromString(p.substring(0, 36)));
+        public Optional<Map<String, Object>> findById(UUID tenantId, UUID folderId) {
+            Map<String, Object> row = rows.get(folderId);
+            return row == null ? Optional.empty() : Optional.of(new LinkedHashMap<>(row));
+        }
+
+        @Override
+        public Set<UUID> findAssignedFolderIds(UUID tenantId, UUID userId) {
+            Set<UUID> folderIds = new HashSet<>();
+            for (String assignment : userAssignments) {
+                if (assignment.endsWith("/" + userId)) folderIds.add(UUID.fromString(assignment.substring(0, 36)));
             }
-            return hasil;
+            return folderIds;
         }
 
         @Override
-        public UUID bawaan(UUID tenantId) {
-            return folder.entrySet().stream().filter(e -> Boolean.TRUE.equals(e.getValue().get("isDefault")))
+        public UUID findDefaultFolderId(UUID tenantId) {
+            return rows.entrySet().stream().filter(entry -> Boolean.TRUE.equals(entry.getValue().get("isDefault")))
                     .map(Map.Entry::getKey).findFirst().orElseThrow();
         }
 
         @Override
-        public Set<UUID> keturunan(UUID tenantId, UUID id) {
-            Set<UUID> hasil = new HashSet<>();
-            for (Map.Entry<UUID, Map<String, Object>> e : folder.entrySet()) {
-                if (id.toString().equals(e.getValue().get("parentId"))) {
-                    hasil.add(e.getKey());
-                    hasil.addAll(keturunan(tenantId, e.getKey()));
+        public Set<UUID> findDescendantIds(UUID tenantId, UUID folderId) {
+            Set<UUID> descendants = new HashSet<>();
+            for (Map.Entry<UUID, Map<String, Object>> entry : rows.entrySet()) {
+                if (folderId.toString().equals(entry.getValue().get("parentId"))) {
+                    descendants.add(entry.getKey());
+                    descendants.addAll(findDescendantIds(tenantId, entry.getKey()));
                 }
             }
-            return hasil;
+            return descendants;
         }
 
         @Override
-        public boolean namaDipakai(UUID tenantId, UUID parentId, String nama, UUID kecuali) {
-            return folder.entrySet().stream().anyMatch(e -> e.getValue().get("ownerId") == null
-                    && java.util.Objects.equals(e.getValue().get("parentId"), parentId == null ? null : parentId.toString())
-                    && ((String) e.getValue().get("name")).equalsIgnoreCase(nama)
-                    && !e.getKey().equals(kecuali));
+        public boolean isNameTaken(UUID tenantId, UUID parentId, String name, UUID excludedFolderId) {
+            return rows.entrySet().stream().anyMatch(entry -> entry.getValue().get("ownerId") == null
+                    && Objects.equals(entry.getValue().get("parentId"), parentId == null ? null : parentId.toString())
+                    && ((String) entry.getValue().get("name")).equalsIgnoreCase(name)
+                    && !entry.getKey().equals(excludedFolderId));
         }
 
         @Override
-        public boolean adaAnak(UUID tenantId, UUID id) {
-            return folder.values().stream().anyMatch(f -> id.toString().equals(f.get("parentId")));
+        public boolean hasChildren(UUID tenantId, UUID folderId) {
+            return rows.values().stream().anyMatch(row -> folderId.toString().equals(row.get("parentId")));
         }
 
         @Override
-        public long jumlahIsi(UUID tenantId, UUID id) {
-            return isi.getOrDefault(id, 0L);
+        public long countContents(UUID tenantId, UUID folderId) {
+            return contentCounts.getOrDefault(folderId, 0L);
         }
 
         @Override
-        public void buat(UUID id, UUID tenantId, UUID parentId, String nama, String keterangan) {
-            Map<String, Object> f = new LinkedHashMap<>();
-            f.put("id", id.toString());
-            f.put("parentId", parentId == null ? null : parentId.toString());
-            f.put("name", nama);
-            f.put("description", keterangan);
-            f.put("isDefault", false);
-            f.put("personal", false);
-            f.put("ownerId", null);
-            folder.put(id, f);
+        public void insert(UUID folderId, UUID tenantId, UUID parentId, String name, String description) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", folderId.toString());
+            row.put("parentId", parentId == null ? null : parentId.toString());
+            row.put("name", name);
+            row.put("description", description);
+            row.put("isDefault", false);
+            row.put("personal", false);
+            row.put("ownerId", null);
+            rows.put(folderId, row);
         }
 
         @Override
-        public void buatPribadi(UUID tenantId, UUID userId) {
-            tambah(null, "Folder Saya", false, userId);
+        public void insertPersonal(UUID tenantId, UUID userId) {
+            add(null, PERSONAL_FOLDER_NAME, false, userId);
         }
 
         @Override
-        public void ubah(UUID tenantId, UUID id, String nama, String keterangan, UUID parentId) {
-            Map<String, Object> f = folder.get(id);
-            f.put("name", nama);
-            f.put("description", keterangan);
-            f.put("parentId", parentId == null ? null : parentId.toString());
+        public void update(UUID tenantId, UUID folderId, String name, String description, UUID parentId) {
+            Map<String, Object> row = rows.get(folderId);
+            row.put("name", name);
+            row.put("description", description);
+            row.put("parentId", parentId == null ? null : parentId.toString());
         }
 
         @Override
-        public void salinPenugasan(UUID tenantId, UUID dari, UUID ke) {
-            for (String p : new ArrayList<>(pengguna)) if (p.startsWith(dari + "/")) pengguna.add(ke + p.substring(36));
-            for (String r : new ArrayList<>(robot)) if (r.startsWith(dari + "/")) robot.add(ke + r.substring(36));
+        public void copyAssignments(UUID tenantId, UUID sourceFolderId, UUID targetFolderId) {
+            for (String user : new ArrayList<>(userAssignments)) {
+                if (user.startsWith(sourceFolderId + "/")) userAssignments.add(targetFolderId + user.substring(36));
+            }
+            for (String robot : new ArrayList<>(robotAssignments)) {
+                if (robot.startsWith(sourceFolderId + "/")) robotAssignments.add(targetFolderId + robot.substring(36));
+            }
         }
 
         @Override
-        public void pindahkanPekerjaan(UUID tenantId, UUID dari, UUID ke) {
-            pekerjaanDipindah.add(dari + "->" + ke);
+        public void moveJobs(UUID tenantId, UUID sourceFolderId, UUID targetFolderId) {
+            movedJobs.add(sourceFolderId + "->" + targetFolderId);
         }
 
         @Override
-        public int hapus(UUID tenantId, UUID id) {
-            return folder.remove(id) == null ? 0 : 1;
+        public int delete(UUID tenantId, UUID folderId) {
+            return rows.remove(folderId) == null ? 0 : 1;
         }
 
         @Override
-        public UUID idPengguna(UUID tenantId, String username) {
-            return idPengguna.get(username);
+        public int assignUser(UUID tenantId, UUID folderId, UUID userId) {
+            return userAssignments.add(folderId + "/" + userId) ? 1 : 0;
         }
 
         @Override
-        public UUID idRobot(UUID tenantId, String nama) {
-            return idRobot.get(nama);
+        public int assignRobot(UUID tenantId, UUID folderId, UUID robotId) {
+            return robotAssignments.add(folderId + "/" + robotId) ? 1 : 0;
+        }
+    }
+
+    private static final class FakeUserRepository extends UserRepository {
+
+        final Map<String, UUID> idsByUsername = new HashMap<>();
+
+        FakeUserRepository() {
+            super(null);
         }
 
         @Override
-        public int tugaskanPengguna(UUID tenantId, UUID folderId, UUID userId) {
-            return pengguna.add(folderId + "/" + userId) ? 1 : 0;
+        public Optional<UUID> findIdByUsername(UUID tenantId, String username) {
+            return Optional.ofNullable(idsByUsername.get(username));
+        }
+    }
+
+    private static final class FakeRobotRepository extends RobotRepository {
+
+        final Map<String, UUID> idsByName = new HashMap<>();
+
+        FakeRobotRepository() {
+            super(null, TestProperties.defaults());
         }
 
         @Override
-        public int tugaskanRobot(UUID tenantId, UUID folderId, UUID robotId) {
-            return robot.add(folderId + "/" + robotId) ? 1 : 0;
+        public Optional<UUID> findIdByName(UUID tenantId, String name) {
+            return Optional.ofNullable(idsByName.get(name));
         }
     }
 }

@@ -16,7 +16,7 @@ public class JacksonConfig {
      * lupa mengalikan seribu.
      */
     @Bean
-    public Jackson2ObjectMapperBuilderCustomizer isoDates() {
+    public Jackson2ObjectMapperBuilderCustomizer isoDateCustomizer() {
         return builder -> builder.featuresToDisable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     }
 }

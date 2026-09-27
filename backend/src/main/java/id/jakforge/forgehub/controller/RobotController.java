@@ -1,9 +1,14 @@
 package id.jakforge.forgehub.controller;
 
-import id.jakforge.forgehub.dto.Permintaan;
-import id.jakforge.forgehub.security.CurrentUser;
-import id.jakforge.forgehub.service.FolderService;
+import id.jakforge.forgehub.dto.request.CreateRobotRequest;
+import id.jakforge.forgehub.dto.request.HeartbeatRequest;
+import id.jakforge.forgehub.dto.response.HeartbeatResponse;
+import id.jakforge.forgehub.dto.response.OkResponse;
+import id.jakforge.forgehub.security.ForgeHubPrincipal;
 import id.jakforge.forgehub.service.RobotService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -15,104 +20,48 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
-/** Robot, mesin, dan lingkungan. */
+/** Robot. */
 @RestController
-@RequestMapping("/api")
+@RequestMapping("/api/robots")
+@RequiredArgsConstructor
 public class RobotController {
 
-    private final RobotService service;
-    private final FolderService folders;
-
-    public RobotController(RobotService service, FolderService folders) {
-        this.service = service;
-        this.folders = folders;
-    }
-
-    private static UUID tenant() {
-        return CurrentUser.get().tenantId();
-    }
-
-    // -----------------------------------------------------------------
-    // Robot
-    // -----------------------------------------------------------------
+    private final RobotService robotService;
 
     /** Dengan {@code folderId}: hanya robot yang ditugaskan ke folder itu. */
-    @GetMapping("/robots")
-    public List<Map<String, Object>> robots(@RequestParam(required = false) String folderId) {
-        return service.daftar(tenant(), folders.saring(CurrentUser.get(), folderId));
+    @GetMapping
+    public List<Map<String, Object>> findAll(@AuthenticationPrincipal ForgeHubPrincipal principal,
+                                             @RequestParam(required = false) String folderId) {
+        return robotService.findAll(principal, folderId);
     }
 
-    @GetMapping("/robots/{name}")
-    public Map<String, Object> robot(@PathVariable String name) {
-        return service.satu(tenant(), name);
+    @GetMapping("/{name}")
+    public Map<String, Object> findByName(@AuthenticationPrincipal ForgeHubPrincipal principal,
+                                          @PathVariable String name) {
+        return robotService.findByName(principal, name);
     }
 
-    @PostMapping("/robots/{name}/heartbeat")
-    public Map<String, Object> denyut(@PathVariable String name,
-                                      @RequestBody(required = false) Map<String, Object> body) {
-
-        return service.denyut(tenant(), name, Permintaan.Denyut.dari(body));
+    /** Denyut JakRunner; badannya dibaca longgar. */
+    @PostMapping("/{name}/heartbeat")
+    public HeartbeatResponse recordHeartbeat(@AuthenticationPrincipal ForgeHubPrincipal principal,
+                                             @PathVariable String name,
+                                             @RequestBody(required = false) Map<String, Object> body) {
+        return robotService.recordHeartbeat(principal, name, HeartbeatRequest.fromBody(body));
     }
 
-    @PostMapping("/robots")
-    public Map<String, Object> buatRobot(@RequestBody(required = false) Map<String, Object> body) {
-        service.buat(tenant(), Permintaan.Robot.dari(body));
+    @PostMapping
+    public OkResponse create(@AuthenticationPrincipal ForgeHubPrincipal principal,
+                             @Valid @RequestBody CreateRobotRequest request) {
+        robotService.create(principal, request);
 
-        return Map.of("ok", true);
+        return OkResponse.success();
     }
 
-    @DeleteMapping("/robots/{name}")
-    public Map<String, Object> hapusRobot(@PathVariable String name) {
-        service.hapus(tenant(), name);
+    @DeleteMapping("/{name}")
+    public OkResponse delete(@AuthenticationPrincipal ForgeHubPrincipal principal, @PathVariable String name) {
+        robotService.delete(principal, name);
 
-        return Map.of("ok", true);
-    }
-
-    // -----------------------------------------------------------------
-    // Mesin
-    // -----------------------------------------------------------------
-
-    @GetMapping("/machines")
-    public List<Map<String, Object>> mesin() {
-        return service.mesin(tenant());
-    }
-
-    @PostMapping("/machines")
-    public Map<String, Object> buatMesin(@RequestBody(required = false) Map<String, Object> body) {
-        service.buatMesin(tenant(), Permintaan.Mesin.dari(body));
-
-        return Map.of("ok", true);
-    }
-
-    @DeleteMapping("/machines/{name}")
-    public Map<String, Object> hapusMesin(@PathVariable String name) {
-        service.hapusMesin(tenant(), name);
-
-        return Map.of("ok", true);
-    }
-
-    // -----------------------------------------------------------------
-    // Lingkungan
-    // -----------------------------------------------------------------
-
-    @GetMapping("/environments")
-    public List<Map<String, Object>> lingkungan() {
-        return service.lingkungan(tenant());
-    }
-
-    @PostMapping("/environments")
-    public Map<String, Object> buatLingkungan(@RequestBody(required = false) Map<String, Object> body) {
-        service.buatLingkungan(tenant(), Permintaan.Bernama.dari(body));
-
-        return Map.of("ok", true);
-    }
-
-    @DeleteMapping("/environments/{name}")
-    public Map<String, Object> hapusLingkungan(@PathVariable String name) {
-        service.hapusLingkungan(tenant(), name);
-
-        return Map.of("ok", true);
+        return OkResponse.success();
     }
 }

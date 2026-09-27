@@ -1,10 +1,12 @@
 package id.jakforge.forgehub.repository;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -21,13 +23,33 @@ import java.util.UUID;
  * null berarti seluruh penyewa — bentuk sebelum folder ada.
  */
 @Repository
+@RequiredArgsConstructor
 public class DashboardRepository {
 
-    private final Db db;
+    private static final String UNFINISHED_STATES = "('PENDING', 'RUNNING', 'STOPPING')";
 
-    public DashboardRepository(Db db) {
-        this.db = db;
+    /**
+     * Awal hari, minggu (Senin), bulan, dan tahun ini — tengah malam di zona
+     * tampilan, dinyatakan dalam UTC untuk dibandingkan dengan kolomnya.
+     */
+    public record PeriodStarts(OffsetDateTime today, OffsetDateTime week, OffsetDateTime month,
+                               OffsetDateTime year) {
     }
+
+    /**
+     * Rentang satu grafik riwayat.
+     *
+     * @param bucketUnit       hour, day, atau month
+     * @param firstBucketStart awal batang pertama, waktu setempat
+     * @param lastBucketStart  awal batang TERAKHIR, waktu setempat (ikut dihitung)
+     * @param fromUtc          batas bawah ended_at
+     * @param untilUtc         batas atas ended_at, tidak ikut
+     */
+    public record HistoryRange(String bucketUnit, LocalDateTime firstBucketStart, LocalDateTime lastBucketStart,
+                               OffsetDateTime fromUtc, OffsetDateTime untilUtc) {
+    }
+
+    private final Database database;
 
     /**
      * Hitungan pekerjaan: yang sedang berlangsung, lalu yang berhasil, gagal,
@@ -40,55 +62,49 @@ public class DashboardRepository {
      * yang sama.
      *
      * <p>Nama kolomnya {@code <periode>_<angka>} — today_successful,
-     * week_faulted, dan seterusnya — mengikuti {@code Periode.nama()}.
+     * week_faulted, dan seterusnya — mengikuti {@code DashboardPeriod.apiName()}.
      *
      * <p>Yang SELESAI dihitung menurut kapan ia selesai (ended_at), yang
      * dibuat menurut kapan ia dibuat. Yang masih berjalan, menunggu, atau
      * sedang dihentikan dihitung tanpa rentang: ia belum punya akhir, dan
      * menyembunyikannya karena dibuat kemarin berarti menyembunyikan yang
      * paling perlu dilihat.
-     *
-     * @param hari   awal hari ini, UTC
-     * @param minggu awal minggu ini (Senin), UTC
-     * @param bulan  awal bulan ini, UTC
-     * @param tahun  awal tahun ini, UTC
      */
-    public Map<String, Object> hitunganPekerjaan(UUID tenantId, UUID folderId, OffsetDateTime hari,
-                                                 OffsetDateTime minggu, OffsetDateTime bulan,
-                                                 OffsetDateTime tahun) {
-        List<Object> args = new ArrayList<>(List.of(hari, minggu, bulan, tahun, tenantId));
-        String saring = "";
+    public Map<String, Object> countJobs(UUID tenantId, UUID folderId, PeriodStarts starts) {
+        List<Object> args = new ArrayList<>(List.of(starts.today(), starts.week(), starts.month(), starts.year(),
+                tenantId));
+        String folderFilter = "";
 
         if (folderId != null) {
-            saring = " AND j.folder_id = ?";
+            folderFilter = " AND j.folder_id = ?";
             args.add(folderId);
         }
 
-        return db.row("""
-                WITH awal AS (SELECT ?::timestamptz AS hari,  ?::timestamptz AS minggu,
-                                     ?::timestamptz AS bulan, ?::timestamptz AS tahun)
+        return database.queryRow("""
+                WITH period_start AS (SELECT ?::timestamptz AS today_start, ?::timestamptz AS week_start,
+                                             ?::timestamptz AS month_start, ?::timestamptz AS year_start)
                 SELECT count(*) FILTER (WHERE j.state = 'RUNNING')  AS running,
                        count(*) FILTER (WHERE j.state = 'PENDING')  AS pending,
                        count(*) FILTER (WHERE j.state = 'STOPPING') AS stopping,
-                       count(*) FILTER (WHERE j.state = 'SUCCESSFUL' AND j.ended_at >= a.hari)   AS today_successful,
-                       count(*) FILTER (WHERE j.state = 'FAULTED'    AND j.ended_at >= a.hari)   AS today_faulted,
-                       count(*) FILTER (WHERE j.state = 'STOPPED'    AND j.ended_at >= a.hari)   AS today_stopped,
-                       count(*) FILTER (WHERE j.created_at >= a.hari)                             AS today_total,
-                       count(*) FILTER (WHERE j.state = 'SUCCESSFUL' AND j.ended_at >= a.minggu) AS week_successful,
-                       count(*) FILTER (WHERE j.state = 'FAULTED'    AND j.ended_at >= a.minggu) AS week_faulted,
-                       count(*) FILTER (WHERE j.state = 'STOPPED'    AND j.ended_at >= a.minggu) AS week_stopped,
-                       count(*) FILTER (WHERE j.created_at >= a.minggu)                           AS week_total,
-                       count(*) FILTER (WHERE j.state = 'SUCCESSFUL' AND j.ended_at >= a.bulan)  AS month_successful,
-                       count(*) FILTER (WHERE j.state = 'FAULTED'    AND j.ended_at >= a.bulan)  AS month_faulted,
-                       count(*) FILTER (WHERE j.state = 'STOPPED'    AND j.ended_at >= a.bulan)  AS month_stopped,
-                       count(*) FILTER (WHERE j.created_at >= a.bulan)                            AS month_total,
-                       count(*) FILTER (WHERE j.state = 'SUCCESSFUL' AND j.ended_at >= a.tahun)  AS year_successful,
-                       count(*) FILTER (WHERE j.state = 'FAULTED'    AND j.ended_at >= a.tahun)  AS year_faulted,
-                       count(*) FILTER (WHERE j.state = 'STOPPED'    AND j.ended_at >= a.tahun)  AS year_stopped,
-                       count(*) FILTER (WHERE j.created_at >= a.tahun)                            AS year_total
-                  FROM jobs j CROSS JOIN awal a
+                       count(*) FILTER (WHERE j.state = 'SUCCESSFUL' AND j.ended_at >= s.today_start) AS today_successful,
+                       count(*) FILTER (WHERE j.state = 'FAULTED'    AND j.ended_at >= s.today_start) AS today_faulted,
+                       count(*) FILTER (WHERE j.state = 'STOPPED'    AND j.ended_at >= s.today_start) AS today_stopped,
+                       count(*) FILTER (WHERE j.created_at >= s.today_start)                           AS today_total,
+                       count(*) FILTER (WHERE j.state = 'SUCCESSFUL' AND j.ended_at >= s.week_start)  AS week_successful,
+                       count(*) FILTER (WHERE j.state = 'FAULTED'    AND j.ended_at >= s.week_start)  AS week_faulted,
+                       count(*) FILTER (WHERE j.state = 'STOPPED'    AND j.ended_at >= s.week_start)  AS week_stopped,
+                       count(*) FILTER (WHERE j.created_at >= s.week_start)                            AS week_total,
+                       count(*) FILTER (WHERE j.state = 'SUCCESSFUL' AND j.ended_at >= s.month_start) AS month_successful,
+                       count(*) FILTER (WHERE j.state = 'FAULTED'    AND j.ended_at >= s.month_start) AS month_faulted,
+                       count(*) FILTER (WHERE j.state = 'STOPPED'    AND j.ended_at >= s.month_start) AS month_stopped,
+                       count(*) FILTER (WHERE j.created_at >= s.month_start)                           AS month_total,
+                       count(*) FILTER (WHERE j.state = 'SUCCESSFUL' AND j.ended_at >= s.year_start)  AS year_successful,
+                       count(*) FILTER (WHERE j.state = 'FAULTED'    AND j.ended_at >= s.year_start)  AS year_faulted,
+                       count(*) FILTER (WHERE j.state = 'STOPPED'    AND j.ended_at >= s.year_start)  AS year_stopped,
+                       count(*) FILTER (WHERE j.created_at >= s.year_start)                            AS year_total
+                  FROM jobs j CROSS JOIN period_start s
                  WHERE j.tenant_id = ?%s
-                """.formatted(saring), args.toArray());
+                """.formatted(folderFilter), args.toArray()).orElseGet(LinkedHashMap::new);
     }
 
     /**
@@ -96,48 +112,47 @@ public class DashboardRepository {
      * proses, satu kolom per periode.
      *
      * <p>"Pekerjaan sebuah periode" di sini sama persis dengan yang dijumlah
-     * {@link #hitunganPekerjaan}: yang selesai di dalam periodenya, ditambah
-     * yang belum selesai. Dua donat di dasbor harus menunjukkan jumlah yang
-     * sama untuk periode yang sama, atau orang mulai bertanya mana yang benar.
+     * {@link #countJobs}: yang selesai di dalam periodenya, ditambah yang belum
+     * selesai. Dua donat di dasbor harus menunjukkan jumlah yang sama untuk
+     * periode yang sama, atau orang mulai bertanya mana yang benar.
      */
-    public List<Map<String, Object>> perProses(UUID tenantId, UUID folderId, OffsetDateTime hari,
-                                               OffsetDateTime minggu, OffsetDateTime bulan,
-                                               OffsetDateTime tahun) {
-        List<Object> args = new ArrayList<>(List.of(hari, minggu, bulan, tahun, tenantId));
-        String saring = "";
+    public List<Map<String, Object>> countJobsByProcess(UUID tenantId, UUID folderId, PeriodStarts starts) {
+        List<Object> args = new ArrayList<>(List.of(starts.today(), starts.week(), starts.month(), starts.year(),
+                tenantId));
+        String folderFilter = "";
 
         if (folderId != null) {
-            saring = " AND j.folder_id = ?";
+            folderFilter = " AND j.folder_id = ?";
             args.add(folderId);
         }
 
-        return db.rows("""
-                WITH awal AS (SELECT ?::timestamptz AS hari,  ?::timestamptz AS minggu,
-                                     ?::timestamptz AS bulan, ?::timestamptz AS tahun)
+        return database.queryRows("""
+                WITH period_start AS (SELECT ?::timestamptz AS today_start, ?::timestamptz AS week_start,
+                                             ?::timestamptz AS month_start, ?::timestamptz AS year_start)
                 SELECT j.process_name,
-                       count(*) FILTER (WHERE j.ended_at >= a.hari   OR j.state IN ('PENDING', 'RUNNING', 'STOPPING')) AS today,
-                       count(*) FILTER (WHERE j.ended_at >= a.minggu OR j.state IN ('PENDING', 'RUNNING', 'STOPPING')) AS week,
-                       count(*) FILTER (WHERE j.ended_at >= a.bulan  OR j.state IN ('PENDING', 'RUNNING', 'STOPPING')) AS month,
-                       count(*) FILTER (WHERE j.ended_at >= a.tahun  OR j.state IN ('PENDING', 'RUNNING', 'STOPPING')) AS year
-                  FROM jobs j CROSS JOIN awal a
-                 WHERE j.tenant_id = ?%s
-                   AND (j.ended_at >= a.tahun OR j.state IN ('PENDING', 'RUNNING', 'STOPPING'))
+                       count(*) FILTER (WHERE j.ended_at >= s.today_start OR j.state IN %1$s) AS today,
+                       count(*) FILTER (WHERE j.ended_at >= s.week_start  OR j.state IN %1$s) AS week,
+                       count(*) FILTER (WHERE j.ended_at >= s.month_start OR j.state IN %1$s) AS month,
+                       count(*) FILTER (WHERE j.ended_at >= s.year_start  OR j.state IN %1$s) AS year
+                  FROM jobs j CROSS JOIN period_start s
+                 WHERE j.tenant_id = ?%2$s
+                   AND (j.ended_at >= s.year_start OR j.state IN %1$s)
                  GROUP BY j.process_name
-                """.formatted(saring), args.toArray());
+                """.formatted(UNFINISHED_STATES, folderFilter), args.toArray());
     }
 
-    public List<Map<String, Object>> sedangBerjalan(UUID tenantId, UUID folderId, int batas) {
+    public List<Map<String, Object>> findJobsInProgress(UUID tenantId, UUID folderId, int limit) {
         List<Object> args = new ArrayList<>(List.of(tenantId));
-        String saring = "";
+        String folderFilter = "";
 
         if (folderId != null) {
-            saring = " AND folder_id = ?";
+            folderFilter = " AND folder_id = ?";
             args.add(folderId);
         }
 
-        args.add(batas);
+        args.add(limit);
 
-        return db.rows("""
+        return database.queryRows("""
                 SELECT id, process_name, robot_name, machine_name, state, source, priority,
                        progress, info, created_at, started_at
                   FROM jobs
@@ -145,7 +160,7 @@ public class DashboardRepository {
                  ORDER BY CASE state WHEN 'RUNNING' THEN 0 WHEN 'STOPPING' THEN 1 ELSE 2 END,
                           created_at
                  LIMIT ?
-                """.formatted(saring), args.toArray());
+                """.formatted(folderFilter), args.toArray());
     }
 
     /**
@@ -155,22 +170,22 @@ public class DashboardRepository {
      * nol. Tanpa itu grafiknya memampatkan hari kosong dan garisnya menyambung
      * dari Senin ke Kamis seolah tidak ada jeda.
      */
-    public List<Map<String, Object>> riwayat(UUID tenantId, String zona, int hari) {
-        return db.rows("""
-                SELECT to_char(h.hari, 'YYYY-MM-DD') AS day,
+    public List<Map<String, Object>> findDailyHistory(UUID tenantId, String zoneId, int days) {
+        return database.queryRows("""
+                SELECT to_char(d.day_start, 'YYYY-MM-DD') AS day,
                        count(j.id) FILTER (WHERE j.state = 'SUCCESSFUL') AS successful,
                        count(j.id) FILTER (WHERE j.state = 'FAULTED')    AS faulted
                   FROM generate_series(
                            (now() AT TIME ZONE ?)::date - (? - 1),
                            (now() AT TIME ZONE ?)::date,
-                           interval '1 day') AS h(hari)
+                           interval '1 day') AS d(day_start)
                   LEFT JOIN jobs j
                          ON j.tenant_id = ?
                         AND j.ended_at IS NOT NULL
-                        AND (j.ended_at AT TIME ZONE ?)::date = h.hari::date
-                 GROUP BY h.hari
-                 ORDER BY h.hari
-                """, zona, hari, zona, tenantId, zona);
+                        AND (j.ended_at AT TIME ZONE ?)::date = d.day_start::date
+                 GROUP BY d.day_start
+                 ORDER BY d.day_start
+                """, zoneId, days, zoneId, tenantId, zoneId);
     }
 
     /**
@@ -179,34 +194,28 @@ public class DashboardRepository {
      * <p>Batangnya dibangkitkan generate_series dalam waktu SETEMPAT (zona
      * tampilan), lalu setiap pekerjaan dipotong ke satuan yang sama
      * — jam, hari, atau bulan — di zona itu juga. Batang tanpa pekerjaan tetap
-     * muncul sebagai nol, dengan alasan yang sama seperti di {@link #riwayat}.
+     * muncul sebagai nol, dengan alasan yang sama seperti di
+     * {@link #findDailyHistory}.
      *
      * <p>Rentang ended_at disaring LEBIH DULU, dengan batas UTC: tanpa itu
      * penggabungannya memotong setiap pekerjaan penyewa ini sepanjang masa
      * hanya untuk membuang hampir semuanya.
-     *
-     * @param satuan    hour, day, atau month
-     * @param awal      awal batang pertama, waktu setempat
-     * @param akhir     awal batang TERAKHIR, waktu setempat (ikut dihitung)
-     * @param awalUtc   batas bawah ended_at
-     * @param akhirUtc  batas atas ended_at, tidak ikut
      */
-    public List<Map<String, Object>> riwayatPeriode(UUID tenantId, String zona, String satuan,
-                                                    LocalDateTime awal, LocalDateTime akhir,
-                                                    OffsetDateTime awalUtc, OffsetDateTime akhirUtc) {
-        return db.rows("""
-                SELECT to_char(h.t, 'YYYY-MM-DD"T"HH24:MI') AS bucket,
-                       to_char(h.t, 'YYYY-MM-DD')          AS day,
+    public List<Map<String, Object>> findPeriodHistory(UUID tenantId, String zoneId, HistoryRange range) {
+        return database.queryRows("""
+                SELECT to_char(b.bucket_start, 'YYYY-MM-DD"T"HH24:MI') AS bucket,
+                       to_char(b.bucket_start, 'YYYY-MM-DD')          AS day,
                        count(j.id) FILTER (WHERE j.state = 'SUCCESSFUL') AS successful,
                        count(j.id) FILTER (WHERE j.state = 'FAULTED')    AS faulted
-                  FROM generate_series(?::timestamp, ?::timestamp, ('1 ' || ?)::interval) AS h(t)
+                  FROM generate_series(?::timestamp, ?::timestamp, ('1 ' || ?)::interval) AS b(bucket_start)
                   LEFT JOIN jobs j
                          ON j.tenant_id = ?
                         AND j.ended_at >= ? AND j.ended_at < ?
-                        AND date_trunc(?, j.ended_at AT TIME ZONE ?) = h.t
-                 GROUP BY h.t
-                 ORDER BY h.t
-                """, awal, akhir, satuan, tenantId, awalUtc, akhirUtc, satuan, zona);
+                        AND date_trunc(?, j.ended_at AT TIME ZONE ?) = b.bucket_start
+                 GROUP BY b.bucket_start
+                 ORDER BY b.bucket_start
+                """, range.firstBucketStart(), range.lastBucketStart(), range.bucketUnit(), tenantId,
+                range.fromUtc(), range.untilUtc(), range.bucketUnit(), zoneId);
     }
 
     /**
@@ -215,14 +224,16 @@ public class DashboardRepository {
      * <p>ILIKE, bukan LIKE: orang mencari "cha" dan berharap menemukan "CHA".
      * Tanda % dan _ pada kata kuncinya diloloskan oleh pemanggilnya, supaya
      * mencari "100%" tidak berubah menjadi "cocokkan apa saja".
-     */
-    /**
+     *
      * <p>{@code folder_id} ikut dikirim untuk yang tinggal di folder: memilih
      * hasilnya berarti membuka folder itu lebih dulu, lalu halamannya. Robot
      * dan paket milik penyewa, jadi foldernya kosong.
+     *
+     * <p>Kolom {@code kind} adalah label yang DITAMPILKAN dasbor apa adanya,
+     * dan {@code page} sekaligus nama sumber izinnya.
      */
-    public List<Map<String, Object>> cari(UUID tenantId, String pola, int batas) {
-        return db.rows("""
+    public List<Map<String, Object>> search(UUID tenantId, String pattern, int limit) {
+        return database.queryRows("""
                 SELECT 'Proses' AS kind, name AS label, COALESCE(description, '') AS detail,
                        'processes' AS page, folder_id
                   FROM processes WHERE tenant_id = ? AND name ILIKE ?
@@ -248,19 +259,19 @@ public class DashboardRepository {
                 SELECT 'Folder', name, COALESCE(description, ''), 'folders', id
                   FROM folders WHERE tenant_id = ? AND owner_id IS NULL AND name ILIKE ?
                 LIMIT ?
-                """, tenantId, pola, tenantId, pola, tenantId, pola, tenantId, pola,
-                     tenantId, pola, tenantId, pola, tenantId, pola, tenantId, pola, batas);
+                """, tenantId, pattern, tenantId, pattern, tenantId, pattern, tenantId, pattern,
+                     tenantId, pattern, tenantId, pattern, tenantId, pattern, tenantId, pattern, limit);
     }
 
     /** Jumlah isi tiap tabel; dipakai halaman Setelan. */
-    public Map<String, Object> isiBasisData(UUID tenantId) {
-        return db.row("""
+    public Map<String, Object> countTableRows(UUID tenantId) {
+        return database.queryRow("""
                 SELECT (SELECT count(*) FROM users     WHERE tenant_id = ?) AS users,
                        (SELECT count(*) FROM robots    WHERE tenant_id = ?) AS robots,
                        (SELECT count(*) FROM processes WHERE tenant_id = ?) AS processes,
                        (SELECT count(*) FROM jobs      WHERE tenant_id = ?) AS jobs,
                        (SELECT count(*) FROM logs      WHERE tenant_id = ?) AS logs
-                """, tenantId, tenantId, tenantId, tenantId, tenantId);
+                """, tenantId, tenantId, tenantId, tenantId, tenantId).orElseGet(LinkedHashMap::new);
     }
 
     /**
@@ -276,8 +287,8 @@ public class DashboardRepository {
      * setiap subkueri: dua puluh tanda tanya yang harus urut adalah tempat
      * paling mudah untuk salah pasang.
      */
-    public Map<String, Object> hitunganPustaka(UUID tenantId, UUID folderId) {
-        return db.row("""
+    public Map<String, Object> countLibrary(UUID tenantId, UUID folderId) {
+        return database.queryRow("""
                 WITH t AS (SELECT ?::uuid AS id), f AS (SELECT ?::uuid AS id)
                 SELECT (SELECT count(*) FROM processes x, t, f
                          WHERE x.tenant_id = t.id AND (f.id IS NULL OR x.folder_id = f.id)) AS processes,
@@ -314,6 +325,6 @@ public class DashboardRepository {
                                            WHERE fr.folder_id = f.id
                                              AND r.machine_name IS NOT NULL AND r.machine_name <> '')
                                END FROM t, f) AS machines
-                """, tenantId, folderId);
+                """, tenantId, folderId).orElseGet(LinkedHashMap::new);
     }
 }

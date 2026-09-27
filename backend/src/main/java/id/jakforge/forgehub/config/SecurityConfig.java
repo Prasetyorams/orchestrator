@@ -1,13 +1,19 @@
 package id.jakforge.forgehub.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import id.jakforge.forgehub.dto.response.ApiError;
 import id.jakforge.forgehub.security.JwtAuthenticationFilter;
+import id.jakforge.forgehub.security.JwtService;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.beans.factory.annotation.Value;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
@@ -15,21 +21,22 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import java.util.Arrays;
 import java.util.List;
 
 @Configuration
 @EnableWebSecurity
+@RequiredArgsConstructor
 public class SecurityConfig {
 
-    private final JwtAuthenticationFilter jwtFilter;
-    private final String allowedOrigins;
+    /** Satu-satunya jalur yang boleh dicapai tanpa token. Sama dengan PermissionInterceptor.PUBLIC. */
+    private static final String[] PUBLIC_PATHS = { "/", "/actuator/health", "/api/health", "/api/auth/login" };
 
-    public SecurityConfig(JwtAuthenticationFilter jwtFilter,
-                          @Value("${forgehub.cors.allowed-origins}") String allowedOrigins) {
-        this.jwtFilter = jwtFilter;
-        this.allowedOrigins = allowedOrigins;
-    }
+    private static final List<String> ALLOWED_METHODS = List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
+    private static final List<String> ALLOWED_HEADERS = List.of(HttpHeaders.AUTHORIZATION, HttpHeaders.CONTENT_TYPE);
+
+    private final JwtService jwtService;
+    private final ForgeHubProperties properties;
+    private final ObjectMapper objectMapper;
 
     // Tidak ada bean PasswordEncoder di sini.
     //
@@ -41,17 +48,16 @@ public class SecurityConfig {
     // lalu menulis hash yang tidak akan pernah cocok dengan yang lain.
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 // CSRF dimatikan karena API ini tanpa sesi dan tanpa cookie:
                 // tokennya dikirim di header Authorization, dan header tidak
                 // ikut terkirim sendiri oleh peramban seperti cookie.
-                .csrf(csrf -> csrf.disable())
+                .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/login").permitAll()
-                        .requestMatchers("/", "/actuator/health", "/api/health").permitAll()
+                        .requestMatchers(PUBLIC_PATHS).permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .anyRequest().authenticated())
 
@@ -69,14 +75,17 @@ public class SecurityConfig {
                 //
                 // 403 tetap dipakai untuk yang sudah dikenali tapi tidak
                 // berhak; itu memang bukan urusan token.
-                .exceptionHandling(e -> e.authenticationEntryPoint((request, response, ex) -> {
+                .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint((request, response, ex) -> {
                     response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                    response.setContentType("application/json;charset=UTF-8");
-                    response.getWriter().write(
-                            "{\"error\":\"Token tidak sah atau sudah kedaluwarsa.\"}");
+                    response.setContentType(MediaType.APPLICATION_JSON_VALUE + ";charset=UTF-8");
+                    objectMapper.writeValue(response.getWriter(),
+                            new ApiError(JwtAuthenticationFilter.INVALID_TOKEN_MESSAGE));
                 }))
 
-                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+                // Dibuat di sini, bukan sebagai @Component: filter yang menjadi
+                // bean ikut didaftarkan Spring Boot ke rantai filter servlet,
+                // sehingga berada di dua rantai sekaligus.
+                .addFilterBefore(new JwtAuthenticationFilter(jwtService), UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
@@ -85,14 +94,10 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
 
-        configuration.setAllowedOrigins(Arrays.stream(allowedOrigins.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .toList());
-
-        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
-        configuration.setMaxAge(3600L);
+        configuration.setAllowedOrigins(properties.cors().allowedOriginList());
+        configuration.setAllowedMethods(ALLOWED_METHODS);
+        configuration.setAllowedHeaders(ALLOWED_HEADERS);
+        configuration.setMaxAge(properties.cors().maxAge());
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

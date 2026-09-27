@@ -74,12 +74,12 @@ class CronTest {
     @Test
     @DisplayName("tiap menit: menit berikutnya, bukan menit ini")
     void everyMinuteMovesForward() {
-        ZonedDateTime dari = utc("2026-09-08T10:30:45Z");
-        ZonedDateTime hasil = Cron.next("* * * * *", dari, ZoneOffset.UTC);
+        ZonedDateTime after = utc("2026-09-08T10:30:45Z");
+        ZonedDateTime next = Cron.next("* * * * *", after, ZoneOffset.UTC);
 
         // Detiknya dibuang, lalu maju satu menit. Kalau menit ini ikut
         // dianggap cocok, pemicu "tiap menit" akan berjalan dua kali.
-        assertEquals(utc("2026-09-08T10:31:00Z"), hasil);
+        assertEquals(utc("2026-09-08T10:31:00Z"), next);
     }
 
     @Test
@@ -103,11 +103,11 @@ class CronTest {
     @DisplayName("hari kerja pukul 07:00 melewati akhir pekan")
     void weekdaysSkipWeekend() {
         // 2026-09-11 adalah Jumat; berikutnya harus Senin 14, bukan Sabtu 12.
-        ZonedDateTime jumatSore = utc("2026-09-11T09:00:00Z");
-        ZonedDateTime hasil = Cron.next("0 7 * * 1-5", jumatSore, ZoneOffset.UTC);
+        ZonedDateTime fridayAfternoon = utc("2026-09-11T09:00:00Z");
+        ZonedDateTime next = Cron.next("0 7 * * 1-5", fridayAfternoon, ZoneOffset.UTC);
 
-        assertEquals(utc("2026-09-14T07:00:00Z"), hasil);
-        assertEquals("MONDAY", hasil.getDayOfWeek().name());
+        assertEquals(utc("2026-09-14T07:00:00Z"), next);
+        assertEquals("MONDAY", next.getDayOfWeek().name());
     }
 
     @Test
@@ -115,8 +115,8 @@ class CronTest {
     void dayOfMonthOrDayOfWeek() {
         // "tanggal 1 ATAU setiap Senin". Dari Kamis 2026-09-03, yang terdekat
         // adalah Senin 2026-09-07 — bukan menunggu tanggal 1 Oktober.
-        ZonedDateTime hasil = Cron.next("0 0 1 * 1", utc("2026-09-03T12:00:00Z"), ZoneOffset.UTC);
-        assertEquals(utc("2026-09-07T00:00:00Z"), hasil);
+        ZonedDateTime next = Cron.next("0 0 1 * 1", utc("2026-09-03T12:00:00Z"), ZoneOffset.UTC);
+        assertEquals(utc("2026-09-07T00:00:00Z"), next);
 
         // Dan dari Senin 7, berikutnya Senin 14 — kecuali ada tanggal 1 di
         // antaranya, yang tidak ada di September.
@@ -131,23 +131,23 @@ class CronTest {
     @Test
     @DisplayName("7 dan 0 sama-sama berarti Minggu")
     void sevenIsSunday() {
-        ZonedDateTime dari = utc("2026-09-08T12:00:00Z");   // Selasa
+        ZonedDateTime tuesday = utc("2026-09-08T12:00:00Z");
 
-        assertEquals(Cron.next("0 0 * * 0", dari, ZoneOffset.UTC),
-                     Cron.next("0 0 * * 7", dari, ZoneOffset.UTC));
+        assertEquals(Cron.next("0 0 * * 0", tuesday, ZoneOffset.UTC),
+                     Cron.next("0 0 * * 7", tuesday, ZoneOffset.UTC));
 
-        assertEquals("SUNDAY", Cron.next("0 0 * * 7", dari, ZoneOffset.UTC).getDayOfWeek().name());
+        assertEquals("SUNDAY", Cron.next("0 0 * * 7", tuesday, ZoneOffset.UTC).getDayOfWeek().name());
     }
 
     @Test
     @DisplayName("29 Februari ditemukan di tahun kabisat")
     void findsLeapDay() {
-        ZonedDateTime hasil = Cron.next("0 0 29 2 *", utc("2026-03-01T00:00:00Z"), ZoneOffset.UTC);
+        ZonedDateTime next = Cron.next("0 0 29 2 *", utc("2026-03-01T00:00:00Z"), ZoneOffset.UTC);
 
-        assertNotNull(hasil, "2028 adalah tahun kabisat dan masih dalam jangkauan 4 tahun.");
-        assertEquals(2028, hasil.getYear());
-        assertEquals(2, hasil.getMonthValue());
-        assertEquals(29, hasil.getDayOfMonth());
+        assertNotNull(next, "2028 adalah tahun kabisat dan masih dalam jangkauan 4 tahun.");
+        assertEquals(2028, next.getYear());
+        assertEquals(2, next.getMonthValue());
+        assertEquals(29, next.getDayOfMonth());
     }
 
     @Test
@@ -171,34 +171,34 @@ class CronTest {
     @Test
     @DisplayName("07:00 Asia/Jakarta adalah 00:00 UTC, bukan 07:00 UTC")
     void respectsTimezone() {
-        ZonedDateTime dari = utc("2026-09-08T10:00:00Z");
-        ZonedDateTime hasil = Cron.next("0 7 * * *", dari, JAKARTA);
+        ZonedDateTime after = utc("2026-09-08T10:00:00Z");
+        ZonedDateTime next = Cron.next("0 7 * * *", after, JAKARTA);
 
-        assertEquals(7, hasil.getHour(), "jamnya 07:00 menurut Jakarta");
-        assertEquals(JAKARTA, hasil.getZone());
+        assertEquals(7, next.getHour(), "jamnya 07:00 menurut Jakarta");
+        assertEquals(JAKARTA, next.getZone());
 
         // Jakarta UTC+7, jadi 07:00 WIB = 00:00 UTC hari yang sama.
-        assertEquals(utc("2026-09-09T00:00:00Z").toInstant(), hasil.toInstant());
+        assertEquals(utc("2026-09-09T00:00:00Z").toInstant(), next.toInstant());
     }
 
     @Test
     @DisplayName("zona yang berbeda menghasilkan saat yang berbeda")
     void differentZonesDiffer() {
-        ZonedDateTime dari = utc("2026-09-08T10:00:00Z");
+        ZonedDateTime after = utc("2026-09-08T10:00:00Z");
 
         assertNotEqualsInstant(
-                Cron.next("0 7 * * *", dari, JAKARTA),
-                Cron.next("0 7 * * *", dari, ZoneOffset.UTC));
+                Cron.next("0 7 * * *", after, JAKARTA),
+                Cron.next("0 7 * * *", after, ZoneOffset.UTC));
     }
 
     @Test
     @DisplayName("nama zona yang salah ketik jatuh ke UTC, tidak melempar")
     void unknownZoneFallsBackToUtc() {
-        assertEquals(ZoneOffset.UTC, Cron.zona("Asia/Djakarta-yang-salah"));
-        assertEquals(ZoneOffset.UTC, Cron.zona(null));
-        assertEquals(ZoneOffset.UTC, Cron.zona("  "));
-        assertEquals(JAKARTA, Cron.zona("Asia/Jakarta"));
-        assertEquals(JAKARTA, Cron.zona("  Asia/Jakarta  "));
+        assertEquals(ZoneOffset.UTC, Cron.zoneOrUtc("Asia/Djakarta-yang-salah"));
+        assertEquals(ZoneOffset.UTC, Cron.zoneOrUtc(null));
+        assertEquals(ZoneOffset.UTC, Cron.zoneOrUtc("  "));
+        assertEquals(JAKARTA, Cron.zoneOrUtc("Asia/Jakarta"));
+        assertEquals(JAKARTA, Cron.zoneOrUtc("  Asia/Jakarta  "));
     }
 
     @Test
@@ -208,16 +208,15 @@ class CronTest {
         // jadi 02:30 tidak ada hari itu. Pemicunya harus tetap berjalan,
         // digeser maju — bukan hilang sampai tahun depan.
         ZoneId berlin = ZoneId.of("Europe/Berlin");
-        ZonedDateTime hasil = Cron.next("30 2 * * *",
-                ZonedDateTime.parse("2026-03-28T12:00:00Z"), berlin);
+        ZonedDateTime next = Cron.next("30 2 * * *", ZonedDateTime.parse("2026-03-28T12:00:00Z"), berlin);
 
-        assertNotNull(hasil);
-        assertEquals(29, hasil.getDayOfMonth(), "tetap pada hari itu");
-        assertEquals(3, hasil.getHour(), "02:30 yang tidak ada digeser ke 03:30");
+        assertNotNull(next);
+        assertEquals(29, next.getDayOfMonth(), "tetap pada hari itu");
+        assertEquals(3, next.getHour(), "02:30 yang tidak ada digeser ke 03:30");
     }
 
-    private static void assertNotEqualsInstant(ZonedDateTime a, ZonedDateTime b) {
-        assertFalse(a.toInstant().equals(b.toInstant()),
-                "Kedua zona menghasilkan saat yang sama: " + a + " vs " + b);
+    private static void assertNotEqualsInstant(ZonedDateTime first, ZonedDateTime second) {
+        assertFalse(first.toInstant().equals(second.toInstant()),
+                "Kedua zona menghasilkan saat yang sama: " + first + " vs " + second);
     }
 }

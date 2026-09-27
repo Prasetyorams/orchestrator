@@ -1,14 +1,18 @@
 package id.jakforge.forgehub.service;
 
 import id.jakforge.forgehub.common.ApiException;
-import id.jakforge.forgehub.repository.Db;
+import id.jakforge.forgehub.dto.request.LogBatchRequest;
+import id.jakforge.forgehub.dto.response.LogWriteResponse;
+import id.jakforge.forgehub.repository.AlertRepository;
 import id.jakforge.forgehub.repository.LogRepository;
+import id.jakforge.forgehub.security.ForgeHubPrincipal;
+import id.jakforge.forgehub.support.RecordingDatabase;
+import id.jakforge.forgehub.support.TestFolderAccess;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,210 +32,181 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class LogServiceTest {
 
-    private final UUID penyewa = UUID.randomUUID();
-    private final DbPerekam db = new DbPerekam();
-    private final LogService layanan = new LogService(new LogRepository(db));
+    private final ForgeHubPrincipal principal =
+            new ForgeHubPrincipal(UUID.randomUUID(), UUID.randomUUID(), "LAPTOP-uji", "Robot");
+    private final RecordingDatabase database = new RecordingDatabase();
+    private final LogService logService = new LogService(new LogRepository(database),
+            new AlertRepository(database), TestFolderAccess.permitAll());
 
     @Test
     @DisplayName("TRACE dan DEBUG dilewati; INFO, WARN, dan ERROR disimpan")
-    void rincianTidakDisimpan() {
-        Map<String, Object> hasil = layanan.tulis(penyewa, List.of(
-                baris("DEBUG", "Assign"),
-                baris("trace", "VisualBasicValue<String>"),
-                baris("INFO", "Workflow dimulai."),
-                baris("WARN", "Elemen lambat muncul."),
-                baris("ERROR", "Elemen tidak ditemukan.")));
+    void verboseLevelsAreNotStored() {
+        LogWriteResponse result = logService.write(principal, new LogBatchRequest(List.of(
+                line("DEBUG", "Assign"),
+                line("trace", "VisualBasicValue<String>"),
+                line("INFO", "Workflow dimulai."),
+                line("WARN", "Elemen lambat muncul."),
+                line("ERROR", "Elemen tidak ditemukan."))));
 
-        assertEquals(3, hasil.get("written"));
-        assertEquals(2, hasil.get("skipped"));
-        assertEquals(List.of("INFO", "WARN", "ERROR"), tingkatYangDisimpan());
+        assertEquals(3, result.written());
+        assertEquals(2, result.skipped());
+        assertEquals(List.of("INFO", "WARN", "ERROR"), storedLevels());
     }
 
     @Test
     @DisplayName("ERROR tetap menjadi peringatan, DEBUG tidak")
-    void peringatanHanyaDariKesalahan() {
-        layanan.tulis(penyewa, List.of(baris("DEBUG", "Click"), baris("ERROR", "Gagal")));
+    void onlyErrorsRaiseAlerts() {
+        logService.write(principal, new LogBatchRequest(List.of(line("DEBUG", "Click"), line("ERROR", "Gagal"))));
 
-        assertEquals(1, db.sqlYangMemuat("INSERT INTO alerts").size());
+        assertEquals(1, database.statementsContaining("INSERT INTO alerts").size());
     }
 
     @Test
     @DisplayName("baris tanpa tingkat dianggap INFO dan tetap disimpan")
-    void tanpaTingkatTetapDisimpan() {
-        Map<String, Object> tanpaTingkat = new HashMap<>();
-        tanpaTingkat.put("message", "Pesan tanpa tingkat");
+    void lineWithoutLevelIsInfo() {
+        Map<String, Object> lineWithoutLevel = new HashMap<>();
+        lineWithoutLevel.put("message", "Pesan tanpa tingkat");
 
-        Map<String, Object> hasil = layanan.tulis(penyewa, List.of(tanpaTingkat));
+        LogWriteResponse result = logService.write(principal, new LogBatchRequest(List.of(lineWithoutLevel)));
 
-        assertEquals(1, hasil.get("written"));
-        assertEquals(List.of("INFO"), tingkatYangDisimpan());
+        assertEquals(1, result.written());
+        assertEquals(List.of("INFO"), storedLevels());
+    }
+
+    @Test
+    @DisplayName("baris yang bukan objek atau tanpa pesan dilewati, bukan menggagalkan kiriman")
+    void malformedLinesAreSkipped() {
+        LogWriteResponse result = logService.write(principal, new LogBatchRequest(List.of(
+                "bukan objek", Map.of("level", "INFO"), line("INFO", "Yang sah"))));
+
+        assertEquals(1, result.written());
+        assertEquals(List.of("INFO"), storedLevels());
+    }
+
+    @Test
+    @DisplayName("kiriman tanpa larik lines ditolak 400")
+    void missingLinesIsBadRequest() {
+        ApiException error = assertThrows(ApiException.class,
+                () -> logService.write(principal, LogBatchRequest.fromBody(Map.<String, Object>of("lines", "bukan larik"))));
+
+        assertEquals(HttpStatus.BAD_REQUEST, error.status());
+        assertEquals("Butuh { \"lines\": [ ... ] }.", error.getMessage());
     }
 
     @Test
     @DisplayName("pembacaan selalu menyaring TRACE dan DEBUG yang terlanjur tersimpan")
-    void pembacaanMenyaringRincian() {
-        layanan.cari(penyewa, null, null, "cha", null, null, null);
+    void readsAlwaysFilterVerboseLevels() {
+        logService.search(principal, null, null, "cha", null, null, null);
 
-        List<Object> args = argsTerakhir();
+        List<Object> args = database.lastArguments();
 
-        assertTrue(sqlTerakhir().contains("level NOT IN (?, ?)"), sqlTerakhir());
-        assertFalse(sqlTerakhir().contains("level IN"), sqlTerakhir());
+        assertTrue(database.lastStatement().contains("level NOT IN (?, ?)"), database.lastStatement());
+        assertFalse(database.lastStatement().contains("level IN"), database.lastStatement());
         assertTrue(args.contains("TRACE") && args.contains("DEBUG"), args.toString());
     }
 
     @Test
     @DisplayName("meminta tingkat DEBUG saja dijawab kosong tanpa bertanya ke basis data")
-    void memintaRincianKosong() {
-        assertEquals(List.of(), layanan.cari(penyewa, List.of("debug"), null, null, null, null, null));
-        assertEquals(List.of(), layanan.cari(penyewa, List.of("TRACE,debug"), null, null, null, null, null));
+    void onlyVerboseLevelsReturnNothing() {
+        assertEquals(List.of(), logService.search(principal, List.of("debug"), null, null, null, null, null));
+        assertEquals(List.of(), logService.search(principal, List.of("TRACE,debug"), null, null, null, null, null));
 
-        assertTrue(db.sql.isEmpty(), db.sql.toString());
+        assertTrue(database.statements.isEmpty(), database.statements.toString());
     }
 
     @Test
     @DisplayName("meminta tingkat ERROR tetap menyaring rincian dan hanya ERROR")
-    void memintaTingkatLain() {
-        layanan.cari(penyewa, List.of("error"), null, null, null, null, null);
+    void requestedLevelIsFiltered() {
+        logService.search(principal, List.of("error"), null, null, null, null, null);
 
-        assertTrue(sqlTerakhir().contains("level NOT IN (?, ?)") && sqlTerakhir().contains("level IN (?)"),
-                sqlTerakhir());
-        assertEquals(List.of("ERROR"), tingkatDiSaring());
+        assertTrue(database.lastStatement().contains("level NOT IN (?, ?)")
+                && database.lastStatement().contains("level IN (?)"), database.lastStatement());
+        assertEquals(List.of("ERROR"), filteredLevels());
     }
 
     @Test
     @DisplayName("lebih dari satu tingkat, dipisah koma maupun parameter berulang")
-    void banyakTingkat() {
-        layanan.cari(penyewa, List.of("info,error"), null, null, null, null, null);
-        assertEquals(List.of("INFO", "ERROR"), tingkatDiSaring());
+    void severalLevels() {
+        logService.search(principal, List.of("info,error"), null, null, null, null, null);
+        assertEquals(List.of("INFO", "ERROR"), filteredLevels());
 
-        layanan.cari(penyewa, List.of("FATAL", "info"), null, null, null, null, null);
-        assertEquals(List.of("INFO", "FATAL"), tingkatDiSaring());
+        logService.search(principal, List.of("FATAL", "info"), null, null, null, null, null);
+        assertEquals(List.of("INFO", "FATAL"), filteredLevels());
     }
 
     @Test
     @DisplayName("WARN ikut membawa WARNING, karena keduanya satu tingkat")
-    void warnDanWarning() {
-        layanan.cari(penyewa, List.of("warn"), null, null, null, null, null);
-        assertEquals(List.of("WARN", "WARNING"), tingkatDiSaring());
+    void warnIncludesWarning() {
+        logService.search(principal, List.of("warn"), null, null, null, null, null);
+        assertEquals(List.of("WARN", "WARNING"), filteredLevels());
 
-        layanan.cari(penyewa, List.of("warning", "WARN"), null, null, null, null, null);
-        assertEquals(List.of("WARN", "WARNING"), tingkatDiSaring());
+        logService.search(principal, List.of("warning", "WARN"), null, null, null, null, null);
+        assertEquals(List.of("WARN", "WARNING"), filteredLevels());
     }
 
     @Test
     @DisplayName("rincian yang diminta bersama tingkat lain dibuang, tingkat lainnya tetap")
-    void rincianBersamaTingkatLain() {
-        layanan.cari(penyewa, List.of("debug,error"), null, null, null, null, null);
+    void verboseLevelDroppedAmongOthers() {
+        logService.search(principal, List.of("debug,error"), null, null, null, null, null);
 
-        assertEquals(List.of("ERROR"), tingkatDiSaring());
+        assertEquals(List.of("ERROR"), filteredLevels());
     }
 
     @Test
     @DisplayName("tingkat yang tidak dikenal ditolak 400, bukan diam-diam menjadi INFO")
-    void tingkatTakDikenal() {
-        ApiException e = assertThrows(ApiException.class,
-                () -> layanan.cari(penyewa, List.of("info,peringatan"), null, null, null, null, null));
+    void unknownLevelIsRejected() {
+        ApiException error = assertThrows(ApiException.class,
+                () -> logService.search(principal, List.of("info,peringatan"), null, null, null, null, null));
 
-        assertEquals(HttpStatus.BAD_REQUEST, e.status());
-        assertTrue(db.sql.isEmpty(), db.sql.toString());
-    }
-
-    // ---------- peringatan ----------
-
-    @Test
-    @DisplayName("peringatan tanpa saringan tingkat menampilkan semua tingkat")
-    void peringatanSemuaTingkat() {
-        layanan.peringatan(penyewa, null, null, null);
-
-        assertFalse(sqlTerakhir().contains("severity IN"), sqlTerakhir());
+        assertEquals(HttpStatus.BAD_REQUEST, error.status());
+        assertTrue(database.statements.isEmpty(), database.statements.toString());
     }
 
     @Test
-    @DisplayName("peringatan bisa disaring satu atau beberapa tingkat, tanpa peduli huruf besar")
-    void peringatanDisaring() {
-        layanan.peringatan(penyewa, null, List.of("error,WARNING"), 20);
-
-        List<Object> args = argsTerakhir();
-
-        assertTrue(sqlTerakhir().contains("severity IN (?, ?)"), sqlTerakhir());
-        // Nilainya dikirim dengan ejaan yang tersimpan: Warning, Error.
-        assertEquals(List.of("Warning", "Error"), args.subList(2, 4));
-        assertEquals(20, args.get(args.size() - 1));
+    @DisplayName("jobId yang bukan UUID dijawab daftar kosong tanpa bertanya ke basis data")
+    void invalidJobIdReturnsNothing() {
+        assertEquals(List.of(), logService.search(principal, null, null, null, "bukan-uuid", null, null));
+        assertTrue(database.statements.isEmpty(), database.statements.toString());
     }
 
     @Test
-    @DisplayName("tingkat peringatan yang tidak dikenal ditolak 400")
-    void peringatanTakDikenal() {
-        ApiException e = assertThrows(ApiException.class,
-                () -> layanan.peringatan(penyewa, null, List.of("gawat"), null));
+    @DisplayName("membersihkan catatan butuh batas hari minimal satu")
+    void purgeRequiresAtLeastOneDay() {
+        assertEquals(HttpStatus.BAD_REQUEST,
+                assertThrows(ApiException.class, () -> logService.purgeOlderThan(principal, null)).status());
+        assertEquals(HttpStatus.BAD_REQUEST,
+                assertThrows(ApiException.class, () -> logService.purgeOlderThan(principal, 0)).status());
 
-        assertEquals(HttpStatus.BAD_REQUEST, e.status());
+        assertEquals(1, logService.purgeOlderThan(principal, 30).deleted());
     }
 
     // ---------- alat ----------
 
-    private static Map<String, Object> baris(String tingkat, String pesan) {
-        Map<String, Object> b = new HashMap<>();
-        b.put("level", tingkat);
-        b.put("message", pesan);
-        b.put("robotName", "LAPTOP-uji");
-        return b;
-    }
-
-    private String sqlTerakhir() {
-        return db.sql.get(db.sql.size() - 1);
-    }
-
-    private List<Object> argsTerakhir() {
-        return Arrays.asList(db.args.get(db.args.size() - 1));
+    private static Map<String, Object> line(String level, String message) {
+        Map<String, Object> line = new HashMap<>();
+        line.put("level", level);
+        line.put("message", message);
+        line.put("robotName", "LAPTOP-uji");
+        return line;
     }
 
     /**
      * Nilai untuk "level IN (...)" pada pencarian terakhir: argumen sesudah
      * penyewa dan kedua tingkat rincian, sebelum batasnya.
      */
-    private List<Object> tingkatDiSaring() {
-        List<Object> args = argsTerakhir();
+    private List<Object> filteredLevels() {
+        List<Object> args = database.lastArguments();
         return args.subList(3, args.size() - 1);
     }
 
     /** Tingkat dari setiap INSERT ke tabel logs, sesuai urutan kirimannya. */
-    private List<Object> tingkatYangDisimpan() {
-        List<Object> hasil = new ArrayList<>();
+    private List<Object> storedLevels() {
+        List<Object> levels = new ArrayList<>();
 
-        for (int i = 0; i < db.sql.size(); i++) {
-            if (db.sql.get(i).contains("INSERT INTO logs")) hasil.add(db.args.get(i)[1]);
+        for (int i = 0; i < database.statements.size(); i++) {
+            if (database.statements.get(i).contains("INSERT INTO logs")) levels.add(database.arguments.get(i)[1]);
         }
 
-        return hasil;
-    }
-
-    /** Basis data palsu: merekam setiap perintah, tidak menjalankan apa pun. */
-    private static final class DbPerekam extends Db {
-
-        final List<String> sql = new ArrayList<>();
-        final List<Object[]> args = new ArrayList<>();
-
-        DbPerekam() {
-            super(null);
-        }
-
-        @Override
-        public List<Map<String, Object>> rows(String perintah, Object... nilai) {
-            sql.add(perintah);
-            args.add(nilai);
-            return new ArrayList<>();
-        }
-
-        @Override
-        public int exec(String perintah, Object... nilai) {
-            sql.add(perintah);
-            args.add(nilai);
-            return 1;
-        }
-
-        List<String> sqlYangMemuat(String potongan) {
-            return sql.stream().filter(s -> s.contains(potongan)).toList();
-        }
+        return levels;
     }
 }

@@ -1,18 +1,25 @@
 package id.jakforge.forgehub.service;
 
 import id.jakforge.forgehub.common.ApiException;
-import id.jakforge.forgehub.dto.JobRequest;
-import id.jakforge.forgehub.dto.JobStateRequest;
+import id.jakforge.forgehub.common.PageLimits;
+import id.jakforge.forgehub.common.Uuids;
+import id.jakforge.forgehub.config.ForgeHubProperties;
+import id.jakforge.forgehub.dto.request.CreateJobRequest;
+import id.jakforge.forgehub.dto.request.UpdateJobStateRequest;
+import id.jakforge.forgehub.dto.response.CreatedResponse;
+import id.jakforge.forgehub.dto.response.NextJobResponse;
 import id.jakforge.forgehub.model.JobState;
 import id.jakforge.forgehub.model.Severity;
-import id.jakforge.forgehub.repository.Db;
+import id.jakforge.forgehub.repository.AlertRepository;
 import id.jakforge.forgehub.repository.FolderRepository;
 import id.jakforge.forgehub.repository.JobRepository;
 import id.jakforge.forgehub.repository.LogRepository;
+import id.jakforge.forgehub.security.ForgeHubPrincipal;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -24,43 +31,54 @@ import java.util.UUID;
  * belum diterbitkan tidak boleh dijadwalkan, keadaan yang tidak dikenal
  * ditolak, kegagalan menghasilkan peringatan.
  */
+@Slf4j
 @Service
+@RequiredArgsConstructor
 public class JobService {
 
-    private static final int BATAS_DAFTAR_BAWAAN = 100;
-    private static final int BATAS_DAFTAR_MAKS = 1000;
+    static final int DEFAULT_PAGE_SIZE = 100;
+    static final int MAX_PAGE_SIZE = 1000;
 
-    private final JobRepository jobs;
-    private final CatalogService katalog;
-    private final LogRepository catatan;
-    private final FolderRepository folders;
+    /**
+     * Pekerjaan dianggap terputus sesudah robotnya diam selama DUA kali batas
+     * putus robot, bukan satu kali: robot yang baru saja melewatkan satu denyut
+     * belum tentu mati, dan menandai pekerjaannya gagal terlalu cepat
+     * menghasilkan kegagalan palsu untuk automasi yang sebenarnya masih berjalan.
+     */
+    static final int DISCONNECTED_JOB_TIMEOUT_MULTIPLIER = 2;
 
-    public JobService(JobRepository jobs, CatalogService katalog, LogRepository catatan,
-                      FolderRepository folders) {
-        this.jobs = jobs;
-        this.katalog = katalog;
-        this.catatan = catatan;
-        this.folders = folders;
-    }
+    static final int MIN_PROGRESS = 0;
+    static final int MAX_PROGRESS = 100;
 
-    /** @param folderId null berarti seluruh penyewa. */
-    public List<Map<String, Object>> daftar(UUID tenantId, String state, String process, UUID folderId,
-                                            Integer batas) {
+    private static final String JOB_NOT_FOUND = "Pekerjaan tidak ada.";
+    private static final String ALERT_SOURCE = "jobs";
+    private static final String UNKNOWN_ROBOT = "?";
+
+    private final JobRepository jobRepository;
+    private final ProcessService processService;
+    private final FolderRepository folderRepository;
+    private final LogRepository logRepository;
+    private final AlertRepository alertRepository;
+    private final FolderAccessService folderAccessService;
+    private final ForgeHubProperties properties;
+
+    /** Tanpa {@code folderId}: pekerjaan seluruh penyewa. */
+    public List<Map<String, Object>> findAll(ForgeHubPrincipal principal, String state, String processName,
+                                             String folderId, Integer limit) {
+        UUID folder = folderAccessService.resolveFolderFilter(principal, folderId);
+
         // Keadaan dinormalkan lewat enum, bukan dengan toUpperCase mentah:
         // "?state=berjalan" tidak akan pernah cocok, dan lebih baik menyaring
         // dengan nilai yang jelas tidak ada daripada dengan untai sembarang.
-        JobState keadaan = JobState.dari(state);
+        JobState jobState = JobState.parse(state);
 
-        return jobs.cari(tenantId, keadaan == null ? null : keadaan.name(), process, folderId,
-                Batas.antara(batas, BATAS_DAFTAR_BAWAAN, BATAS_DAFTAR_MAKS));
+        return jobRepository.search(principal.tenantId(), jobState == null ? null : jobState.name(), processName,
+                folder, PageLimits.clamp(limit, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
     }
 
-    public Map<String, Object> satu(UUID tenantId, String id) {
-        Map<String, Object> job = jobs.satu(tenantId, uuid(id));
-
-        if (job == null) throw ApiException.tidakAda("Pekerjaan tidak ada.");
-
-        return job;
+    public Map<String, Object> findById(ForgeHubPrincipal principal, String jobId) {
+        return jobRepository.findById(principal.tenantId(), parseJobId(jobId))
+                .orElseThrow(() -> ApiException.notFound(JOB_NOT_FOUND));
     }
 
     /**
@@ -70,49 +88,46 @@ public class JobService {
      * pekerjaan PENDING yang tidak akan pernah bisa dijalankan robot mana pun —
      * dan yang terlihat kemudian adalah antrean yang menumpuk tanpa sebab.
      *
-     * @param folderId folder prosesnya, sudah diperiksa haknya; null berarti
-     *                 proses bernama itu di mana pun ia berada — bentuk yang
-     *                 dikirim Studio (lihat CatalogService.pilihFolder)
+     * <p>{@code folderId} menyebut folder prosesnya; nama proses unik per
+     * folder. Studio tidak mengirimnya — lihat {@link FolderLocations#resolve}.
      */
     @Transactional
-    public Map<String, Object> buat(UUID tenantId, JobRequest minta, UUID folderId) {
-        if (minta.processName() == null) {
-            throw ApiException.salah("processName wajib diisi.");
+    public CreatedResponse create(ForgeHubPrincipal principal, CreateJobRequest request) {
+        UUID tenantId = principal.tenantId();
+        UUID requestedFolder = folderAccessService.resolveFolderFilter(principal, request.folderId());
+
+        if (request.processName() == null) {
+            throw ApiException.badRequest("processName wajib diisi.");
         }
 
-        UUID folder = katalog.folderProses(tenantId, minta.processName(), folderId);
+        UUID folder = processService.resolveProcessFolder(tenantId, request.processName(), requestedFolder);
 
         if (folder == null) {
-            throw ApiException.salah(folderId == null
-                    ? "Proses '" + minta.processName() + "' belum diterbitkan ke ForgeHub."
-                    : "Proses '" + minta.processName() + "' tidak ada di folder ini.");
+            throw ApiException.badRequest(requestedFolder == null
+                    ? "Proses '" + request.processName() + "' belum diterbitkan ke ForgeHub."
+                    : "Proses '" + request.processName() + "' tidak ada di folder ini.");
         }
 
-        UUID id = Db.newId();
+        UUID jobId = UUID.randomUUID();
 
         // Folder pekerjaan adalah folder prosesnya, disebut langsung — bukan
         // dibiarkan ditebak basis data dari namanya. Folder tanpa robot berarti
         // pekerjaan ini akan menunggu selamanya, dan keterangannya harus
         // mengatakan itu — bukan "menunggu robot yang tersedia", yang membuat
         // orang menunggu robot yang tidak akan datang.
-        boolean adaRobot = minta.robotName() != null || folders.adaRobot(tenantId, folder);
+        boolean robotAvailable = request.robotName() != null || folderRepository.hasRobots(tenantId, folder);
 
-        String info = adaRobot
+        String info = robotAvailable
                 ? "Menunggu robot yang tersedia."
                 : "Belum ada robot yang ditugaskan ke folder proses ini. Tugaskan robot lewat Setelan folder.";
 
-        jobs.buat(id, tenantId, folder, minta.processName(), minta.robotName(), minta.machineName(),
-                minta.source(), minta.priority(), info, minta.inputJson());
+        jobRepository.insert(jobId, tenantId, folder, request.processName(), request.robotName(),
+                request.machineName(), request.source(), request.priority(), info, request.inputJson());
 
-        catatan.tulisSistem(tenantId,
-                "Pekerjaan dijadwalkan untuk " + minta.processName() + ".",
-                minta.processName(), id);
+        logRepository.insertSystemEntry(tenantId,
+                "Pekerjaan dijadwalkan untuk " + request.processName() + ".", request.processName(), jobId);
 
-        Map<String, Object> hasil = new LinkedHashMap<>();
-        hasil.put("ok", true);
-        hasil.put("id", id.toString());
-
-        return hasil;
+        return CreatedResponse.of(jobId);
     }
 
     /**
@@ -124,54 +139,82 @@ public class JobService {
      * galat.
      */
     @Transactional
-    public Map<String, Object> ambilBerikutnya(UUID tenantId, String robot) {
-        if (robot == null || robot.isBlank()) {
-            throw ApiException.salah("Parameter 'robot' wajib diisi.");
+    public NextJobResponse claimNext(ForgeHubPrincipal principal, String robotName) {
+        if (robotName == null || robotName.isBlank()) {
+            throw ApiException.badRequest("Parameter 'robot' wajib diisi.");
         }
 
-        Map<String, Object> hasil = new LinkedHashMap<>();
-        hasil.put("job", jobs.ambilBerikutnya(tenantId, robot));
-
-        return hasil;
+        return new NextJobResponse(jobRepository.claimNext(principal.tenantId(), robotName).orElse(null));
     }
 
     @Transactional
-    public void ubahKeadaan(UUID tenantId, String id, JobStateRequest minta) {
-        UUID jobId = uuid(id);
+    public void updateState(ForgeHubPrincipal principal, String jobIdText, UpdateJobStateRequest request) {
+        UUID tenantId = principal.tenantId();
+        UUID jobId = parseJobId(jobIdText);
 
-        JobState keadaan = JobState.dari(minta.state());
+        JobState state = JobState.parse(request.state());
 
-        if (keadaan == null) {
-            throw ApiException.salah("Keadaan tidak dikenal: '" + minta.state() + "'.");
+        if (state == null) {
+            throw ApiException.badRequest("Keadaan tidak dikenal: '" + request.state() + "'.");
         }
 
-        String proses = jobs.namaProses(tenantId, jobId);
-
-        if (proses == null) throw ApiException.tidakAda("Pekerjaan tidak ada.");
+        String processName = jobRepository.findProcessName(tenantId, jobId)
+                .orElseThrow(() -> ApiException.notFound(JOB_NOT_FOUND));
 
         // Yang sudah selesai selalu 100%. Pekerjaan berhasil yang tercatat 40%
         // membuat orang mengira ada yang terhenti di tengah.
-        int kemajuan = keadaan.selesai() ? 100 : Math.clamp(minta.progress(), 0, 100);
+        int progress = state.isFinished() ? MAX_PROGRESS : Math.clamp(request.progress(), MIN_PROGRESS, MAX_PROGRESS);
 
-        jobs.ubahKeadaan(tenantId, jobId, keadaan, kemajuan, minta.info(), minta.outputJson());
+        jobRepository.updateState(tenantId, jobId, state, progress, request.info(), request.outputJson());
 
-        if (keadaan == JobState.FAULTED) {
-            catatan.catatPeringatan(tenantId, Severity.Error, "Pekerjaan gagal",
-                    proses + " gagal: " + (minta.info() == null ? "tanpa keterangan" : minta.info()),
-                    "jobs");
+        if (state == JobState.FAULTED) {
+            alertRepository.insert(tenantId, Severity.Error, "Pekerjaan gagal",
+                    processName + " gagal: " + (request.info() == null ? "tanpa keterangan" : request.info()),
+                    ALERT_SOURCE);
         }
     }
 
-    public void hentikan(UUID tenantId, String id) {
-        if (jobs.hentikan(tenantId, uuid(id)) == 0) {
-            throw ApiException.salah("Pekerjaan itu tidak sedang menunggu atau berjalan.");
+    public void requestStop(ForgeHubPrincipal principal, String jobId) {
+        if (jobRepository.requestStop(principal.tenantId(), parseJobId(jobId)) == 0) {
+            throw ApiException.badRequest("Pekerjaan itu tidak sedang menunggu atau berjalan.");
         }
     }
 
-    public void hapus(UUID tenantId, String id) {
-        if (jobs.hapus(tenantId, uuid(id)) == 0) {
-            throw ApiException.tidakAda("Pekerjaan tidak ada.");
+    public void delete(ForgeHubPrincipal principal, String jobId) {
+        if (jobRepository.delete(principal.tenantId(), parseJobId(jobId)) == 0) {
+            throw ApiException.notFound(JOB_NOT_FOUND);
         }
+    }
+
+    /**
+     * Pekerjaan yang robotnya menghilang — dijalankan penjadwal.
+     *
+     * <p>Robot yang mati di tengah jalan tidak pernah melaporkan hasil akhir,
+     * jadi pekerjaannya akan berstatus RUNNING selamanya — dan kartu "berjalan"
+     * di dasbor terus menghitungnya.
+     *
+     * @return jumlah pekerjaan yang ditandai gagal
+     */
+    @Transactional
+    public int failJobsOfDisconnectedRobots() {
+        int silenceSeconds = Math.toIntExact(
+                properties.robot().heartbeatTimeout().toSeconds() * DISCONNECTED_JOB_TIMEOUT_MULTIPLIER);
+
+        List<Map<String, Object>> faultedJobs = jobRepository.markJobsOfSilentRobotsFaulted(silenceSeconds);
+
+        for (Map<String, Object> job : faultedJobs) {
+            UUID tenantId = Uuids.parseOrNull((String) job.get("tenantId"));
+            Object robotName = job.get("robotName");
+
+            alertRepository.insert(tenantId, Severity.Error, "Pekerjaan terputus",
+                    job.get("processName") + " dihentikan karena robot '"
+                            + (robotName == null ? UNKNOWN_ROBOT : robotName) + "' tidak lagi terhubung.",
+                    ALERT_SOURCE);
+
+            log.warn("Pekerjaan {} ditandai FAULTED: robot {} berhenti berdenyut.", job.get("id"), robotName);
+        }
+
+        return faultedJobs.size();
     }
 
     /**
@@ -180,11 +223,9 @@ public class JobService {
      * <p>Yang bukan UUID dijawab 404, bukan 500: itu permintaan yang salah
      * bentuk, dan 500 mengarahkan orang mencari kerusakan di server.
      */
-    private static UUID uuid(String id) {
-        UUID hasil = Db.uuid(id);
-
-        if (hasil == null) throw ApiException.tidakAda("Pekerjaan tidak ada.");
-
-        return hasil;
+    private static UUID parseJobId(String jobId) {
+        UUID id = Uuids.parseOrNull(jobId);
+        if (id == null) throw ApiException.notFound(JOB_NOT_FOUND);
+        return id;
     }
 }

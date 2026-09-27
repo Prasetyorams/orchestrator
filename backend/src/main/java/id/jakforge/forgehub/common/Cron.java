@@ -45,7 +45,27 @@ import java.util.Set;
 public final class Cron {
 
     /** Jumlah tahun ke depan yang ditelusuri sebelum menyerah. */
-    private static final int BATAS_TAHUN = 4;
+    private static final int MAX_YEARS_AHEAD = 4;
+
+    private static final int FIELD_COUNT = 5;
+    private static final int MINUTE = 0;
+    private static final int HOUR = 1;
+    private static final int DAY_OF_MONTH = 2;
+    private static final int MONTH = 3;
+    private static final int DAY_OF_WEEK = 4;
+
+    private static final int DAYS_IN_LONGEST_MONTH = 31;
+    private static final int DAYS_IN_WEEK = 7;
+
+    /** Cron menerima 7 sebagai Minggu; di sini Minggu selalu 0. */
+    private static final int SUNDAY_ALIAS = 7;
+    private static final int SUNDAY = 0;
+
+    /** Batas bawah dan atas tiap ruas, dalam urutan ruasnya. */
+    private static final int[][] FIELD_RANGES = { {0, 59}, {0, 23}, {1, 31}, {1, 12}, {0, 7} };
+
+    /** Angka dalam ekspresi paling banyak empat digit. */
+    private static final int MAX_NUMBER_DIGITS = 4;
 
     private Cron() {
     }
@@ -60,40 +80,40 @@ public final class Cron {
      * {@code zone}. Null kalau ekspresinya tidak sah atau tidak pernah cocok.
      */
     public static ZonedDateTime next(String expression, ZonedDateTime after, ZoneId zone) {
-        Set<Integer>[] ruas = parse(expression);
-        if (ruas == null) return null;
+        Set<Integer>[] fields = parse(expression);
+        if (fields == null) return null;
 
-        ZoneId z = zone == null ? ZoneOffset.UTC : zone;
+        ZoneId effectiveZone = zone == null ? ZoneOffset.UTC : zone;
 
         // Mulai dari menit BERIKUTNYA: pemicu yang baru saja berjalan pada
         // menit ini tidak boleh langsung berjalan lagi di menit yang sama.
-        LocalDateTime t = after.withZoneSameInstant(z).toLocalDateTime()
+        LocalDateTime candidate = after.withZoneSameInstant(effectiveZone).toLocalDateTime()
                 .truncatedTo(ChronoUnit.MINUTES)
                 .plusMinutes(1);
 
         // Empat tahun cukup untuk menutup 29 Februari pada ekspresi yang paling
         // jarang sekalipun. Kalau dalam rentang itu tidak ada yang cocok,
         // ekspresinya memang tidak akan pernah cocok.
-        LocalDateTime batas = t.plusYears(BATAS_TAHUN);
+        LocalDateTime giveUpAt = candidate.plusYears(MAX_YEARS_AHEAD);
 
-        while (t.isBefore(batas)) {
-            if (!ruas[3].contains(t.getMonthValue())) {
-                t = t.withDayOfMonth(1).toLocalDate().atStartOfDay().plusMonths(1);
+        while (candidate.isBefore(giveUpAt)) {
+            if (!fields[MONTH].contains(candidate.getMonthValue())) {
+                candidate = candidate.withDayOfMonth(1).toLocalDate().atStartOfDay().plusMonths(1);
                 continue;
             }
 
-            if (!hariCocok(ruas, t)) {
-                t = t.toLocalDate().atStartOfDay().plusDays(1);
+            if (!dayMatches(fields, candidate)) {
+                candidate = candidate.toLocalDate().atStartOfDay().plusDays(1);
                 continue;
             }
 
-            if (!ruas[1].contains(t.getHour())) {
-                t = t.toLocalDate().atStartOfDay().plusHours(t.getHour() + 1L);
+            if (!fields[HOUR].contains(candidate.getHour())) {
+                candidate = candidate.toLocalDate().atStartOfDay().plusHours(candidate.getHour() + 1L);
                 continue;
             }
 
-            if (!ruas[0].contains(t.getMinute())) {
-                t = t.plusMinutes(1);
+            if (!fields[MINUTE].contains(candidate.getMinute())) {
+                candidate = candidate.plusMinutes(1);
                 continue;
             }
 
@@ -101,30 +121,44 @@ public final class Cron {
             // maju sendiri oleh ZonedDateTime.of, dan itu perilaku yang benar:
             // pemicu pukul 02:30 pada hari jam dimajukan tetap harus berjalan,
             // bukan dilewati diam-diam sampai tahun depan.
-            return ZonedDateTime.of(t, z);
+            return ZonedDateTime.of(candidate, effectiveZone);
         }
 
         return null;
     }
 
+    /** Zona waktu yang tercatat pada pemicu; UTC kalau namanya tidak dikenal. */
+    public static ZoneId zoneOrUtc(String zoneName) {
+        if (zoneName == null || zoneName.isBlank()) return ZoneOffset.UTC;
+
+        try {
+            return ZoneId.of(zoneName.trim());
+        } catch (Exception e) {
+            // Nama zona yang salah ketik TIDAK menghentikan pemicunya; ia
+            // berjalan dalam UTC. Berhenti sama sekali karena satu untai yang
+            // keliru adalah hukuman yang tidak sebanding.
+            return ZoneOffset.UTC;
+        }
+    }
+
     /** Tanggal dan hari: kalau KEDUANYA dibatasi, cukup salah satu cocok. */
-    private static boolean hariCocok(Set<Integer>[] ruas, LocalDateTime t) {
-        boolean tanggalDibatasi = ruas[2].size() < 31;
-        boolean hariDibatasi = ruas[4].size() < 7;
+    private static boolean dayMatches(Set<Integer>[] fields, LocalDateTime candidate) {
+        boolean dayOfMonthRestricted = fields[DAY_OF_MONTH].size() < DAYS_IN_LONGEST_MONTH;
+        boolean dayOfWeekRestricted = fields[DAY_OF_WEEK].size() < DAYS_IN_WEEK;
 
-        boolean tanggalCocok = ruas[2].contains(t.getDayOfMonth());
-        boolean hariCocok = ruas[4].contains(nomorHari(t.getDayOfWeek()));
+        boolean dayOfMonthMatches = fields[DAY_OF_MONTH].contains(candidate.getDayOfMonth());
+        boolean dayOfWeekMatches = fields[DAY_OF_WEEK].contains(cronDayOfWeek(candidate.getDayOfWeek()));
 
-        if (tanggalDibatasi && hariDibatasi) return tanggalCocok || hariCocok;
-        if (tanggalDibatasi) return tanggalCocok;
-        if (hariDibatasi) return hariCocok;
+        if (dayOfMonthRestricted && dayOfWeekRestricted) return dayOfMonthMatches || dayOfWeekMatches;
+        if (dayOfMonthRestricted) return dayOfMonthMatches;
+        if (dayOfWeekRestricted) return dayOfWeekMatches;
 
         return true;
     }
 
     /** Java memakai Senin=1..Minggu=7; cron memakai Minggu=0..Sabtu=6. */
-    private static int nomorHari(DayOfWeek hari) {
-        return hari.getValue() % 7;
+    private static int cronDayOfWeek(DayOfWeek day) {
+        return day.getValue() % DAYS_IN_WEEK;
     }
 
     /** Lima himpunan nilai yang diizinkan, atau null kalau tidak sah. */
@@ -132,79 +166,78 @@ public final class Cron {
     private static Set<Integer>[] parse(String expression) {
         if (expression == null || expression.isBlank()) return null;
 
-        String[] ruas = expression.trim().split("\\s+");
-        if (ruas.length != 5) return null;
+        String[] parts = expression.trim().split("\\s+");
+        if (parts.length != FIELD_COUNT) return null;
 
-        int[][] batas = { {0, 59}, {0, 23}, {1, 31}, {1, 12}, {0, 7} };
-        Set<Integer>[] hasil = new Set[5];
+        Set<Integer>[] fields = new Set[FIELD_COUNT];
 
-        for (int i = 0; i < 5; i++) {
-            Set<Integer> himpunan = uraiRuas(ruas[i], batas[i][0], batas[i][1]);
-            if (himpunan == null) return null;
+        for (int i = 0; i < FIELD_COUNT; i++) {
+            Set<Integer> allowed = parseField(parts[i], FIELD_RANGES[i][0], FIELD_RANGES[i][1]);
+            if (allowed == null) return null;
 
             // Cron menerima 7 sebagai Minggu, sementara di sini Minggu adalah 0.
             // Disamakan di sini supaya pembandingnya tidak perlu tahu.
-            if (i == 4 && himpunan.remove(7)) himpunan.add(0);
+            if (i == DAY_OF_WEEK && allowed.remove(SUNDAY_ALIAS)) allowed.add(SUNDAY);
 
-            if (himpunan.isEmpty()) return null;
-            hasil[i] = himpunan;
+            if (allowed.isEmpty()) return null;
+            fields[i] = allowed;
         }
 
-        return hasil;
+        return fields;
     }
 
-    private static Set<Integer> uraiRuas(String ruas, int min, int max) {
-        Set<Integer> hasil = new HashSet<>();
+    private static Set<Integer> parseField(String field, int min, int max) {
+        Set<Integer> allowed = new HashSet<>();
 
-        for (String bagian : ruas.split(",", -1)) {
-            if (bagian.isEmpty()) return null;
+        for (String part : field.split(",", -1)) {
+            if (part.isEmpty()) return null;
 
-            int langkah = 1;
-            String isi = bagian;
+            int step = 1;
+            String range = part;
 
-            int garis = bagian.indexOf('/');
-            if (garis >= 0) {
-                isi = bagian.substring(0, garis);
+            int slash = part.indexOf('/');
+            if (slash >= 0) {
+                range = part.substring(0, slash);
 
-                Integer n = angka(bagian.substring(garis + 1));
-                if (n == null || n < 1) return null;
-                langkah = n;
+                Integer parsedStep = parseNumber(part.substring(slash + 1));
+                if (parsedStep == null || parsedStep < 1) return null;
+                step = parsedStep;
             }
 
-            int mulai;
-            int akhir;
+            int start;
+            int end;
 
-            if ("*".equals(isi)) {
-                mulai = min;
-                akhir = max;
+            if ("*".equals(range)) {
+                start = min;
+                end = max;
             } else {
-                int strip = isi.indexOf('-');
+                int dash = range.indexOf('-');
 
-                if (strip > 0) {
-                    Integer a = angka(isi.substring(0, strip));
-                    Integer b = angka(isi.substring(strip + 1));
-                    if (a == null || b == null) return null;
+                if (dash > 0) {
+                    Integer from = parseNumber(range.substring(0, dash));
+                    Integer to = parseNumber(range.substring(dash + 1));
+                    if (from == null || to == null) return null;
 
-                    mulai = a;
-                    akhir = b;
+                    start = from;
+                    end = to;
                 } else {
-                    Integer a = angka(isi);
-                    if (a == null) return null;
+                    Integer single = parseNumber(range);
+                    if (single == null) return null;
 
-                    mulai = a;
+                    start = single;
 
                     // Angka tunggal DENGAN langkah berarti "dari sini sampai
                     // batas atas": "5/10" pada menit berarti 5, 15, 25, ...
-                    akhir = garis >= 0 ? max : a;
+                    end = slash >= 0 ? max : single;
                 }
             }
 
-            if (mulai < min || akhir > max || mulai > akhir) return null;
+            if (start < min || end > max || start > end) return null;
 
-            for (int n = mulai; n <= akhir; n += langkah) hasil.add(n);
+            for (int value = start; value <= end; value += step) allowed.add(value);
         }
 
-        return hasil;
+        return allowed;
     }
 
     /**
@@ -214,27 +247,13 @@ public final class Cron {
      * ekspresi cron yang longgar begitu akan diterima di sini tapi ditolak di
      * tempat lain. Jadi hanya digit yang lolos.
      */
-    private static Integer angka(String teks) {
-        if (teks == null || teks.isEmpty() || teks.length() > 4) return null;
+    private static Integer parseNumber(String text) {
+        if (text == null || text.isEmpty() || text.length() > MAX_NUMBER_DIGITS) return null;
 
-        for (int i = 0; i < teks.length(); i++) {
-            if (teks.charAt(i) < '0' || teks.charAt(i) > '9') return null;
+        for (int i = 0; i < text.length(); i++) {
+            if (text.charAt(i) < '0' || text.charAt(i) > '9') return null;
         }
 
-        return Integer.parseInt(teks);
-    }
-
-    /** Zona waktu yang tercatat pada pemicu; UTC kalau namanya tidak dikenal. */
-    public static ZoneId zona(String nama) {
-        if (nama == null || nama.isBlank()) return ZoneOffset.UTC;
-
-        try {
-            return ZoneId.of(nama.trim());
-        } catch (Exception e) {
-            // Nama zona yang salah ketik TIDAK menghentikan pemicunya; ia
-            // berjalan dalam UTC. Berhenti sama sekali karena satu untai yang
-            // keliru adalah hukuman yang tidak sebanding.
-            return ZoneOffset.UTC;
-        }
+        return Integer.parseInt(text);
     }
 }

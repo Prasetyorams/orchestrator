@@ -18,15 +18,16 @@ public enum QueueItemStatus {
      * butirnya dibuat dan diambil, bukan dilaporkan dari luar. Robot yang bisa
      * mengembalikan butir ke NEW sendiri akan membuatnya diproses dua kali.
      */
-    public boolean bolehDilaporkan() {
+    public boolean isReportable() {
         return this == SUCCESSFUL || this == FAILED || this == RETRIED || this == ABANDONED;
     }
 
-    public static QueueItemStatus dari(String teks) {
-        if (teks == null || teks.isBlank()) return null;
+    /** Null kalau tidak dikenal. */
+    public static QueueItemStatus parse(String text) {
+        if (text == null || text.isBlank()) return null;
 
         try {
-            return valueOf(teks.trim().toUpperCase(Locale.ROOT));
+            return valueOf(text.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             return null;
         }

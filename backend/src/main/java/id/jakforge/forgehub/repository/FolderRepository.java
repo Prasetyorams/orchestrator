@@ -1,10 +1,13 @@
 package id.jakforge.forgehub.repository;
 
+import id.jakforge.forgehub.common.Uuids;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -12,12 +15,16 @@ import java.util.UUID;
  * Folder dan penugasan pengguna serta robot ke dalamnya.
  *
  * <p>Isi folder — proses, antrean, aset, dan seterusnya — TIDAK diurus di sini.
- * SQL tentang proses tetap tinggal di CatalogRepository, termasuk memindahkan
+ * SQL tentang proses tetap tinggal di ProcessRepository, termasuk memindahkan
  * proses ke folder lain; yang ada di sini hanya folder itu sendiri dan siapa
  * yang boleh memakainya.
  */
 @Repository
+@RequiredArgsConstructor
 public class FolderRepository {
+
+    /** Nama Folder Saya — sama untuk semua orang, dan ditampilkan apa adanya. */
+    public static final String PERSONAL_FOLDER_NAME = "Folder Saya";
 
     /**
      * Kolom yang dikirim ke dasbor.
@@ -25,47 +32,48 @@ public class FolderRepository {
      * <p>"personal" alih-alih owner_id mentah: yang perlu diketahui layar hanya
      * apakah ini Folder Saya, bukan id pemiliknya.
      */
-    private static final String KOLOM = """
+    private static final String COLUMNS = """
             f.id, f.parent_id, f.name, f.description, f.is_default,
             f.owner_id IS NOT NULL AS personal, f.created_at
             """;
 
-    private final Db db;
-
-    public FolderRepository(Db db) {
-        this.db = db;
-    }
+    private final Database database;
 
     // -----------------------------------------------------------------
     // Membaca
     // -----------------------------------------------------------------
 
     /** Semua folder BERSAMA sebuah penyewa — tanpa folder pribadi siapa pun. */
-    public List<Map<String, Object>> semua(UUID tenantId) {
-        return db.rows("""
+    public List<Map<String, Object>> findAllShared(UUID tenantId) {
+        return database.queryRows("""
                 SELECT %s
                   FROM folders f
                  WHERE f.tenant_id = ? AND f.owner_id IS NULL
                  ORDER BY f.is_default DESC, lower(f.name)
-                """.formatted(KOLOM), tenantId);
+                """.formatted(COLUMNS), tenantId);
     }
 
-    /** Folder Saya milik seorang pengguna, atau null kalau belum pernah dibuka. */
-    public Map<String, Object> pribadi(UUID tenantId, UUID userId) {
-        return db.row("""
+    /** Folder Saya milik seorang pengguna, atau kosong kalau belum pernah dibuka. */
+    public Optional<Map<String, Object>> findPersonal(UUID tenantId, UUID userId) {
+        return database.queryRow("""
                 SELECT %s
                   FROM folders f
                  WHERE f.tenant_id = ? AND f.owner_id = ?
-                """.formatted(KOLOM), tenantId, userId);
+                """.formatted(COLUMNS), tenantId, userId);
     }
 
-    /** Satu folder, termasuk pemiliknya — dipakai untuk memeriksa hak. */
-    public Map<String, Object> satu(UUID tenantId, UUID id) {
-        return db.row("""
+    /** Satu folder, termasuk pemiliknya ({@code ownerId}) — dipakai untuk memeriksa hak. */
+    public Optional<Map<String, Object>> findById(UUID tenantId, UUID folderId) {
+        return database.queryRow("""
                 SELECT %s, f.owner_id
                   FROM folders f
                  WHERE f.tenant_id = ? AND f.id = ?
-                """.formatted(KOLOM), tenantId, id);
+                """.formatted(COLUMNS), tenantId, folderId);
+    }
+
+    public Optional<String> findName(UUID tenantId, UUID folderId) {
+        return database.queryScalar("SELECT name FROM folders WHERE tenant_id = ? AND id = ?", tenantId, folderId)
+                .map(String::valueOf);
     }
 
     /**
@@ -75,8 +83,8 @@ public class FolderRepository {
      * <p>Hitungan diambil dalam kueri yang sama supaya halaman itu bisa
      * menunjukkan folder mana yang boleh dihapus tanpa bertanya satu per satu.
      */
-    public List<Map<String, Object>> kelola(UUID tenantId) {
-        return db.rows("""
+    public List<Map<String, Object>> findAllForManagement(UUID tenantId) {
+        return database.queryRows("""
                 SELECT %s,
                        u.username AS owner_username,
                        (SELECT count(*) FROM folders c    WHERE c.parent_id = f.id)  AS child_count,
@@ -91,25 +99,19 @@ public class FolderRepository {
                   LEFT JOIN users u ON u.id = f.owner_id
                  WHERE f.tenant_id = ?
                  ORDER BY f.owner_id IS NOT NULL, f.is_default DESC, lower(f.name)
-                """.formatted(KOLOM), tenantId);
+                """.formatted(COLUMNS), tenantId);
     }
 
     /** Folder tempat seorang pengguna ditugaskan. */
-    public Set<UUID> ditugaskan(UUID tenantId, UUID userId) {
-        List<Object> id = db.jdbc().query("""
+    public Set<UUID> findAssignedFolderIds(UUID tenantId, UUID userId) {
+        return toUuidSet(database.query("""
                 SELECT folder_id FROM folder_users WHERE tenant_id = ? AND user_id = ?
-                """, (rs, i) -> rs.getObject(1), tenantId, userId);
-
-        Set<UUID> hasil = new HashSet<>();
-        for (Object o : id) hasil.add(o instanceof UUID u ? u : Db.uuid(String.valueOf(o)));
-
-        return hasil;
+                """, (rs, rowNumber) -> rs.getObject(1), tenantId, userId));
     }
 
     /** Id folder bawaan penyewa ini — dibuat oleh basis data kalau belum ada. */
-    public UUID bawaan(UUID tenantId) {
-        Object id = db.scalar("SELECT folder_bawaan(?)", tenantId);
-        return id instanceof UUID u ? u : Db.uuid(String.valueOf(id));
+    public UUID findDefaultFolderId(UUID tenantId) {
+        return database.queryScalar("SELECT folder_bawaan(?)", tenantId).map(Uuids::fromColumn).orElse(null);
     }
 
     /**
@@ -119,53 +121,50 @@ public class FolderRepository {
      * di dalam cabangnya sendiri, atau cabang itu terlepas dari pohon dan
      * berputar tanpa akar.
      */
-    public Set<UUID> keturunan(UUID tenantId, UUID id) {
-        List<Object> baris = db.jdbc().query("""
-                WITH RECURSIVE cabang AS (
+    public Set<UUID> findDescendantIds(UUID tenantId, UUID folderId) {
+        return toUuidSet(database.query("""
+                WITH RECURSIVE descendants AS (
                     SELECT id FROM folders WHERE tenant_id = ? AND parent_id = ?
                     UNION ALL
-                    SELECT f.id FROM folders f JOIN cabang c ON f.parent_id = c.id
+                    SELECT f.id FROM folders f JOIN descendants d ON f.parent_id = d.id
                 )
-                SELECT id FROM cabang
-                """, (rs, i) -> rs.getObject(1), tenantId, id);
-
-        Set<UUID> hasil = new HashSet<>();
-        for (Object o : baris) hasil.add(o instanceof UUID u ? u : Db.uuid(String.valueOf(o)));
-
-        return hasil;
+                SELECT id FROM descendants
+                """, (rs, rowNumber) -> rs.getObject(1), tenantId, folderId));
     }
 
     /**
      * Nama sudah dipakai saudaranya? Tanpa membedakan huruf besar, sama seperti
      * indeks unik uq_folders_nama.
      */
-    public boolean namaDipakai(UUID tenantId, UUID parentId, String nama, UUID kecuali) {
-        return db.exists("""
+    public boolean isNameTaken(UUID tenantId, UUID parentId, String name, UUID excludedFolderId) {
+        return database.exists("""
                 SELECT count(*) FROM folders
                  WHERE tenant_id = ? AND owner_id IS NULL
                    AND parent_id IS NOT DISTINCT FROM ?
                    AND lower(name) = lower(?)
                    AND id IS DISTINCT FROM ?
-                """, tenantId, parentId, nama, kecuali);
+                """, tenantId, parentId, name, excludedFolderId);
     }
 
-    public boolean adaAnak(UUID tenantId, UUID id) {
-        return db.exists("SELECT count(*) FROM folders WHERE tenant_id = ? AND parent_id = ?", tenantId, id);
+    public boolean hasChildren(UUID tenantId, UUID folderId) {
+        return database.exists("SELECT count(*) FROM folders WHERE tenant_id = ? AND parent_id = ?",
+                tenantId, folderId);
     }
 
     /** Berapa banyak isi yang masih tinggal di folder ini. Pekerjaan tidak dihitung: itu riwayat. */
-    public long jumlahIsi(UUID tenantId, UUID id) {
-        return db.count("""
+    public long countContents(UUID tenantId, UUID folderId) {
+        return database.count("""
                 SELECT (SELECT count(*) FROM processes WHERE tenant_id = ? AND folder_id = ?)
                      + (SELECT count(*) FROM triggers  WHERE tenant_id = ? AND folder_id = ?)
                      + (SELECT count(*) FROM queues    WHERE tenant_id = ? AND folder_id = ?)
                      + (SELECT count(*) FROM assets    WHERE tenant_id = ? AND folder_id = ?)
                      + (SELECT count(*) FROM buckets   WHERE tenant_id = ? AND folder_id = ?)
-                """, tenantId, id, tenantId, id, tenantId, id, tenantId, id, tenantId, id);
+                """, tenantId, folderId, tenantId, folderId, tenantId, folderId, tenantId, folderId,
+                tenantId, folderId);
     }
 
-    public boolean adaRobot(UUID tenantId, UUID folderId) {
-        return db.exists("SELECT count(*) FROM folder_robots WHERE tenant_id = ? AND folder_id = ?",
+    public boolean hasRobots(UUID tenantId, UUID folderId) {
+        return database.exists("SELECT count(*) FROM folder_robots WHERE tenant_id = ? AND folder_id = ?",
                 tenantId, folderId);
     }
 
@@ -173,11 +172,11 @@ public class FolderRepository {
     // Menulis
     // -----------------------------------------------------------------
 
-    public void buat(UUID id, UUID tenantId, UUID parentId, String nama, String keterangan) {
-        db.exec("""
+    public void insert(UUID folderId, UUID tenantId, UUID parentId, String name, String description) {
+        database.update("""
                 INSERT INTO folders (id, tenant_id, parent_id, name, description, is_default, created_at)
                 VALUES (?, ?, ?, ?, ?, FALSE, now())
-                """, id, tenantId, parentId, nama, keterangan);
+                """, folderId, tenantId, parentId, name, description);
     }
 
     /**
@@ -186,19 +185,19 @@ public class FolderRepository {
      * <p>ON CONFLICT: dua tab yang membukanya bersamaan tidak boleh membuat dua
      * folder pribadi, dan yang kalah cukup memakai milik yang menang.
      */
-    public void buatPribadi(UUID tenantId, UUID userId) {
-        db.exec("""
+    public void insertPersonal(UUID tenantId, UUID userId) {
+        database.update("""
                 INSERT INTO folders (id, tenant_id, parent_id, name, description, is_default, owner_id, created_at)
-                VALUES (?, ?, NULL, 'Folder Saya', NULL, FALSE, ?, now())
+                VALUES (?, ?, NULL, ?, NULL, FALSE, ?, now())
                 ON CONFLICT DO NOTHING
-                """, Db.newId(), tenantId, userId);
+                """, UUID.randomUUID(), tenantId, PERSONAL_FOLDER_NAME, userId);
     }
 
-    public void ubah(UUID tenantId, UUID id, String nama, String keterangan, UUID parentId) {
-        db.exec("""
+    public void update(UUID tenantId, UUID folderId, String name, String description, UUID parentId) {
+        database.update("""
                 UPDATE folders SET name = ?, description = ?, parent_id = ?
                  WHERE tenant_id = ? AND id = ?
-                """, nama, keterangan, parentId, tenantId, id);
+                """, name, description, parentId, tenantId, folderId);
     }
 
     /**
@@ -209,36 +208,37 @@ public class FolderRepository {
      * yang bekerja di induknya, dan tidak satu robot pun mau menjalankan
      * isinya.
      */
-    public void salinPenugasan(UUID tenantId, UUID dari, UUID ke) {
-        db.exec("""
+    public void copyAssignments(UUID tenantId, UUID sourceFolderId, UUID targetFolderId) {
+        database.update("""
                 INSERT INTO folder_users (folder_id, user_id, tenant_id, created_at)
                 SELECT ?, user_id, tenant_id, now() FROM folder_users WHERE tenant_id = ? AND folder_id = ?
                 ON CONFLICT DO NOTHING
-                """, ke, tenantId, dari);
+                """, targetFolderId, tenantId, sourceFolderId);
 
-        db.exec("""
+        database.update("""
                 INSERT INTO folder_robots (folder_id, robot_id, tenant_id, created_at)
                 SELECT ?, robot_id, tenant_id, now() FROM folder_robots WHERE tenant_id = ? AND folder_id = ?
                 ON CONFLICT DO NOTHING
-                """, ke, tenantId, dari);
+                """, targetFolderId, tenantId, sourceFolderId);
     }
 
     /** Riwayat pekerjaan sebuah folder yang akan dihapus pindah ke folder lain, bukan ikut hilang. */
-    public void pindahkanPekerjaan(UUID tenantId, UUID dari, UUID ke) {
-        db.exec("UPDATE jobs SET folder_id = ? WHERE tenant_id = ? AND folder_id = ?", ke, tenantId, dari);
+    public void moveJobs(UUID tenantId, UUID sourceFolderId, UUID targetFolderId) {
+        database.update("UPDATE jobs SET folder_id = ? WHERE tenant_id = ? AND folder_id = ?",
+                targetFolderId, tenantId, sourceFolderId);
     }
 
     /** Penugasannya ikut terhapus lewat ON DELETE CASCADE. */
-    public int hapus(UUID tenantId, UUID id) {
-        return db.exec("DELETE FROM folders WHERE tenant_id = ? AND id = ?", tenantId, id);
+    public int delete(UUID tenantId, UUID folderId) {
+        return database.update("DELETE FROM folders WHERE tenant_id = ? AND id = ?", tenantId, folderId);
     }
 
     // -----------------------------------------------------------------
     // Penugasan
     // -----------------------------------------------------------------
 
-    public List<Map<String, Object>> pengguna(UUID tenantId, UUID folderId) {
-        return db.rows("""
+    public List<Map<String, Object>> findAssignedUsers(UUID tenantId, UUID folderId) {
+        return database.queryRows("""
                 SELECT u.id, u.username, u.display_name, u.role, u.is_active, fu.created_at AS assigned_at
                   FROM folder_users fu
                   JOIN users u ON u.id = fu.user_id
@@ -247,8 +247,8 @@ public class FolderRepository {
                 """, tenantId, folderId);
     }
 
-    public List<Map<String, Object>> robot(UUID tenantId, UUID folderId) {
-        return db.rows("""
+    public List<Map<String, Object>> findAssignedRobots(UUID tenantId, UUID folderId) {
+        return database.queryRows("""
                 SELECT r.id, r.name, r.machine_name, r.type, fr.created_at AS assigned_at
                   FROM folder_robots fr
                   JOIN robots r ON r.id = fr.robot_id
@@ -257,45 +257,36 @@ public class FolderRepository {
                 """, tenantId, folderId);
     }
 
-    public int tugaskanPengguna(UUID tenantId, UUID folderId, UUID userId) {
-        return db.exec("""
+    public int assignUser(UUID tenantId, UUID folderId, UUID userId) {
+        return database.update("""
                 INSERT INTO folder_users (folder_id, user_id, tenant_id, created_at)
                 VALUES (?, ?, ?, now())
                 ON CONFLICT DO NOTHING
                 """, folderId, userId, tenantId);
     }
 
-    public int lepasPengguna(UUID tenantId, UUID folderId, UUID userId) {
-        return db.exec("DELETE FROM folder_users WHERE tenant_id = ? AND folder_id = ? AND user_id = ?",
+    public int unassignUser(UUID tenantId, UUID folderId, UUID userId) {
+        return database.update("DELETE FROM folder_users WHERE tenant_id = ? AND folder_id = ? AND user_id = ?",
                 tenantId, folderId, userId);
     }
 
-    public int tugaskanRobot(UUID tenantId, UUID folderId, UUID robotId) {
-        return db.exec("""
+    public int assignRobot(UUID tenantId, UUID folderId, UUID robotId) {
+        return database.update("""
                 INSERT INTO folder_robots (folder_id, robot_id, tenant_id, created_at)
                 VALUES (?, ?, ?, now())
                 ON CONFLICT DO NOTHING
                 """, folderId, robotId, tenantId);
     }
 
-    public int lepasRobot(UUID tenantId, UUID folderId, UUID robotId) {
-        return db.exec("DELETE FROM folder_robots WHERE tenant_id = ? AND folder_id = ? AND robot_id = ?",
+    public int unassignRobot(UUID tenantId, UUID folderId, UUID robotId) {
+        return database.update("DELETE FROM folder_robots WHERE tenant_id = ? AND folder_id = ? AND robot_id = ?",
                 tenantId, folderId, robotId);
     }
 
-    /** Id pengguna bernama itu di penyewa ini, atau null. */
-    public UUID idPengguna(UUID tenantId, String username) {
-        Object id = db.scalar("SELECT id FROM users WHERE tenant_id = ? AND username = ?", tenantId, username);
-        if (id == null) return null;
+    private static Set<UUID> toUuidSet(List<Object> columnValues) {
+        Set<UUID> ids = new HashSet<>();
+        for (Object value : columnValues) ids.add(Uuids.fromColumn(value));
 
-        return id instanceof UUID u ? u : Db.uuid(String.valueOf(id));
-    }
-
-    /** Id robot bernama itu di penyewa ini, atau null. */
-    public UUID idRobot(UUID tenantId, String nama) {
-        Object id = db.scalar("SELECT id FROM robots WHERE tenant_id = ? AND name = ?", tenantId, nama);
-        if (id == null) return null;
-
-        return id instanceof UUID u ? u : Db.uuid(String.valueOf(id));
+        return ids;
     }
 }

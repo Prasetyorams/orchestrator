@@ -1,8 +1,9 @@
 package id.jakforge.forgehub.controller;
 
-import id.jakforge.forgehub.repository.AuditRepository;
-import id.jakforge.forgehub.security.CurrentUser;
-import id.jakforge.forgehub.service.Batas;
+import id.jakforge.forgehub.security.ForgeHubPrincipal;
+import id.jakforge.forgehub.service.AuditService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -13,7 +14,7 @@ import java.util.Map;
 
 /**
  * Jejak audit, hanya untuk dibaca — oleh peran yang punya izin audit.read,
- * yang diperiksa IzinInterceptor sebelum permintaannya sampai di sini.
+ * yang diperiksa PermissionInterceptor sebelum permintaannya sampai di sini.
  *
  * <p>Tidak ada jalur untuk menghapus atau mengubahnya, dengan sengaja: jejak
  * yang bisa dibersihkan oleh orang yang jejaknya tercatat di sana bukan lagi
@@ -21,24 +22,22 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/audit")
+@RequiredArgsConstructor
 public class AuditController {
 
-    private final AuditRepository audit;
-
-    public AuditController(AuditRepository audit) {
-        this.audit = audit;
-    }
+    private final AuditService auditService;
 
     @GetMapping
-    public List<Map<String, Object>> daftar(@RequestParam(required = false) String component,
-                                            @RequestParam(required = false) String q,
-                                            @RequestParam(required = false) Integer limit) {
-        return audit.daftar(CurrentUser.get().tenantId(), component, q, Batas.antara(limit, 200, 2000));
+    public List<Map<String, Object>> findRecent(@AuthenticationPrincipal ForgeHubPrincipal principal,
+                                                @RequestParam(required = false) String component,
+                                                @RequestParam(name = "q", required = false) String keyword,
+                                                @RequestParam(required = false) Integer limit) {
+        return auditService.findRecent(principal, component, keyword, limit);
     }
 
     /** Komponen yang pernah tercatat, beserta jumlahnya — untuk pilihan penyaring. */
     @GetMapping("/components")
-    public List<Map<String, Object>> komponen() {
-        return audit.komponen(CurrentUser.get().tenantId());
+    public List<Map<String, Object>> countByComponent(@AuthenticationPrincipal ForgeHubPrincipal principal) {
+        return auditService.countByComponent(principal);
     }
 }

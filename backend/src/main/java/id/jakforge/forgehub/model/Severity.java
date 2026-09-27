@@ -6,16 +6,17 @@ public enum Severity {
     Warning,
     Error;
 
-    public String nilai() {
+    /** Ejaan yang tersimpan di kolom alerts.severity: Info, Warning, Error. */
+    public String storedValue() {
         return name();
     }
 
     /** Urai tanpa peduli huruf besar-kecil; null kalau tidak dikenal. */
-    public static Severity dari(String teks) {
-        if (teks == null || teks.isBlank()) return null;
+    public static Severity parse(String text) {
+        if (text == null || text.isBlank()) return null;
 
-        for (Severity s : values()) {
-            if (s.name().equalsIgnoreCase(teks.trim())) return s;
+        for (Severity severity : values()) {
+            if (severity.name().equalsIgnoreCase(text.trim())) return severity;
         }
 
         return null;

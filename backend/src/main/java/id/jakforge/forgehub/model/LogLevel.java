@@ -15,7 +15,7 @@ public enum LogLevel {
     FATAL;
 
     /** Perlu ikut muncul sebagai peringatan di kepala halaman. */
-    public boolean gawat() {
+    public boolean raisesAlert() {
         return this == ERROR || this == FATAL;
     }
 
@@ -29,13 +29,13 @@ public enum LogLevel {
      * orkestrator. Robot tetap menuliskannya ke log hariannya sendiri, jadi
      * jejak rinci satu jalan masih bisa dibaca di mesin robotnya.
      */
-    public boolean rincian() {
+    public boolean isVerbose() {
         return this == TRACE || this == DEBUG;
     }
 
     /** Nama tingkat rincian, untuk menyaring baris lama yang terlanjur tersimpan. */
-    public static List<String> namaRincian() {
-        return Arrays.stream(values()).filter(LogLevel::rincian).map(Enum::name).toList();
+    public static List<String> verboseLevelNames() {
+        return Arrays.stream(values()).filter(LogLevel::isVerbose).map(Enum::name).toList();
     }
 
     /**
@@ -46,7 +46,7 @@ public enum LogLevel {
      * adanya. Penyaring yang memilih "WARN" tapi melewatkan baris WARNING akan
      * menyembunyikan peringatan yang justru sedang dicari.
      */
-    public List<String> ejaan() {
+    public List<String> storedSpellings() {
         return this == WARN || this == WARNING ? List.of(WARN.name(), WARNING.name()) : List.of(name());
     }
 
@@ -57,11 +57,11 @@ public enum LogLevel {
      * Salah ketik pada penyaring harus terlihat sebagai kesalahan, bukan
      * diam-diam berubah menjadi "INFO" dan menampilkan hasil yang tidak diminta.
      */
-    public static LogLevel kenali(String teks) {
-        if (teks == null || teks.isBlank()) return null;
+    public static LogLevel parseStrict(String text) {
+        if (text == null || text.isBlank()) return null;
 
         try {
-            return valueOf(teks.trim().toUpperCase(Locale.ROOT));
+            return valueOf(text.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             return null;
         }
@@ -74,13 +74,8 @@ public enum LogLevel {
      * membuang seluruh kiriman log. Yang hilang kemudian justru catatan di
      * sekitar kegagalan yang sedang dicari orang.
      */
-    public static LogLevel dari(String teks) {
-        if (teks == null || teks.isBlank()) return INFO;
-
-        try {
-            return valueOf(teks.trim().toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException e) {
-            return INFO;
-        }
+    public static LogLevel parseOrInfo(String text) {
+        LogLevel level = parseStrict(text);
+        return level == null ? INFO : level;
     }
 }

@@ -1,116 +1,131 @@
 package id.jakforge.forgehub.service;
 
 import id.jakforge.forgehub.common.ApiException;
-import id.jakforge.forgehub.dto.Permintaan;
+import id.jakforge.forgehub.common.PageLimits;
+import id.jakforge.forgehub.common.Uuids;
+import id.jakforge.forgehub.dto.request.AddQueueItemRequest;
+import id.jakforge.forgehub.dto.request.CreateQueueRequest;
+import id.jakforge.forgehub.dto.request.MoveToFolderRequest;
+import id.jakforge.forgehub.dto.request.NextQueueItemRequest;
+import id.jakforge.forgehub.dto.request.QueueItemResultRequest;
+import id.jakforge.forgehub.dto.response.CreatedResponse;
+import id.jakforge.forgehub.dto.response.NextQueueItemResponse;
+import id.jakforge.forgehub.dto.response.QueueItemResultResponse;
 import id.jakforge.forgehub.model.QueueItemStatus;
 import id.jakforge.forgehub.model.Severity;
-import id.jakforge.forgehub.repository.Db;
-import id.jakforge.forgehub.repository.LogRepository;
+import id.jakforge.forgehub.repository.AlertRepository;
 import id.jakforge.forgehub.repository.QueueRepository;
+import id.jakforge.forgehub.repository.QueueRepository.QueueItemSummary;
+import id.jakforge.forgehub.repository.QueueRepository.QueueSettings;
+import id.jakforge.forgehub.security.ForgeHubPrincipal;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** Aturan tentang antrean transaksi. */
+/**
+ * Aturan tentang antrean transaksi.
+ *
+ * <p>Nama antrean unik untuk seluruh penyewa: robot memanggilnya lewat nama,
+ * tanpa tahu foldernya.
+ */
 @Service
+@RequiredArgsConstructor
 public class QueueService {
 
-    private static final int BATAS_BUTIR_BAWAAN = 200;
-    private static final int BATAS_BUTIR_MAKS = 2000;
+    static final int DEFAULT_ITEM_PAGE_SIZE = 200;
+    static final int MAX_ITEM_PAGE_SIZE = 2000;
 
-    private final QueueRepository antrean;
-    private final LogRepository catatan;
+    private static final String ITEM_NOT_FOUND = "Butir antrean tidak ada.";
+    private static final String ALERT_SOURCE = "queues";
 
-    public QueueService(QueueRepository antrean, LogRepository catatan) {
-        this.antrean = antrean;
-        this.catatan = catatan;
+    private final QueueRepository queueRepository;
+    private final AlertRepository alertRepository;
+    private final FolderAccessService folderAccessService;
+
+    /** Tanpa {@code folderId}: antrean seluruh penyewa. */
+    public List<Map<String, Object>> findAll(ForgeHubPrincipal principal, String folderId) {
+        return queueRepository.findAll(principal.tenantId(),
+                folderAccessService.resolveFolderFilter(principal, folderId));
     }
 
-    /** @param folderId null berarti seluruh penyewa. */
-    public List<Map<String, Object>> daftar(UUID tenantId, UUID folderId) {
-        return antrean.semua(tenantId, folderId);
-    }
+    /** {@code folderId} kosong berarti folder bawaan. */
+    @Transactional
+    public void create(ForgeHubPrincipal principal, CreateQueueRequest request) {
+        UUID tenantId = principal.tenantId();
+        UUID folderId = folderAccessService.resolveFolderFilter(principal, request.folderId());
 
-    /** @param folderId null berarti folder bawaan. */
-    public void buat(UUID tenantId, Permintaan.Antrean minta, UUID folderId) {
-        if (minta.name() == null) throw ApiException.salah("Nama antrean wajib diisi.");
-
-        if (antrean.ada(tenantId, minta.name())) {
-            throw ApiException.sudahAda("Antrean '" + minta.name() + "' sudah ada.");
+        if (queueRepository.existsByName(tenantId, request.name())) {
+            throw ApiException.conflict("Antrean '" + request.name() + "' sudah ada.");
         }
 
-        if (minta.maxRetries() < 0) throw ApiException.salah("Jumlah percobaan ulang tidak boleh negatif.");
-
-        antrean.buat(tenantId, minta.name(), minta.description(),
-                minta.maxRetries(), minta.acceptDuplicates(), folderId);
+        queueRepository.insert(tenantId, request.name(), request.description(),
+                request.maxRetries(), request.acceptDuplicates(), folderId);
     }
 
     /** Butirnya tidak perlu ikut dipindah: butir mengikuti antreannya lewat nama. */
-    public void pindah(UUID tenantId, String nama, UUID folderId) {
-        if (folderId == null) throw ApiException.salah("folderId wajib diisi.");
+    public void moveToFolder(ForgeHubPrincipal principal, String name, MoveToFolderRequest request) {
+        UUID folderId = folderAccessService.resolveFolderFilter(principal, request.folderId());
 
-        if (antrean.pindah(tenantId, nama, folderId) == 0) {
-            throw ApiException.tidakAda("Antrean '" + nama + "' tidak ada.");
+        if (folderId == null) throw ApiException.badRequest("folderId wajib diisi.");
+
+        if (queueRepository.moveToFolder(principal.tenantId(), name, folderId) == 0) {
+            throw ApiException.notFound("Antrean '" + name + "' tidak ada.");
         }
     }
 
     @Transactional
-    public void hapus(UUID tenantId, String nama) {
+    public void delete(ForgeHubPrincipal principal, String name) {
         // Isinya ikut dihapus. Butir yang menggantung tanpa antrean induk tidak
         // akan pernah bisa dilihat lagi lewat jalan mana pun, tapi tetap
         // terhitung dalam angka apa pun yang menjumlahkan seluruh tabel.
-        antrean.hapusButirAntrean(tenantId, nama);
+        queueRepository.deleteItemsOfQueue(principal.tenantId(), name);
 
-        if (antrean.hapus(tenantId, nama) == 0) {
-            throw ApiException.tidakAda("Antrean tidak ada.");
+        if (queueRepository.deleteByName(principal.tenantId(), name) == 0) {
+            throw ApiException.notFound("Antrean tidak ada.");
         }
     }
 
-    public List<Map<String, Object>> butir(UUID tenantId, String nama, String status, Integer batas) {
-        QueueItemStatus keadaan = QueueItemStatus.dari(status);
+    public List<Map<String, Object>> findItems(ForgeHubPrincipal principal, String queueName, String status,
+                                               Integer limit) {
+        QueueItemStatus itemStatus = QueueItemStatus.parse(status);
 
-        return antrean.butir(tenantId, nama, keadaan == null ? null : keadaan.name(),
-                Batas.antara(batas, BATAS_BUTIR_BAWAAN, BATAS_BUTIR_MAKS));
+        return queueRepository.findItems(principal.tenantId(), queueName,
+                itemStatus == null ? null : itemStatus.name(),
+                PageLimits.clamp(limit, DEFAULT_ITEM_PAGE_SIZE, MAX_ITEM_PAGE_SIZE));
     }
 
     @Transactional
-    public Map<String, Object> tambahButir(UUID tenantId, String nama, Permintaan.ButirAntrean minta) {
-        Map<String, Object> setelan = antrean.satu(tenantId, nama);
-
-        if (setelan == null) throw ApiException.tidakAda("Antrean '" + nama + "' tidak ada.");
-
-        boolean bolehKembar = Boolean.TRUE.equals(setelan.get("acceptDuplicates"));
+    public CreatedResponse addItem(ForgeHubPrincipal principal, String queueName, AddQueueItemRequest request) {
+        UUID tenantId = principal.tenantId();
+        QueueSettings settings = queueRepository.findSettings(tenantId, queueName)
+                .orElseThrow(() -> ApiException.notFound("Antrean '" + queueName + "' tidak ada."));
 
         // Penolakan kembar hanya berlaku untuk butir yang BELUM selesai.
         // Referensi yang sama boleh muncul lagi besok; yang tidak boleh adalah
         // dua salinan menunggu diproses pada saat yang sama.
-        if (!bolehKembar && minta.reference() != null && !minta.reference().isEmpty()
-                && antrean.adaKembar(tenantId, nama, minta.reference())) {
+        if (!settings.acceptDuplicates() && request.reference() != null && !request.reference().isEmpty()
+                && queueRepository.hasPendingDuplicate(tenantId, queueName, request.reference())) {
 
-            throw ApiException.sudahAda("Butir dengan referensi '" + minta.reference()
+            throw ApiException.conflict("Butir dengan referensi '" + request.reference()
                     + "' sudah menunggu di antrean ini.");
         }
 
-        UUID id = Db.newId();
-        antrean.tambahButir(id, tenantId, nama, minta.reference(), minta.priority(), minta.content());
+        UUID itemId = UUID.randomUUID();
+        queueRepository.insertItem(itemId, tenantId, queueName, request.reference(), request.priority(),
+                request.content());
 
-        Map<String, Object> hasil = new LinkedHashMap<>();
-        hasil.put("ok", true);
-        hasil.put("id", id.toString());
-
-        return hasil;
+        return CreatedResponse.of(itemId);
     }
 
     @Transactional
-    public Map<String, Object> ambilButir(UUID tenantId, String nama, String robot) {
-        Map<String, Object> hasil = new LinkedHashMap<>();
-        hasil.put("item", antrean.ambilButir(tenantId, nama, robot));
-
-        return hasil;
+    public NextQueueItemResponse claimNextItem(ForgeHubPrincipal principal, String queueName,
+                                               NextQueueItemRequest request) {
+        return new NextQueueItemResponse(
+                queueRepository.claimNextItem(principal.tenantId(), queueName, request.robotName()).orElse(null));
     }
 
     /**
@@ -121,63 +136,51 @@ public class QueueService {
      * selamanya adalah butir yang tidak pernah ketahuan rusaknya.
      */
     @Transactional
-    public Map<String, Object> hasilButir(UUID tenantId, String id, Permintaan.HasilButir minta) {
-        UUID itemId = uuid(id);
+    public QueueItemResultResponse reportResult(ForgeHubPrincipal principal, String itemIdText,
+                                                QueueItemResultRequest request) {
+        UUID tenantId = principal.tenantId();
+        UUID itemId = parseItemId(itemIdText);
 
-        QueueItemStatus status = QueueItemStatus.dari(minta.status());
+        QueueItemStatus status = QueueItemStatus.parse(request.status());
 
-        if (status == null || !status.bolehDilaporkan()) {
-            throw ApiException.salah("Status hasil tidak dikenal: '" + minta.status() + "'.");
+        if (status == null || !status.isReportable()) {
+            throw ApiException.badRequest("Status hasil tidak dikenal: '" + request.status() + "'.");
         }
 
-        Map<String, Object> butir = antrean.satuButir(tenantId, itemId);
-
-        if (butir == null) throw ApiException.tidakAda("Butir antrean tidak ada.");
-
-        String namaAntrean = (String) butir.get("queueName");
-        long percobaan = ((Number) butir.get("retries")).longValue();
-
-        Map<String, Object> hasil = new LinkedHashMap<>();
-        hasil.put("ok", true);
+        QueueItemSummary item = queueRepository.findItemSummary(tenantId, itemId)
+                .orElseThrow(() -> ApiException.notFound(ITEM_NOT_FOUND));
 
         if (status == QueueItemStatus.FAILED) {
-            Map<String, Object> setelan = antrean.satu(tenantId, namaAntrean);
-            long maksimum = setelan == null ? 0 : ((Number) setelan.get("maxRetries")).longValue();
+            long maxRetries = queueRepository.findSettings(tenantId, item.queueName())
+                    .map(QueueSettings::maxRetries)
+                    .orElse(0);
 
-            if (percobaan < maksimum) {
-                antrean.cobaLagi(tenantId, itemId, minta.exception());
+            if (item.retries() < maxRetries) {
+                queueRepository.requeueForRetry(tenantId, itemId, request.exception());
 
-                hasil.put("retried", true);
-                hasil.put("attempt", percobaan + 1);
-
-                return hasil;
+                return QueueItemResultResponse.retried(item.retries() + 1);
             }
 
-            Object referensi = butir.get("reference");
-
-            catatan.catatPeringatan(tenantId, Severity.Warning, "Butir antrean gagal permanen",
-                    "Butir '" + (referensi == null ? id : referensi) + "' di antrean " + namaAntrean
-                            + " gagal setelah " + percobaan + " percobaan ulang.", "queues");
+            alertRepository.insert(tenantId, Severity.Warning, "Butir antrean gagal permanen",
+                    "Butir '" + (item.reference() == null ? itemIdText : item.reference()) + "' di antrean "
+                            + item.queueName() + " gagal setelah " + item.retries() + " percobaan ulang.",
+                    ALERT_SOURCE);
         }
 
-        antrean.selesaikanButir(tenantId, itemId, status, minta.output(), minta.exception());
+        queueRepository.completeItem(tenantId, itemId, status, request.output(), request.exception());
 
-        hasil.put("retried", false);
-
-        return hasil;
+        return QueueItemResultResponse.completed();
     }
 
-    public void hapusButir(UUID tenantId, String id) {
-        if (antrean.hapusButir(tenantId, uuid(id)) == 0) {
-            throw ApiException.tidakAda("Butir antrean tidak ada.");
+    public void deleteItem(ForgeHubPrincipal principal, String itemId) {
+        if (queueRepository.deleteItem(principal.tenantId(), parseItemId(itemId)) == 0) {
+            throw ApiException.notFound(ITEM_NOT_FOUND);
         }
     }
 
-    private static UUID uuid(String id) {
-        UUID hasil = Db.uuid(id);
-
-        if (hasil == null) throw ApiException.tidakAda("Butir antrean tidak ada.");
-
-        return hasil;
+    private static UUID parseItemId(String itemId) {
+        UUID id = Uuids.parseOrNull(itemId);
+        if (id == null) throw ApiException.notFound(ITEM_NOT_FOUND);
+        return id;
     }
 }

@@ -1,9 +1,17 @@
 package id.jakforge.forgehub.controller;
 
-import id.jakforge.forgehub.common.Badan;
-import id.jakforge.forgehub.dto.Permintaan;
-import id.jakforge.forgehub.security.CurrentUser;
+import id.jakforge.forgehub.dto.request.AssignRobotRequest;
+import id.jakforge.forgehub.dto.request.AssignUserRequest;
+import id.jakforge.forgehub.dto.request.FolderRequest;
+import id.jakforge.forgehub.dto.response.CreatedResponse;
+import id.jakforge.forgehub.dto.response.FolderMembersResponse;
+import id.jakforge.forgehub.dto.response.FolderTreeResponse;
+import id.jakforge.forgehub.dto.response.OkResponse;
+import id.jakforge.forgehub.security.ForgeHubPrincipal;
 import id.jakforge.forgehub.service.FolderService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,50 +33,52 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/folders")
+@RequiredArgsConstructor
 public class FolderController {
 
-    private final FolderService service;
-
-    public FolderController(FolderService service) {
-        this.service = service;
-    }
+    private final FolderService folderService;
 
     /** Isi bilah folder: folder yang boleh dilihat, dan Folder Saya. */
     @GetMapping
-    public Map<String, Object> daftar() {
-        return service.daftar(CurrentUser.get());
+    public FolderTreeResponse getTree(@AuthenticationPrincipal ForgeHubPrincipal principal) {
+        return folderService.getTree(principal);
     }
 
-    /** Semua folder beserta isinya, untuk halaman pengelolaan. Hanya Administrator. */
+    /** Semua folder beserta isinya, untuk halaman pengelolaan. */
     @GetMapping("/manage")
-    public List<Map<String, Object>> kelola() {
-        return service.kelola(CurrentUser.get());
+    public List<Map<String, Object>> findAllForManagement(@AuthenticationPrincipal ForgeHubPrincipal principal) {
+        return folderService.findAllForManagement(principal);
     }
 
+    /**
+     * Dibaca dari {@code Map}: {@code parentId} yang tidak disebut berbeda
+     * artinya dari {@code parentId} kosong — lihat {@link FolderRequest}.
+     */
     @PostMapping
-    public Map<String, Object> buat(@RequestBody(required = false) Map<String, Object> body) {
-        return service.buat(CurrentUser.get(), Permintaan.Folder.dari(body));
+    public CreatedResponse create(@AuthenticationPrincipal ForgeHubPrincipal principal,
+                                  @RequestBody(required = false) Map<String, Object> body) {
+        return folderService.create(principal, FolderRequest.fromBody(body));
     }
 
     /** Folder Saya, dibuat saat pertama kali dibuka. */
     @PostMapping("/personal")
-    public Map<String, Object> pribadi() {
-        return service.pribadi(CurrentUser.get());
+    public Map<String, Object> getOrCreatePersonalFolder(@AuthenticationPrincipal ForgeHubPrincipal principal) {
+        return folderService.getOrCreatePersonalFolder(principal);
     }
 
     @PutMapping("/{id}")
-    public Map<String, Object> ubah(@PathVariable String id,
-                                    @RequestBody(required = false) Map<String, Object> body) {
-        service.ubah(CurrentUser.get(), id, Permintaan.Folder.dari(body));
+    public OkResponse update(@AuthenticationPrincipal ForgeHubPrincipal principal, @PathVariable String id,
+                             @RequestBody(required = false) Map<String, Object> body) {
+        folderService.update(principal, id, FolderRequest.fromBody(body));
 
-        return Map.of("ok", true);
+        return OkResponse.success();
     }
 
     @DeleteMapping("/{id}")
-    public Map<String, Object> hapus(@PathVariable String id) {
-        service.hapus(CurrentUser.get(), id);
+    public OkResponse delete(@AuthenticationPrincipal ForgeHubPrincipal principal, @PathVariable String id) {
+        folderService.delete(principal, id);
 
-        return Map.of("ok", true);
+        return OkResponse.success();
     }
 
     // -----------------------------------------------------------------
@@ -76,37 +86,40 @@ public class FolderController {
     // -----------------------------------------------------------------
 
     @GetMapping("/{id}/members")
-    public Map<String, Object> anggota(@PathVariable String id) {
-        return service.anggota(CurrentUser.get(), id);
+    public FolderMembersResponse getMembers(@AuthenticationPrincipal ForgeHubPrincipal principal,
+                                            @PathVariable String id) {
+        return folderService.getMembers(principal, id);
     }
 
     @PostMapping("/{id}/users")
-    public Map<String, Object> tugaskanPengguna(@PathVariable String id,
-                                                @RequestBody(required = false) Map<String, Object> body) {
-        service.tugaskanPengguna(CurrentUser.get(), id, Badan.nama(body, "username"));
+    public OkResponse assignUser(@AuthenticationPrincipal ForgeHubPrincipal principal, @PathVariable String id,
+                                 @Valid @RequestBody AssignUserRequest request) {
+        folderService.assignUser(principal, id, request);
 
-        return Map.of("ok", true);
+        return OkResponse.success();
     }
 
     @DeleteMapping("/{id}/users/{username}")
-    public Map<String, Object> lepasPengguna(@PathVariable String id, @PathVariable String username) {
-        service.lepasPengguna(CurrentUser.get(), id, username);
+    public OkResponse unassignUser(@AuthenticationPrincipal ForgeHubPrincipal principal, @PathVariable String id,
+                                   @PathVariable String username) {
+        folderService.unassignUser(principal, id, username);
 
-        return Map.of("ok", true);
+        return OkResponse.success();
     }
 
     @PostMapping("/{id}/robots")
-    public Map<String, Object> tugaskanRobot(@PathVariable String id,
-                                             @RequestBody(required = false) Map<String, Object> body) {
-        service.tugaskanRobot(CurrentUser.get(), id, Badan.nama(body, "robotName"));
+    public OkResponse assignRobot(@AuthenticationPrincipal ForgeHubPrincipal principal, @PathVariable String id,
+                                  @Valid @RequestBody AssignRobotRequest request) {
+        folderService.assignRobot(principal, id, request);
 
-        return Map.of("ok", true);
+        return OkResponse.success();
     }
 
     @DeleteMapping("/{id}/robots/{name}")
-    public Map<String, Object> lepasRobot(@PathVariable String id, @PathVariable String name) {
-        service.lepasRobot(CurrentUser.get(), id, name);
+    public OkResponse unassignRobot(@AuthenticationPrincipal ForgeHubPrincipal principal, @PathVariable String id,
+                                    @PathVariable String name) {
+        folderService.unassignRobot(principal, id, name);
 
-        return Map.of("ok", true);
+        return OkResponse.success();
     }
 }

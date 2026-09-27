@@ -19,7 +19,7 @@ public enum RobotStatus {
      * sedang mengaku mati sambil membuktikan bahwa ia hidup, dan yang tersimpan
      * kemudian adalah kolom status yang bertentangan dengan waktu denyutnya.
      */
-    public boolean bolehDilaporkan() {
+    public boolean isReportable() {
         return this != DISCONNECTED;
     }
 
@@ -31,11 +31,11 @@ public enum RobotStatus {
      * salah cuma sebutannya, dan menganggapnya tersedia jauh lebih dekat ke
      * kenyataan daripada menganggapnya tidak ada.
      */
-    public static RobotStatus dariDenyut(String teks) {
-        if (teks == null || teks.isBlank()) return AVAILABLE;
+    public static RobotStatus fromHeartbeat(String text) {
+        if (text == null || text.isBlank()) return AVAILABLE;
 
-        for (RobotStatus s : values()) {
-            if (s.name().equalsIgnoreCase(teks.trim()) && s.bolehDilaporkan()) return s;
+        for (RobotStatus status : values()) {
+            if (status.name().equalsIgnoreCase(text.trim()) && status.isReportable()) return status;
         }
 
         return AVAILABLE;

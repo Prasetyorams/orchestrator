@@ -12,29 +12,17 @@ spring:
     hikari:
       maximum-pool-size: 12
 
-  jpa:
-    hibernate:
-      # Skema dikelola Flyway, BUKAN Hibernate. Membiarkan Hibernate
-      # mengubah skema berarti bentuk basis data bergantung pada versi
-      # kode yang kebetulan jalan terakhir — dan itu tidak bisa ditinjau
-      # sebelum dijalankan.
-      #
-      # "none", bukan "validate": lapisan datanya memakai JdbcTemplate dan
-      # tidak ada satu pun @Entity yang tersisa. Membiarkan "validate" pada
-      # pemetaan kosong tidak salah, tapi menyalakan pemeriksa untuk sesuatu
-      # yang tidak diperiksa hanya menambah satu tahap yang bisa gagal.
-      ddl-auto: none
-    open-in-view: false
-    properties:
-      hibernate:
-        jdbc:
-          time_zone: UTC
-
+  # Skema dikelola Flyway, bukan ORM: lapisan datanya JdbcTemplate dan tidak
+  # ada satu pun @Entity. Bentuk basis data ditentukan berkas migrasi yang bisa
+  # ditinjau, bukan oleh versi kode yang kebetulan jalan terakhir.
   flyway:
     enabled: true
     locations: classpath:db/migration
     baseline-on-migrate: true
 
+# Seluruh setelan ForgeHub, dibaca ke satu record bertipe: ForgeHubProperties.
+# Nilai yang dulu tertulis di dalam kode ada di sini, supaya bisa diubah lewat
+# variabel lingkungan tanpa membangun ulang — mis. FORGEHUB_ROBOT_HEARTBEATTIMEOUT=60s.
 forgehub:
   # Zona untuk menghitung batas "hari ini" di dasbor.
   #
@@ -57,8 +45,43 @@ forgehub:
     # WAJIB diganti di produksi. Minimal 32 karakter untuk HS256.
     secret: ${JWT_SECRET:ganti-nilai-ini-dengan-rahasia-minimal-32-karakter}
     expiration-minutes: ${JWT_EXPIRATION_MINUTES:480}
+
   cors:
     allowed-origins: ${CORS_ORIGINS:http://localhost:3000}
+    # Berapa lama peramban boleh mengingat jawaban preflight.
+    max-age: 1h
+
+  robot:
+    # Setelah berapa lama tanpa denyut sebuah robot dianggap terputus.
+    # Pekerjaan yang robotnya diam dua kali selama ini ditandai gagal.
+    heartbeat-timeout: 45s
+
+  permission-cache:
+    # Izin peran diingat selama ini per orang, supaya denyut robot tiap
+    # beberapa detik tidak menjadi kueri tiap beberapa detik. Perubahan peran
+    # lewat ForgeHub menghapus ingatannya seketika.
+    ttl: 10s
+
+  scheduler:
+    # Jeda sebelum putaran pertama: Flyway dan basis data selesai lebih dulu.
+    initial-delay: 15s
+    # Selang pemeriksaan pemicu dan pekerjaan terputus.
+    interval: 30s
+
+  limits:
+    # Isi paket dan berkas dikirim sebagai base64 DI DALAM JSON: 64 MB menjadi
+    # sekitar 85 MB teks yang harus muat di memori sekaligus.
+    max-package-size: 64MB
+    max-bucket-file-size: 32MB
+
+  bootstrap:
+    # Isi awal yang ditanam saat aplikasi naik, hanya kalau belum ada.
+    tenant-name: default
+    admin-username: FH_Admin
+    admin-password: forgehub
+    admin-display-name: ForgeHub Administrator
+    # Nama mesin tempat ForgeHub berjalan; kosong berarti nama host.
+    machine-name: ${FORGEHUB_MACHINE_NAME:}
 
 management:
   endpoints:

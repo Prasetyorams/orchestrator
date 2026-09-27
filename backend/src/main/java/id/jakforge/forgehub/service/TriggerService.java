@@ -2,101 +2,107 @@ package id.jakforge.forgehub.service;
 
 import id.jakforge.forgehub.common.ApiException;
 import id.jakforge.forgehub.common.Cron;
-import id.jakforge.forgehub.dto.TriggerRequest;
+import id.jakforge.forgehub.dto.request.SaveTriggerRequest;
+import id.jakforge.forgehub.dto.response.TriggerSaveResponse;
+import id.jakforge.forgehub.dto.response.TriggerToggleResponse;
 import id.jakforge.forgehub.repository.TriggerRepository;
-import id.jakforge.forgehub.security.Penjaga;
+import id.jakforge.forgehub.repository.TriggerRepository.TriggerSchedule;
+import id.jakforge.forgehub.security.ForgeHubPrincipal;
+import id.jakforge.forgehub.security.PermissionChecker;
+import id.jakforge.forgehub.security.Permissions;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.DateTimeException;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
-import java.time.ZoneOffset;
-import java.time.ZonedDateTime;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** Aturan tentang pemicu terjadwal. */
+/**
+ * Aturan tentang pemicu terjadwal: membuat, mengubah, menyalakan, menghapus.
+ *
+ * <p>Pemicu tinggal di folder PROSESNYA, dan namanya unik di folder itu.
+ * Menjalankan pemicu yang jatuh tempo ada di {@link TriggerFiringService}.
+ */
 @Service
+@RequiredArgsConstructor
 public class TriggerService {
 
-    private final TriggerRepository pemicu;
-    private final CatalogService katalog;
+    private static final String TRIGGER_NOT_FOUND = "Pemicu tidak ada.";
 
-    public TriggerService(TriggerRepository pemicu, CatalogService katalog) {
-        this.pemicu = pemicu;
-        this.katalog = katalog;
-    }
+    private final TriggerRepository triggerRepository;
+    private final ProcessService processService;
+    private final NextRunCalculator nextRunCalculator;
+    private final FolderAccessService folderAccessService;
+    private final PermissionChecker permissionChecker;
 
-    /** @param folderId null berarti seluruh penyewa. */
-    public List<Map<String, Object>> daftar(UUID tenantId, UUID folderId) {
-        return pemicu.semua(tenantId, folderId);
+    /**
+     * Tanpa {@code folderId}: pemicu seluruh penyewa.
+     *
+     * <p>Menyimpan membawa {@code folderId} di badan, mengalihkan dan menghapus
+     * membawa {@code ?folderId=}. Tanpa itu, yang dimaksud adalah pemicu
+     * bernama itu di mana pun ia berada (lihat {@link FolderLocations#resolve}).
+     */
+    public List<Map<String, Object>> findAll(ForgeHubPrincipal principal, String folderId) {
+        return triggerRepository.findAll(principal.tenantId(),
+                folderAccessService.resolveFolderFilter(principal, folderId));
     }
 
     /**
-     * Pemicu tinggal di folder PROSESNYA, dan namanya unik di folder itu.
+     * Simpan pemicu di folder prosesnya.
      *
-     * @param folderId folder yang sedang dibuka, sudah diperiksa haknya; null
-     *                 berarti proses bernama itu di mana pun ia berada (lihat
-     *                 CatalogService.pilihFolder)
-     * @param penjaga  triggers.create untuk yang baru, triggers.update untuk yang sudah ada
+     * <p>triggers.create untuk yang baru, triggers.update untuk yang sudah ada.
      */
     @Transactional
-    public Map<String, Object> simpan(UUID tenantId, TriggerRequest minta, UUID folderId, Penjaga penjaga) {
-        if (minta.name() == null) throw ApiException.salah("Nama pemicu wajib diisi.");
-        if (minta.processName() == null) throw ApiException.salah("processName wajib diisi.");
+    public TriggerSaveResponse save(ForgeHubPrincipal principal, SaveTriggerRequest request) {
+        UUID tenantId = principal.tenantId();
+        UUID requestedFolder = folderAccessService.resolveFolderFilter(principal, request.folderId());
 
         // Cron DIVALIDASI di sini, bukan dibiarkan sampai penjadwal. Ekspresi
         // yang salah baru ketahuan pada putaran penjadwal berikutnya, dan orang
         // yang menekan "Buat pemicu" sudah pergi.
-        if (minta.pakaiCron() && !Cron.isValid(minta.cron())) {
-            throw ApiException.salah("Ekspresi cron tidak sah: " + minta.cron()
+        if (request.usesCron() && !Cron.isValid(request.cron())) {
+            throw ApiException.badRequest("Ekspresi cron tidak sah: " + request.cron()
                     + ". Bentuknya lima ruas: menit jam tanggal bulan hari, "
                     + "mis. \"0 7 * * 1-5\" untuk tiap hari kerja pukul 07:00.");
         }
 
-        if (!minta.pakaiCron() && minta.intervalMinutes() < 1) {
-            throw ApiException.salah("Selang waktu minimal 1 menit.");
+        if (!request.usesCron() && request.intervalMinutes() < NextRunCalculator.MIN_INTERVAL_MINUTES) {
+            throw ApiException.badRequest("Selang waktu minimal 1 menit.");
         }
 
         // Nama zona diperiksa juga. Penjadwal memang jatuh ke UTC untuk nama
         // yang tidak dikenal, tapi jatuh diam-diam berarti pemicunya berjalan
         // tujuh jam meleset tanpa ada yang tahu sebabnya.
-        if (!"UTC".equals(minta.timezone()) && !zonaDikenal(minta.timezone())) {
-            throw ApiException.salah("Zona waktu tidak dikenal: '" + minta.timezone()
+        if (!SaveTriggerRequest.DEFAULT_TIMEZONE.equals(request.timezone()) && !isKnownZone(request.timezone())) {
+            throw ApiException.badRequest("Zona waktu tidak dikenal: '" + request.timezone()
                     + "'. Pakai nama IANA, mis. \"Asia/Jakarta\".");
         }
 
-        UUID folder = katalog.folderProses(tenantId, minta.processName(), folderId);
+        UUID folder = processService.resolveProcessFolder(tenantId, request.processName(), requestedFolder);
 
         if (folder == null) {
-            throw ApiException.salah(folderId == null
-                    ? "Proses '" + minta.processName() + "' belum diterbitkan ke ForgeHub."
-                    : "Proses '" + minta.processName() + "' tidak ada di folder ini.");
+            throw ApiException.badRequest(requestedFolder == null
+                    ? "Proses '" + request.processName() + "' belum diterbitkan ke ForgeHub."
+                    : "Proses '" + request.processName() + "' tidak ada di folder ini.");
         }
 
-        ZoneId zona = Cron.zona(minta.timezone());
-        OffsetDateTime berikutnya = hitungBerikutnya(minta.cron(), minta.intervalMinutes(), zona);
+        OffsetDateTime nextRunAt = nextRunCalculator.nextRun(request.cron(), request.intervalMinutes(),
+                Cron.zoneOrUtc(request.timezone()));
 
-        boolean sudahAda = pemicu.ada(tenantId, folder, minta.name());
-        penjaga.perluSimpan("triggers", sudahAda);
+        boolean alreadyExists = triggerRepository.existsInFolder(tenantId, folder, request.name());
+        permissionChecker.requireSave(principal, Permissions.TRIGGERS, alreadyExists);
 
-        if (sudahAda) {
-            pemicu.perbarui(tenantId, folder, minta.name(), minta.processName(), minta.robotName(),
-                    minta.type(), minta.cron(), minta.intervalMinutes(), minta.enabled(),
-                    berikutnya, minta.priority(), minta.timezone(), minta.runtimeType());
+        if (alreadyExists) {
+            triggerRepository.update(tenantId, folder, request.toDefinition(), nextRunAt);
         } else {
-            pemicu.buat(tenantId, folder, minta.name(), minta.processName(), minta.robotName(),
-                    minta.type(), minta.cron(), minta.intervalMinutes(), minta.enabled(),
-                    berikutnya, minta.priority(), minta.timezone(), minta.runtimeType());
+            triggerRepository.insert(tenantId, folder, request.toDefinition(), nextRunAt);
         }
 
-        Map<String, Object> hasil = new LinkedHashMap<>();
-        hasil.put("ok", true);
-        hasil.put("nextRunAt", String.valueOf(berikutnya));
-
-        return hasil;
+        return new TriggerSaveResponse(true, String.valueOf(nextRunAt));
     }
 
     /**
@@ -108,73 +114,51 @@ public class TriggerService {
      * — biasanya bukan itu yang dimaksud orang yang menekan tombolnya.
      */
     @Transactional
-    public Map<String, Object> alihkan(UUID tenantId, String nama, UUID folderId) {
-        UUID folder = folderPemicu(tenantId, nama, folderId);
-        Map<String, Object> baris = pemicu.satu(tenantId, folder, nama);
+    public TriggerToggleResponse toggle(ForgeHubPrincipal principal, String name, String folderId) {
+        UUID tenantId = principal.tenantId();
+        UUID folder = resolveTriggerFolder(tenantId, name, folderAccessService.resolveFolderFilter(principal, folderId));
 
-        if (baris == null) throw ApiException.tidakAda("Pemicu tidak ada.");
+        TriggerSchedule schedule = triggerRepository.findSchedule(tenantId, folder, name)
+                .orElseThrow(() -> ApiException.notFound(TRIGGER_NOT_FOUND));
 
-        boolean akanAktif = !Boolean.TRUE.equals(baris.get("enabled"));
+        boolean enable = !schedule.enabled();
 
-        OffsetDateTime berikutnya = akanAktif
-                ? hitungBerikutnya((String) baris.get("cron"),
-                        ((Number) baris.get("intervalMinutes")).intValue(),
-                        Cron.zona((String) baris.get("timezone")))
+        OffsetDateTime nextRunAt = enable
+                ? nextRunCalculator.nextRun(schedule.cron(), schedule.intervalMinutes(),
+                        Cron.zoneOrUtc(schedule.timezone()))
                 : null;
 
-        pemicu.setAktif(tenantId, folder, nama, akanAktif, berikutnya);
+        triggerRepository.setEnabled(tenantId, folder, name, enable, nextRunAt);
 
-        Map<String, Object> hasil = new LinkedHashMap<>();
-        hasil.put("ok", true);
-        hasil.put("enabled", akanAktif);
-
-        return hasil;
+        return new TriggerToggleResponse(true, enable);
     }
 
-    public void hapus(UUID tenantId, String nama, UUID folderId) {
-        if (pemicu.hapus(tenantId, folderPemicu(tenantId, nama, folderId), nama) == 0) {
-            throw ApiException.tidakAda("Pemicu tidak ada.");
+    public void delete(ForgeHubPrincipal principal, String name, String folderId) {
+        UUID tenantId = principal.tenantId();
+        UUID folder = resolveTriggerFolder(tenantId, name, folderAccessService.resolveFolderFilter(principal, folderId));
+
+        if (triggerRepository.delete(tenantId, folder, name) == 0) {
+            throw ApiException.notFound(TRIGGER_NOT_FOUND);
         }
     }
 
-    /** Folder pemicu yang dimaksud; aturannya sama dengan proses (CatalogService.pilihFolder). */
-    private UUID folderPemicu(UUID tenantId, String nama, UUID folderId) {
-        UUID folder = CatalogService.pilihFolder(pemicu.tempat(tenantId, nama), folderId,
-                "Pemicu '" + nama + "' ada di beberapa folder. Sebutkan foldernya.");
+    /** Folder pemicu yang dimaksud; aturannya sama dengan proses ({@link FolderLocations#resolve}). */
+    private UUID resolveTriggerFolder(UUID tenantId, String name, UUID folderId) {
+        UUID folder = FolderLocations.resolve(triggerRepository.findLocations(tenantId, name), folderId,
+                "Pemicu '" + name + "' ada di beberapa folder. Sebutkan foldernya.");
 
-        if (folder == null) throw ApiException.tidakAda("Pemicu tidak ada.");
+        if (folder == null) throw ApiException.notFound(TRIGGER_NOT_FOUND);
 
         return folder;
     }
 
-    /**
-     * Waktu jalan berikutnya: dari CRON kalau ada, kalau tidak dari selangnya.
-     *
-     * <p>Dipakai bersama oleh penyimpanan, penyalaan, dan penjadwal, supaya
-     * ketiganya tidak bisa berbeda pendapat tentang kapan sesuatu jatuh tempo.
-     *
-     * <p>Mengembalikan null untuk cron yang sah tapi tidak pernah cocok (mis.
-     * "0 0 31 2 *"); pemanggilnya yang memutuskan apa artinya.
-     */
-    public static OffsetDateTime hitungBerikutnya(String cron, int selangMenit, ZoneId zona) {
-        OffsetDateTime sekarang = OffsetDateTime.now(ZoneOffset.UTC);
-
-        if (cron == null || cron.isBlank()) {
-            return sekarang.plusMinutes(Math.max(1, selangMenit));
-        }
-
-        ZonedDateTime next = Cron.next(cron, sekarang.toZonedDateTime(), zona);
-
-        return next == null ? null : next.toOffsetDateTime().withOffsetSameInstant(ZoneOffset.UTC);
-    }
-
-    private static boolean zonaDikenal(String nama) {
-        if (nama == null || nama.isBlank()) return false;
+    private static boolean isKnownZone(String zoneName) {
+        if (zoneName == null || zoneName.isBlank()) return false;
 
         try {
-            ZoneId.of(nama.trim());
+            ZoneId.of(zoneName.trim());
             return true;
-        } catch (Exception e) {
+        } catch (DateTimeException e) {
             return false;
         }
     }

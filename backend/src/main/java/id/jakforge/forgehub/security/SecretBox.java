@@ -1,9 +1,6 @@
 package id.jakforge.forgehub.security;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.crypto.Cipher;
 import javax.crypto.Mac;
@@ -42,18 +39,20 @@ import java.util.Base64;
  *       Java menaruh tag di BELAKANG ciphertext, .NET memisahkannya, jadi
  *       urutannya disusun ulang di sini — bukan di pemanggilnya.</li>
  * </ul>
+ *
+ * <p>Dibuat lewat {@code CryptoConfig} dari {@code forgehub.secret.key-file},
+ * bukan dipindai sebagai komponen: uji membuatnya langsung dengan kunci
+ * sementara.
  */
-@Component
+@Slf4j
 public class SecretBox {
-
-    private static final Logger log = LoggerFactory.getLogger(SecretBox.class);
 
     private static final String TRANSFORMATION = "AES/GCM/NoPadding";
     private static final String HMAC = "HmacSHA256";
 
     private static final int NONCE_BYTES = 12;   // ukuran baku AES-GCM
     private static final int TAG_BYTES = 16;
-    private static final int TAG_BITS = TAG_BYTES * 8;
+    private static final int TAG_BITS = TAG_BYTES * Byte.SIZE;
     private static final int KEY_BYTES = 32;
     private static final int HASH_BYTES = 32;    // panjang keluaran SHA-256
 
@@ -69,7 +68,7 @@ public class SecretBox {
      *                ForgeHub .NET — di Docker berarti dipasang sebagai volume,
      *                bukan dibuat baru.
      */
-    public SecretBox(@Value("${forgehub.secret.key-file}") String keyFile) throws IOException {
+    public SecretBox(String keyFile) throws IOException {
         Path path = Path.of(keyFile);
         byte[] master = readOrCreate(path);
 

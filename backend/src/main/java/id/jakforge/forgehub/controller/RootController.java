@@ -1,13 +1,12 @@
 package id.jakforge.forgehub.controller;
 
-import org.springframework.beans.factory.annotation.Value;
+import id.jakforge.forgehub.config.ForgeHubProperties;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.net.URI;
 
 /**
  * Halaman akar: mengarahkan ke dasbor.
@@ -24,26 +23,16 @@ import java.net.URI;
  * membawanya ke tempat yang dicari.
  */
 @RestController
+@RequiredArgsConstructor
 public class RootController {
 
-    private final String dasbor;
+    private final ForgeHubProperties properties;
 
-    /**
-     * Alamat dasbor diambil dari CORS_ORIGINS, bukan ditulis tetap.
-     *
-     * <p>Keduanya menjawab pertanyaan yang sama — "di mana dasbornya" — dan dua
-     * tempat yang menjawabnya sendiri-sendiri akan berbeda begitu salah satunya
-     * diubah. Kalau berisi beberapa alamat, yang dipakai yang pertama.
-     */
-    public RootController(@Value("${forgehub.cors.allowed-origins}") String allowedOrigins) {
-        String pertama = allowedOrigins.split(",")[0].trim();
-        this.dasbor = pertama.isEmpty() ? "http://localhost:3000" : pertama;
-    }
-
+    /** Alamat dasbor: asal pertama di CORS_ORIGINS (lihat {@link ForgeHubProperties.Cors#dashboardUrl()}). */
     @GetMapping("/")
-    public ResponseEntity<Void> akar() {
+    public ResponseEntity<Void> redirectToDashboard() {
         return ResponseEntity.status(HttpStatus.FOUND)
-                .header(HttpHeaders.LOCATION, dasbor)
+                .header(HttpHeaders.LOCATION, properties.cors().dashboardUrl())
                 .build();
     }
 }
