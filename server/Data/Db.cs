@@ -1,11 +1,11 @@
 using Microsoft.Data.Sqlite;
 
-namespace ForgeHub.Data;
+namespace OpenOrchestrator.Data;
 
 /// <summary>
-/// Basis data ForgeHub.
+/// Basis data OpenOrchestrator.
 ///
-/// SQLite dipilih supaya ForgeHub bisa dinyalakan tanpa memasang apa pun:
+/// SQLite dipilih supaya OpenOrchestrator bisa dinyalakan tanpa memasang apa pun:
 /// tidak ada layanan yang perlu dijalankan, tidak ada kata sandi yang perlu
 /// dibuat, tidak ada berkas setelan yang perlu diisi lebih dulu. Berkasnya satu,
 /// di sebelah program, dan bisa disalin atau dihapus begitu saja.
@@ -69,7 +69,7 @@ public static class Db
     /// "CREATE TABLE IF NOT EXISTS" tidak menyentuh tabel yang sudah ada, jadi
     /// pemasangan lama tidak akan pernah mendapat kolom baru dari sana. SQLite
     /// tidak punya "ADD COLUMN IF NOT EXISTS", jadi kolomnya diperiksa dulu
-    /// lewat PRAGMA — kalau langsung ditambahkan, menjalankan ForgeHub kedua
+    /// lewat PRAGMA — kalau langsung ditambahkan, menjalankan OpenOrchestrator kedua
     /// kali akan gagal dengan "duplicate column name".
     /// </summary>
     private static void Migrasi(SqliteConnection connection)
@@ -93,7 +93,7 @@ public static class Db
     }
 
     /// <summary>
-    /// Skema dibuat dengan IF NOT EXISTS, jadi menjalankan ulang ForgeHub tidak
+    /// Skema dibuat dengan IF NOT EXISTS, jadi menjalankan ulang OpenOrchestrator tidak
     /// pernah menghapus data yang sudah ada.
     /// </summary>
     private const string Schema = @"

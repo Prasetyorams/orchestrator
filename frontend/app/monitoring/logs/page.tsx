@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ForgeHubApi, type FolderNode } from "@/lib/api";
+import { OpenOrchestratorApi, type FolderNode } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { cn, dateTimeOf } from "@/lib/utils";
 import { Badge, Button, Card } from "@/components/ui/primitives";
@@ -11,7 +11,7 @@ import { kelasIsian } from "@/components/Dialog";
 import { PilihTingkat } from "@/components/PilihTingkat";
 import { BilahAlat, PerluFolder } from "@/components/HalamanFolder";
 
-// Tanpa TRACE dan DEBUG: ForgeHub tidak menyimpan maupun menampilkan tingkat
+// Tanpa TRACE dan DEBUG: OpenOrchestrator tidak menyimpan maupun menampilkan tingkat
 // rincian (lihat LogLevel.rincian di backend), jadi pilihan itu selalu kosong.
 // WARN juga membawa baris WARNING — satu tingkat dengan dua ejaan.
 const TINGKAT = ["INFO", "WARN", "ERROR", "FATAL"];
@@ -29,13 +29,13 @@ function IsiCatatan({ folder }: { folder: FolderNode }) {
 
   const daftarProses = useQuery({
     queryKey: ["processes", folder.id],
-    queryFn: () => ForgeHubApi.processes(folder.id),
+    queryFn: () => OpenOrchestratorApi.processes(folder.id),
   });
 
   const log = useQuery({
     queryKey: ["logs", folder.id, tingkat, proses],
     queryFn: () =>
-      ForgeHubApi.logs({
+      OpenOrchestratorApi.logs({
         level: tingkat,
         process: proses || undefined,
         folderId: folder.id,

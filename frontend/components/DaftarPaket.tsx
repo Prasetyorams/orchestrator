@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, History, Trash2 } from "lucide-react";
-import { ForgeHubApi, errorText, unduh, type Package } from "@/lib/api";
+import { OpenOrchestratorApi, errorText, unduh, type Package } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { kelompokkanPaket, type RingkasanPaket } from "@/lib/paket";
 import { dateTimeOf, kunciUrutVersi, ukuranBerkas } from "@/lib/utils";
@@ -28,7 +28,7 @@ export function DaftarPaket({ folderId, bolehHapus = false }: { folderId?: strin
 
   const paket = useQuery({
     queryKey: ["packages", folderId ?? "semua"],
-    queryFn: () => ForgeHubApi.packages(folderId),
+    queryFn: () => OpenOrchestratorApi.packages(folderId),
   });
 
   // Satu baris per PAKET dengan versi tertingginya; API memberi satu baris per versi.
@@ -45,7 +45,7 @@ export function DaftarPaket({ folderId, bolehHapus = false }: { folderId?: strin
   const unduhVersi = useCallback(async (p: Package) => {
     setGalat("");
     try {
-      await unduh(ForgeHubApi.packageUrl(p.name, p.version), `${p.name}.${p.version}.zip`);
+      await unduh(OpenOrchestratorApi.packageUrl(p.name, p.version), `${p.name}.${p.version}.zip`);
     } catch (e) {
       setGalat(errorText(e));
     }
@@ -59,7 +59,7 @@ export function DaftarPaket({ folderId, bolehHapus = false }: { folderId?: strin
 
       setGalat("");
       try {
-        await ForgeHubApi.deletePackage(p.name, p.version);
+        await OpenOrchestratorApi.deletePackage(p.name, p.version);
         klien.invalidateQueries({ queryKey: ["packages"] });
       } catch (e) {
         setGalat(errorText(e));
@@ -82,7 +82,7 @@ export function DaftarPaket({ folderId, bolehHapus = false }: { folderId?: strin
               ? "Memuat..."
               : folderId
                 ? "Belum ada paket yang dipakai proses di folder ini."
-                : "Belum ada paket yang diterbitkan. Terbitkan dari Studio: tab Design → grup ForgeHub → Terbitkan."
+                : "Belum ada paket yang diterbitkan. Terbitkan dari Studio: tab Design → grup OpenOrchestrator → Terbitkan."
           }
           kolom={[
             {

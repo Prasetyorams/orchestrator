@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/primitives";
 /**
  * Tabel yang bisa diurut, dihalaman, dan dipilih.
  *
- * Satu komponen untuk semua tabel di ForgeHub, bukan tabel yang ditulis ulang
+ * Satu komponen untuk semua tabel di OpenOrchestrator, bukan tabel yang ditulis ulang
  * di tiap halaman. Alasannya bukan hemat baris: perilaku pengurutan dan
  * penomoran halaman yang ditulis ulang sembilan kali akan berbeda di sembilan
  * tempat, dan bedanya baru terasa oleh orang yang memakai keduanya.

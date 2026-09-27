@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace ForgeHub.Auth;
+namespace OpenOrchestrator.Auth;
 
 /// <summary>
 /// Penyandian nilai yang harus bisa dibaca kembali: kata sandi kredensial dan

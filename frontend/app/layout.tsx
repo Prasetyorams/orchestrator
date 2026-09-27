@@ -7,7 +7,7 @@ import { SKRIP_TEMA, TemaProvider } from "@/lib/tema";
 import { Shell } from "@/components/Shell";
 
 export const metadata: Metadata = {
-  title: "JakForge Orchestrator — ForgeHub",
+  title: "Open Orchestrator",
   description: "Pusat kendali robot, proses, antrean, dan catatan automasi JakForge.",
 };
 

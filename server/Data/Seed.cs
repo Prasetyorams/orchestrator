@@ -1,7 +1,7 @@
 using Microsoft.Data.Sqlite;
-using ForgeHub.Auth;
+using OpenOrchestrator.Auth;
 
-namespace ForgeHub.Data;
+namespace OpenOrchestrator.Data;
 
 /// <summary>
 /// Isi awal basis data.
@@ -18,8 +18,8 @@ namespace ForgeHub.Data;
 public static class Seed
 {
     public const string DefaultTenant = "default";
-    public const string DefaultUser = "FH_Admin";
-    public const string DefaultPassword = "forgehub";
+    public const string DefaultUser = "OO_Admin";
+    public const string DefaultPassword = "openorchestrator";
 
     public static void Apply(SqliteConnection connection)
     {
@@ -50,6 +50,16 @@ public static class Seed
 
     private static void SeedUser(SqliteConnection connection, string tenantId, string now)
     {
+        // Akun ini dulu bernama FH_Admin (singkatan ForgeHub). Basis data lama
+        // diganti namanya lebih dulu, sama seperti Flyway V7 di backend Java:
+        // tanpa ini pemeriksaan di bawah tidak menemukan DefaultUser lalu
+        // membuat admin KEDUA dengan kata sandi bawaan. Kata sandinya tetap.
+        Sql.Exec(connection,
+            @"UPDATE users SET username = @p1
+              WHERE tenant_id = @p0 AND username = @p2
+                AND NOT EXISTS (SELECT 1 FROM users WHERE tenant_id = @p0 AND username = @p1)",
+            tenantId, DefaultUser, "FH_Admin");
+
         var exists = Sql.Count(connection,
             "SELECT COUNT(*) FROM users WHERE tenant_id = @p0 AND username = @p1",
             tenantId, DefaultUser);
@@ -60,14 +70,14 @@ public static class Seed
             @"INSERT INTO users (id, tenant_id, username, password_hash, display_name, email, role, is_active, created_at)
               VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, 1, @p7)",
             Sql.NewId(), tenantId, DefaultUser, Passwords.Hash(DefaultPassword),
-            "ForgeHub Administrator", null, "Administrator", now);
+            "OpenOrchestrator Administrator", null, "Administrator", now);
     }
 
     private static void SeedRoles(SqliteConnection connection, string tenantId, string now)
     {
         var roles = new (string Name, string Description, string Permissions)[]
         {
-            ("Administrator", "Akses penuh ke seluruh ForgeHub.", "*"),
+            ("Administrator", "Akses penuh ke seluruh OpenOrchestrator.", "*"),
             ("Automation Developer", "Menerbitkan paket dan proses, menjalankan pekerjaan.",
                 "packages.*,processes.*,jobs.create,jobs.read,logs.read,assets.read,queues.*"),
             ("Automation User", "Menjalankan proses yang sudah ada dan membaca hasilnya.",
@@ -112,7 +122,7 @@ public static class Seed
     }
 
     /// <summary>
-    /// Mesin tempat ForgeHub berjalan didaftarkan sendiri.
+    /// Mesin tempat OpenOrchestrator berjalan didaftarkan sendiri.
     ///
     /// Tanpa ini, denyut pertama dari JakRunner tiba untuk mesin yang belum
     /// dikenal, dan halaman Machines kosong padahal jelas ada satu yang aktif.
@@ -128,7 +138,7 @@ public static class Seed
 
         Sql.Exec(connection,
             "INSERT INTO machines (id, tenant_id, name, type, description, created_at) VALUES (@p0, @p1, @p2, @p3, @p4, @p5)",
-            Sql.NewId(), tenantId, name, "Standard", "Mesin tempat ForgeHub berjalan.", now);
+            Sql.NewId(), tenantId, name, "Standard", "Mesin tempat OpenOrchestrator berjalan.", now);
     }
 
     private static void SeedQueue(SqliteConnection connection, string tenantId, string now)

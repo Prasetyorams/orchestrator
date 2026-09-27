@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ForgeHubApi, errorText, type FolderNode, type Job } from "@/lib/api";
+import { OpenOrchestratorApi, errorText, type FolderNode, type Job } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
 import { cn, dateTimeOf } from "@/lib/utils";
@@ -30,7 +30,7 @@ function IsiPekerjaan({ folder }: { folder: FolderNode }) {
 
   const jobs = useQuery({
     queryKey: ["jobs", folder.id, saring],
-    queryFn: () => ForgeHubApi.jobs({ state: saring || undefined, folderId: folder.id, limit: 500 }),
+    queryFn: () => OpenOrchestratorApi.jobs({ state: saring || undefined, folderId: folder.id, limit: 500 }),
     refetchInterval: 5_000,
   });
 
@@ -41,13 +41,13 @@ function IsiPekerjaan({ folder }: { folder: FolderNode }) {
   }, [klien]);
 
   const hentikan = useMutation({
-    mutationFn: ForgeHubApi.stopJob,
+    mutationFn: OpenOrchestratorApi.stopJob,
     onSuccess: segarkan,
     onError: (e) => setGalat(errorText(e)),
   });
 
   const hapus = useMutation({
-    mutationFn: ForgeHubApi.deleteJob,
+    mutationFn: OpenOrchestratorApi.deleteJob,
     onSuccess: segarkan,
     onError: (e) => setGalat(errorText(e)),
   });
@@ -159,7 +159,7 @@ function DialogDetail({ job, onTutup }: { job: Job | null; onTutup: () => void }
   // DALAM prosesnya, bukan di halaman terpisah yang harus disaring sendiri.
   const log = useQuery({
     queryKey: ["logs", "job", job?.id],
-    queryFn: () => ForgeHubApi.logs({ jobId: job!.id, limit: 500 }),
+    queryFn: () => OpenOrchestratorApi.logs({ jobId: job!.id, limit: 500 }),
     enabled: !!job,
   });
 
@@ -240,11 +240,11 @@ function DialogJalankan({
 }) {
   const { t } = useT();
 
-  const proses = useQuery({ queryKey: ["processes", folder.id], queryFn: () => ForgeHubApi.processes(folder.id) });
+  const proses = useQuery({ queryKey: ["processes", folder.id], queryFn: () => OpenOrchestratorApi.processes(folder.id) });
   const { boleh } = useIzin();
   const robot = useQuery({
     queryKey: ["robots", folder.id],
-    queryFn: () => ForgeHubApi.robots(folder.id),
+    queryFn: () => OpenOrchestratorApi.robots(folder.id),
     enabled: boleh("robots.read"),
   });
 
@@ -255,7 +255,7 @@ function DialogJalankan({
   const [galat, setGalat] = useState("");
 
   const jalankan = useMutation({
-    mutationFn: ForgeHubApi.startJob,
+    mutationFn: OpenOrchestratorApi.startJob,
     onSuccess: () => {
       onSelesai();
       onTutup();

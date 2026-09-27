@@ -181,8 +181,8 @@ export const EN: Record<string, string> = {
   Terbaru: "Latest",
   "Satu baris per paket, dengan versi tertingginya. Klik ganda untuk melihat semua versinya.":
     "One row per package, showing its highest version. Double-click to see every version.",
-  "Belum ada paket yang diterbitkan. Terbitkan dari Studio: tab Design → grup ForgeHub → Terbitkan.":
-    "No packages published yet. Publish from Studio: Design tab → ForgeHub group → Terbitkan.",
+  "Belum ada paket yang diterbitkan. Terbitkan dari Studio: tab Design → grup OpenOrchestrator → Terbitkan.":
+    "No packages published yet. Publish from Studio: Design tab → OpenOrchestrator group → Terbitkan.",
 
   // aset
   "Tambah aset": "Add asset",
@@ -518,7 +518,7 @@ export const EN: Record<string, string> = {
   "Hapus peran \"{0}\"?": "Delete role \"{0}\"?",
   "Akun robot (JakRunner) sebaiknya memakai peran Robot: izinnya persis yang dibutuhkan robot, tidak lebih.": "Robot (JakRunner) accounts should use the Robot role: exactly the permissions a robot needs, nothing more.",
   "Nama peran wajib diisi.": "Role name is required.",
-  "Peran bawaan dengan semua izin. Tidak bisa diubah atau dihapus, supaya selalu ada yang bisa mengurus ForgeHub.": "Built-in role with every permission. It can't be edited or deleted, so someone can always manage ForgeHub.",
+  "Peran bawaan dengan semua izin. Tidak bisa diubah atau dihapus, supaya selalu ada yang bisa mengurus OpenOrchestrator.": "Built-in role with every permission. It can't be edited or deleted, so someone can always manage OpenOrchestrator.",
   "Salin izin dari": "Copy permissions from",
   "Mulai dari izin peran lain, lalu ubah seperlunya.": "Start from another role's permissions, then adjust.",
   "Semua: {0}": "All: {0}",
@@ -540,7 +540,7 @@ export const EN: Record<string, string> = {
 
 /**
  * Teks yang datang dari SERVER: pesan galat, judul dan isi peringatan,
- * keterangan pekerjaan, baris catatan ForgeHub dan JakRunner, serta
+ * keterangan pekerjaan, baris catatan OpenOrchestrator dan JakRunner, serta
  * keterangan data awal. Dipakai lewat tp().
  *
  * Terpisah dari teks antarmuka dengan sengaja. Pola seperti "{0} menunggu"
@@ -549,7 +549,7 @@ export const EN: Record<string, string> = {
  *
  * Teks yang tidak ada di sini tampil apa adanya. Itu yang terjadi pada pesan
  * yang ditulis workflow sendiri — isinya milik pembuat workflow, bukan
- * ForgeHub.
+ * OpenOrchestrator.
  */
 export const PESAN_EN: Record<string, string> = {
   // --- galat: umum ---
@@ -578,7 +578,7 @@ export const PESAN_EN: Record<string, string> = {
   "Paket terlalu besar. Batasnya {0} MB.": "The package is too large. The limit is {0} MB.",
   "Pekerjaan tidak ada.": "Job not found.",
   "processName wajib diisi.": "processName is required.",
-  "Proses '{0}' belum diterbitkan ke ForgeHub.": "Process '{0}' hasn't been published to ForgeHub.",
+  "Proses '{0}' belum diterbitkan ke OpenOrchestrator.": "Process '{0}' hasn't been published to OpenOrchestrator.",
   "Parameter 'robot' wajib diisi.": "The 'robot' parameter is required.",
   "Keadaan tidak dikenal: '{0}'.": "Unknown state: '{0}'.",
   "Pekerjaan itu tidak sedang menunggu atau berjalan.": "That job isn't pending or running.",
@@ -679,7 +679,7 @@ export const PESAN_EN: Record<string, string> = {
     "Process '{0}' isn't on this computer. Copy its project here, or run it on another robot.",
   "Dihentikan dari JakRunner": "Stopped from JakRunner",
 
-  // --- baris catatan dari ForgeHub dan JakRunner ---
+  // --- baris catatan dari OpenOrchestrator dan JakRunner ---
   "Pekerjaan dijadwalkan untuk {0}.": "Job scheduled for {0}.",
   "Paket {0} {1} diterbitkan.": "Package {0} {1} published.",
   "Pemicu '{0}' menjadwalkan {1}.": "Trigger '{0}' scheduled {1}.",
@@ -700,7 +700,7 @@ export const PESAN_EN: Record<string, string> = {
     "Log level '{0}' isn't recognised; logged as Info.",
 
   // --- keterangan data awal ---
-  "Akses penuh ke seluruh ForgeHub.": "Full access to all of ForgeHub.",
+  "Akses penuh ke seluruh OpenOrchestrator.": "Full access to all of OpenOrchestrator.",
   "Menerbitkan paket dan proses, menjalankan pekerjaan.": "Publishes packages and processes, runs jobs.",
   "Menjalankan proses yang sudah ada dan membaca hasilnya.": "Runs existing processes and reads their results.",
   "Hanya membaca — untuk pemeriksaan dan pelaporan.": "Read-only — for audits and reporting.",
@@ -710,7 +710,7 @@ export const PESAN_EN: Record<string, string> = {
   "Antrean bawaan yang dipakai template ReFramework.": "The default queue used by the ReFramework template.",
   "Berkas yang dipakai bersama oleh proses — masukan, keluaran, lampiran.":
     "Files shared by processes — inputs, outputs, attachments.",
-  "Mesin tempat ForgeHub berjalan.": "The machine ForgeHub runs on.",
+  "Mesin tempat OpenOrchestrator berjalan.": "The machine OpenOrchestrator runs on.",
   "Terdaftar sendiri lewat denyut robot.": "Registered automatically by a robot heartbeat.",
 
   // --- folder ---

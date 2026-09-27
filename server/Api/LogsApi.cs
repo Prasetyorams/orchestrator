@@ -1,7 +1,7 @@
 using System.Text.Json;
-using ForgeHub.Data;
+using OpenOrchestrator.Data;
 
-namespace ForgeHub.Api;
+namespace OpenOrchestrator.Api;
 
 public static class LogsApi
 {

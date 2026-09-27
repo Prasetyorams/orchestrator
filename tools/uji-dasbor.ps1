@@ -18,7 +18,7 @@ function Cek($nama, $dapat, $harap) {
 }
 
 $login = Invoke-RestMethod "$base/api/auth/login" -Method Post -ContentType 'application/json' `
-    -Body (@{ username = 'FH_Admin'; password = 'forgehub' } | ConvertTo-Json)
+    -Body (@{ username = 'OO_Admin'; password = 'openorchestrator' } | ConvertTo-Json)
 $h = @{ Authorization = "Bearer $($login.token)" }
 
 # ---------- dasbor ----------
@@ -148,7 +148,7 @@ try {
 }
 
 try {
-    Invoke-RestMethod "$base/api/users/FH_Admin" -Method Delete -Headers $h | Out-Null
+    Invoke-RestMethod "$base/api/users/OO_Admin" -Method Delete -Headers $h | Out-Null
     Cek "Administrator terakhir tidak bisa dihapus" "terhapus" "400"
 } catch {
     Cek "Administrator terakhir tidak bisa dihapus" $_.Exception.Response.StatusCode.value__ 400

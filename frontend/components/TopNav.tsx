@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, Check, Globe, Menu, Monitor, Moon, Search, Sun } from "lucide-react";
-import { ForgeHubApi, type SearchHit } from "@/lib/api";
+import { OpenOrchestratorApi, type SearchHit } from "@/lib/api";
 import { BAHASA, useT, type Bahasa } from "@/lib/i18n";
 import { useFolder } from "@/lib/folder";
 import { useIzin } from "@/lib/izin";
@@ -62,7 +62,7 @@ export function TopNav({ onMenu }: { onMenu: () => void }) {
 
   const hasil = useQuery({
     queryKey: ["search", tunda],
-    queryFn: () => ForgeHubApi.search(tunda),
+    queryFn: () => OpenOrchestratorApi.search(tunda),
     enabled: tunda.length >= 2,
   });
 
@@ -70,7 +70,7 @@ export function TopNav({ onMenu }: { onMenu: () => void }) {
   // dan tidak ditanyai tiap sepuluh detik untuk dijawab 403.
   const ringkasan = useQuery({
     queryKey: ["alerts", "ringkasan"],
-    queryFn: ForgeHubApi.alertSummary,
+    queryFn: OpenOrchestratorApi.alertSummary,
     refetchInterval: 10_000,
     enabled: lihatPeringatan,
   });
@@ -110,7 +110,7 @@ export function TopNav({ onMenu }: { onMenu: () => void }) {
   }
 
   async function tandaiSemua() {
-    await ForgeHubApi.readAllAlerts();
+    await OpenOrchestratorApi.readAllAlerts();
     klien.invalidateQueries({ queryKey: ["alerts"] });
   }
 
@@ -128,10 +128,10 @@ export function TopNav({ onMenu }: { onMenu: () => void }) {
 
       <Link href="/" className="flex shrink-0 items-center gap-2.5 rounded-md pr-2">
         <span className="flex h-8 w-8 items-center justify-center rounded-md bg-brand text-sm font-bold text-white">
-          FH
+          OO
         </span>
         <span className="hidden text-[17px] font-semibold tracking-tight text-ink md:block">
-          JakForge Orchestrator
+          Open Orchestrator
         </span>
       </Link>
 

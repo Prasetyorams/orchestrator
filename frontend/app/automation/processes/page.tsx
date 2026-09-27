@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderInput, Pencil, Play, Trash2, TriangleAlert } from "lucide-react";
-import { ForgeHubApi, errorText, type FolderNode, type Process } from "@/lib/api";
+import { OpenOrchestratorApi, errorText, type FolderNode, type Process } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
 import { kelompokkanPaket } from "@/lib/paket";
@@ -33,7 +33,7 @@ function IsiProses({ folder }: { folder: FolderNode }) {
 
   const proses = useQuery({
     queryKey: ["processes", folder.id],
-    queryFn: () => ForgeHubApi.processes(folder.id),
+    queryFn: () => OpenOrchestratorApi.processes(folder.id),
     // Tombol Jalankan harus hidup lagi SENDIRI begitu pekerjaannya selesai,
     // tanpa orang menekan muat ulang. Selama ada yang berjalan, daftar
     // disegarkan tiap 3 detik; selebihnya cukup tiap 15 detik.
@@ -45,7 +45,7 @@ function IsiProses({ folder }: { folder: FolderNode }) {
   // bukan baru ketahuan di halaman Pekerjaan.
   const robot = useQuery({
     queryKey: ["robots", folder.id],
-    queryFn: () => ForgeHubApi.robots(folder.id),
+    queryFn: () => OpenOrchestratorApi.robots(folder.id),
     enabled: boleh("robots.read"),
   });
   const tanpaRobot = robot.isSuccess && robot.data.length === 0;
@@ -56,14 +56,14 @@ function IsiProses({ folder }: { folder: FolderNode }) {
   }, [klien]);
 
   const hapus = useMutation({
-    mutationFn: (nama: string) => ForgeHubApi.deleteProcess(nama, folder.id),
+    mutationFn: (nama: string) => OpenOrchestratorApi.deleteProcess(nama, folder.id),
     onSuccess: segarkan,
     onError: (e) => setGalat(errorText(e)),
   });
 
   const jalankan = useMutation({
     mutationFn: (nama: string) =>
-      ForgeHubApi.startJob({ processName: nama, folderId: folder.id, source: "Dashboard" }),
+      OpenOrchestratorApi.startJob({ processName: nama, folderId: folder.id, source: "Dashboard" }),
     onMutate: (nama) => {
       setGalat("");
 
@@ -244,7 +244,7 @@ function IsiProses({ folder }: { folder: FolderNode }) {
           folderSekarang={folder.id}
           onTutup={() => setPindah(null)}
           onPindah={async (tujuan) => {
-            await ForgeHubApi.moveProcess(pindah.name, folder.id, tujuan);
+            await OpenOrchestratorApi.moveProcess(pindah.name, folder.id, tujuan);
             segarkan();
             klien.invalidateQueries({ queryKey: ["triggers"] });
           }}
@@ -288,8 +288,8 @@ function DialogSimpanProses({
 }) {
   const { t } = useT();
 
-  const paket = useQuery({ queryKey: ["packages", "semua"], queryFn: () => ForgeHubApi.packages() });
-  const lingkungan = useQuery({ queryKey: ["environments"], queryFn: ForgeHubApi.environments });
+  const paket = useQuery({ queryKey: ["packages", "semua"], queryFn: () => OpenOrchestratorApi.packages() });
+  const lingkungan = useQuery({ queryKey: ["environments"], queryFn: OpenOrchestratorApi.environments });
   const ringkasan = useMemo(() => kelompokkanPaket(paket.data ?? []), [paket.data]);
 
   const [namaPaket, setNamaPaket] = useState(awal?.packageName ?? "");
@@ -304,7 +304,7 @@ function DialogSimpanProses({
 
   const simpan = useMutation({
     mutationFn: () =>
-      ForgeHubApi.saveProcess({
+      OpenOrchestratorApi.saveProcess({
         name: nama.trim(),
         packageName: namaPaket || undefined,
         packageVersion: versi || undefined,
@@ -413,7 +413,7 @@ function DialogSimpanProses({
 
       {paket.isSuccess && ringkasan.length === 0 ? (
         <p className="mb-2 text-sm text-muted">
-          {t("Belum ada paket yang diterbitkan. Terbitkan dari Studio: tab Design → grup ForgeHub → Terbitkan.")}
+          {t("Belum ada paket yang diterbitkan. Terbitkan dari Studio: tab Design → grup OpenOrchestrator → Terbitkan.")}
         </p>
       ) : null}
 
@@ -445,13 +445,13 @@ function DialogProses({
   // lain, dengan riwayatnya sendiri.
   const jobs = useQuery({
     queryKey: ["jobs", "process", folderId, proses?.name],
-    queryFn: () => ForgeHubApi.jobs({ process: proses!.name, folderId, limit: 200 }),
+    queryFn: () => OpenOrchestratorApi.jobs({ process: proses!.name, folderId, limit: 200 }),
     enabled: !!proses,
   });
 
   const log = useQuery({
     queryKey: ["logs", "process", folderId, proses?.name],
-    queryFn: () => ForgeHubApi.logs({ process: proses!.name, folderId, limit: 500 }),
+    queryFn: () => OpenOrchestratorApi.logs({ process: proses!.name, folderId, limit: 500 }),
     enabled: !!proses && tab === "catatan",
   });
 

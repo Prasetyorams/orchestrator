@@ -1,4 +1,4 @@
-# Menguji pemicu terjadwal dan penjadwalnya terhadap ForgeHub yang berjalan.
+# Menguji pemicu terjadwal dan penjadwalnya terhadap OpenOrchestrator yang berjalan.
 #
 # Uji ini SENGAJA menunggu penjadwal benar-benar menembak, bukan sekadar
 # memeriksa bahwa barisnya tersimpan. Pemicu yang tersimpan rapi tapi tidak
@@ -20,7 +20,7 @@ function Cek($nama, $dapat, $harap) {
 }
 
 $login = Invoke-RestMethod "$base/api/auth/login" -Method Post -ContentType 'application/json' `
-    -Body (@{ username = 'FH_Admin'; password = 'forgehub' } | ConvertTo-Json)
+    -Body (@{ username = 'OO_Admin'; password = 'openorchestrator' } | ConvertTo-Json)
 $h = @{ Authorization = "Bearer $($login.token)" }
 
 $nama = "UjiPemicu-$(Get-Random -Maximum 99999)"
@@ -88,7 +88,7 @@ Invoke-RestMethod "$base/api/triggers" -Method Post -Headers $h -ContentType 'ap
     -Body (@{ name = $namaCepat; processName = 'cha'; intervalMinutes = 1; enabled = $true } | ConvertTo-Json) | Out-Null
 
 # Dimajukan supaya jatuh tempo sekarang, tanpa menunggu satu menit penuh.
-docker exec -e PGPASSWORD=forgehub forgehub-db psql -U forgehub -d forgehub -q -c `
+docker exec -e PGPASSWORD=openorchestrator openorchestrator-db psql -U openorchestrator -d openorchestrator -q -c `
     "UPDATE triggers SET next_run_at = now() - interval '1 second' WHERE name = '$namaCepat'" | Out-Null
 
 $sebelum = (Invoke-RestMethod "$base/api/jobs?process=cha&limit=500" -Headers $h).Count
@@ -127,7 +127,7 @@ Invoke-RestMethod "$base/api/triggers" -Method Post -Headers $h -ContentType 'ap
 
 Invoke-RestMethod "$base/api/processes/ProsesSementara" -Method Delete -Headers $h | Out-Null
 
-docker exec -e PGPASSWORD=forgehub forgehub-db psql -U forgehub -d forgehub -q -c `
+docker exec -e PGPASSWORD=openorchestrator openorchestrator-db psql -U openorchestrator -d openorchestrator -q -c `
     "UPDATE triggers SET next_run_at = now() - interval '1 second' WHERE name = '$namaYatim'" | Out-Null
 
 Write-Host "  menunggu penjadwal mematikan pemicu yatim..."

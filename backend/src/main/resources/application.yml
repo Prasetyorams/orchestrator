@@ -3,12 +3,12 @@ server:
 
 spring:
   application:
-    name: forgehub
+    name: openorchestrator
 
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/forgehub}
-    username: ${DB_USER:forgehub}
-    password: ${DB_PASSWORD:forgehub}
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/openorchestrator}
+    username: ${DB_USER:openorchestrator}
+    password: ${DB_PASSWORD:openorchestrator}
     hikari:
       maximum-pool-size: 12
 
@@ -20,16 +20,16 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
 
-# Seluruh setelan ForgeHub, dibaca ke satu record bertipe: ForgeHubProperties.
+# Seluruh setelan OpenOrchestrator, dibaca ke satu record bertipe: OpenOrchestratorProperties.
 # Nilai yang dulu tertulis di dalam kode ada di sini, supaya bisa diubah lewat
-# variabel lingkungan tanpa membangun ulang — mis. FORGEHUB_ROBOT_HEARTBEATTIMEOUT=60s.
-forgehub:
+# variabel lingkungan tanpa membangun ulang — mis. OPENORCHESTRATOR_ROBOT_HEARTBEATTIMEOUT=60s.
+openorchestrator:
   # Zona untuk menghitung batas "hari ini" di dasbor.
   #
   # BUKAN zona server. Di dalam container zona server adalah UTC, dan orang
   # yang membuka dasbor pukul 7 pagi WIB akan melihat angka "hari ini" yang
   # masih menghitung kemarin sore. Nilainya nama IANA, mis. Asia/Jakarta.
-  display-timezone: ${FORGEHUB_TZ:UTC}
+  display-timezone: ${OPENORCHESTRATOR_TZ:UTC}
 
   secret:
     # Kunci induk untuk menyandikan kredensial. Bukan sekadar berkas rahasia
@@ -39,7 +39,7 @@ forgehub:
     #
     # Di Docker berkasnya dipasang sebagai volume dari
     # %LOCALAPPDATA%\JakForge\ForgeHub\signing.key, bukan dibuat baru.
-    key-file: ${FORGEHUB_SIGNING_KEY:/data/signing.key}
+    key-file: ${OPENORCHESTRATOR_SIGNING_KEY:/data/signing.key}
 
   jwt:
     # WAJIB diganti di produksi. Minimal 32 karakter untuk HS256.
@@ -59,7 +59,7 @@ forgehub:
   permission-cache:
     # Izin peran diingat selama ini per orang, supaya denyut robot tiap
     # beberapa detik tidak menjadi kueri tiap beberapa detik. Perubahan peran
-    # lewat ForgeHub menghapus ingatannya seketika.
+    # lewat OpenOrchestrator menghapus ingatannya seketika.
     ttl: 10s
 
   scheduler:
@@ -77,11 +77,11 @@ forgehub:
   bootstrap:
     # Isi awal yang ditanam saat aplikasi naik, hanya kalau belum ada.
     tenant-name: default
-    admin-username: FH_Admin
-    admin-password: forgehub
-    admin-display-name: ForgeHub Administrator
-    # Nama mesin tempat ForgeHub berjalan; kosong berarti nama host.
-    machine-name: ${FORGEHUB_MACHINE_NAME:}
+    admin-username: OO_Admin
+    admin-password: openorchestrator
+    admin-display-name: OpenOrchestrator Administrator
+    # Nama mesin tempat OpenOrchestrator berjalan; kosong berarti nama host.
+    machine-name: ${OPENORCHESTRATOR_MACHINE_NAME:}
 
 management:
   endpoints:
@@ -91,4 +91,4 @@ management:
 
 logging:
   level:
-    id.jakforge.forgehub: INFO
+    id.jakforge.openorchestrator: INFO

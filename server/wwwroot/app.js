@@ -1,8 +1,8 @@
 /*
-   ForgeHub — dasbor.
+   OpenOrchestrator — dasbor.
 
    Ditulis sebagai satu halaman JavaScript biasa, tanpa kerangka kerja dan
-   tanpa langkah pembangunan. Alasannya sederhana: ForgeHub harus bisa dijalankan
+   tanpa langkah pembangunan. Alasannya sederhana: OpenOrchestrator harus bisa dijalankan
    dengan satu perintah di komputer yang belum tentu punya Node terpasang. Berkas
    ini disajikan apa adanya oleh server yang sama dengan API-nya.
 */
@@ -22,7 +22,7 @@ const S = {
     logLines: [],
 };
 
-const KEY = 'forgehub.token';
+const KEY = 'openorchestrator.token';
 
 // =====================================================================
 // Pembantu
@@ -1120,7 +1120,7 @@ PAGES.dashboard = async (page) => {
         `<div class="panel-body flush">${table(
             ['Robot', 'Keadaan', 'Lingkungan', 'CPU', 'Memori', 'Kerja', 'Denyut terakhir'],
             robotRows,
-            'Belum ada robot yang menyambung. Jalankan JakRunner dengan jakrunner.json yang menunjuk ke ForgeHub ini.')}</div>`,
+            'Belum ada robot yang menyambung. Jalankan JakRunner dengan jakrunner.json yang menunjuk ke OpenOrchestrator ini.')}</div>`,
         `<button class="btn sm" data-act="goRobots">Kelola robot</button>`);
 
     // ---------------------------------------------------------------
@@ -1259,7 +1259,7 @@ PAGES.processes = async (page) => {
             `<div class="panel-body flush">${dataTable('processes', kolom, rows, {
                 rowKey: (p) => p.name,
                 openable: true,
-                empty: 'Belum ada proses. Terbitkan dari JakForge Studio lewat Design → Terbitkan ke ForgeHub, atau buat di sini.',
+                empty: 'Belum ada proses. Terbitkan dari JakForge Studio lewat Design → Terbitkan ke OpenOrchestrator, atau buat di sini.',
                 searchHint: 'Cari nama proses, paket, atau lingkungan…',
                 bulk: [{ act: 'runSelectedProcesses', label: 'Jalankan terpilih' }],
             })}</div>`);
@@ -1391,7 +1391,7 @@ PAGES.packages = async (page) => {
         `<button class="btn" data-act="refresh">Muat ulang</button>`)
         + panel('Semua paket', `<div class="panel-body flush">${table(
             ['Paket', 'Versi', 'Titik masuk', 'Diterbitkan oleh', 'Ukuran', 'Waktu', 'Tindakan'], body,
-            'Belum ada paket. Di Studio, buka tab Design lalu tekan Terbitkan ke ForgeHub.')}</div>`);
+            'Belum ada paket. Di Studio, buka tab Design lalu tekan Terbitkan ke OpenOrchestrator.')}</div>`);
 };
 
 // =====================================================================
@@ -1539,7 +1539,7 @@ PAGES.robots = async (page) => {
          <button class="btn primary" data-act="newRobot">Daftarkan robot</button>`)
         + panel('Semua robot', `<div class="panel-body flush">${table(
             ['Robot', 'Mesin', 'Jenis', 'Lingkungan', 'Keadaan', 'CPU / Memori', 'Denyut terakhir', ''], body,
-            'Belum ada robot. Isi jakrunner.json di sebelah JakRunner.exe dengan alamat ForgeHub ini, lalu jalankan JakRunner.')}</div>`);
+            'Belum ada robot. Isi jakrunner.json di sebelah JakRunner.exe dengan alamat OpenOrchestrator ini, lalu jalankan JakRunner.')}</div>`);
 };
 
 PAGES.machines = async (page) => {
@@ -1992,7 +1992,7 @@ PAGES.users = async (page) => {
         </td>
     </tr>`);
 
-    page.innerHTML = head('Pengguna', 'Siapa saja yang boleh masuk ke ForgeHub ini.',
+    page.innerHTML = head('Pengguna', 'Siapa saja yang boleh masuk ke OpenOrchestrator ini.',
         `<button class="btn" data-act="refresh">Muat ulang</button>
          <button class="btn primary" data-act="newUser">Pengguna baru</button>`)
         + panel('Semua pengguna', `<div class="panel-body flush">${table(
@@ -2030,7 +2030,7 @@ PAGES.licensing = async (page) => {
         + panel('Lisensi', `<div class="panel-body flush">${table(
             ['Produk', 'Jatah', 'Terpakai', 'Berlaku sampai'], body, 'Tidak ada lisensi.')}</div>`)
         + panel('Catatan', `<div class="panel-body" style="color:var(--muted);line-height:1.7">
-            Pemasangan ForgeHub mandiri ini tidak membatasi jumlah robot. Baris di atas ada supaya
+            Pemasangan OpenOrchestrator mandiri ini tidak membatasi jumlah robot. Baris di atas ada supaya
             pemakaian tetap terlihat, dan supaya bentuk datanya sudah siap jika nanti pembatasan diberlakukan.
         </div>`);
 };
@@ -2038,7 +2038,7 @@ PAGES.licensing = async (page) => {
 PAGES.settings = async (page) => {
     const s = await api('/api/settings');
 
-    page.innerHTML = head('Pengaturan', 'Keterangan pemasangan ForgeHub ini.',
+    page.innerHTML = head('Pengaturan', 'Keterangan pemasangan OpenOrchestrator ini.',
         `<button class="btn" data-act="changePassword">Ganti kata sandi</button>`)
         + `<div class="grid-2">
             ${panel('Server', `<div class="panel-body"><div class="kv">
@@ -2074,10 +2074,10 @@ PAGES.settings = async (page) => {
 
         + panel('Menyambungkan JakForge Studio',
             `<div class="panel-body" style="line-height:1.75">
-                Di Studio, buka tab <b>Design</b> → grup <b>ForgeHub</b> → <b>Sambungkan</b>,
+                Di Studio, buka tab <b>Design</b> → grup <b>OpenOrchestrator</b> → <b>Sambungkan</b>,
                 lalu isi alamat <span class="mono">${esc(location.origin)}</span> beserta nama pengguna dan
                 kata sandi. Setelah tersambung, tombol <b>Terbitkan</b> mengirim proyek yang sedang
-                terbuka ke ForgeHub sebagai paket, dan langsung tersedia untuk dijalankan robot.
+                terbuka ke OpenOrchestrator sebagai paket, dan langsung tersedia untuk dijalankan robot.
             </div>`);
 };
 
@@ -2846,14 +2846,14 @@ async function start() {
     $('tenantName').textContent = S.user.tenant || '—';
     $('whoName').textContent = S.user.username;
     $('whoRole').textContent = S.user.role;
-    $('whoInitials').textContent = (S.user.username || 'FH').substring(0, 2).toUpperCase();
+    $('whoInitials').textContent = (S.user.username || 'OO').substring(0, 2).toUpperCase();
 
     buildNav();
     setConnected(true);
 
     try {
         const health = await api('/api/health');
-        $('serverInfo').textContent = 'ForgeHub · ' + location.host;
+        $('serverInfo').textContent = 'OpenOrchestrator · ' + location.host;
     } catch (ex) { /* penandanya sudah diurus setConnected */ }
 
     const initial = location.hash.replace('#', '');

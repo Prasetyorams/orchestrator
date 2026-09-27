@@ -1,4 +1,4 @@
-namespace ForgeHub.Api;
+namespace OpenOrchestrator.Api;
 
 /// <summary>
 /// Penilai ekspresi cron lima ruas: menit, jam, tanggal, bulan, hari.

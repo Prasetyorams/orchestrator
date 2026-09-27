@@ -8,7 +8,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
  * Yang diubah hanya kelas .dark di <html>; warnanya sendiri ada di
  * globals.css. Pilihannya diingat per peramban. "Ikuti sistem" adalah
  * bawaannya dan benar-benar MENGIKUTI: sistem yang berganti ke gelap saat
- * matahari terbenam ikut mengganti ForgeHub yang sedang terbuka, tanpa muat
+ * matahari terbenam ikut mengganti OpenOrchestrator yang sedang terbuka, tanpa muat
  * ulang.
  *
  * Kelas awalnya dipasang oleh SKRIP_TEMA di app/layout.tsx sebelum halaman
@@ -17,7 +17,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 
 export type Tema = "terang" | "gelap" | "sistem";
 
-export const KUNCI_TEMA = "forgehub.tema";
+export const KUNCI_TEMA = "openorchestrator.tema";
 
 const MEDIA = "(prefers-color-scheme: dark)";
 

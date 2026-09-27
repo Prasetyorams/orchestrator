@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Trash2 } from "lucide-react";
-import { ForgeHubApi, errorText, type User } from "@/lib/api";
+import { OpenOrchestratorApi, errorText, type User } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
 import { dateTimeOf } from "@/lib/utils";
@@ -21,11 +21,11 @@ export default function Pengguna() {
   const [baru, setBaru] = useState(false);
   const [galat, setGalat] = useState("");
 
-  const pengguna = useQuery({ queryKey: ["users"], queryFn: ForgeHubApi.users });
-  const peran = useQuery({ queryKey: ["roles"], queryFn: ForgeHubApi.roles });
+  const pengguna = useQuery({ queryKey: ["users"], queryFn: OpenOrchestratorApi.users });
+  const peran = useQuery({ queryKey: ["roles"], queryFn: OpenOrchestratorApi.roles });
 
   const hapus = useMutation({
-    mutationFn: ForgeHubApi.deleteUser,
+    mutationFn: OpenOrchestratorApi.deleteUser,
     onSuccess: () => klien.invalidateQueries({ queryKey: ["users"] }),
     onError: (e) => setGalat(errorText(e)),
   });
@@ -152,7 +152,7 @@ function DialogPengguna({
   const [galat, setGalat] = useState("");
 
   const simpan = useMutation({
-    mutationFn: ForgeHubApi.saveUser,
+    mutationFn: OpenOrchestratorApi.saveUser,
     onSuccess: () => {
       onSelesai();
       onTutup();

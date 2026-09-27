@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, FolderLock, FolderPlus, Pencil, Trash2 } from "lucide-react";
-import { ForgeHubApi, errorText, statusGalat, type FolderKelola } from "@/lib/api";
+import { OpenOrchestratorApi, errorText, statusGalat, type FolderKelola } from "@/lib/api";
 import { useFolder } from "@/lib/folder";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
@@ -36,7 +36,7 @@ export default function KelolaFolder() {
 
   const folders = useQuery({
     queryKey: ["folders", "manage"],
-    queryFn: ForgeHubApi.foldersManage,
+    queryFn: OpenOrchestratorApi.foldersManage,
     enabled: boleh("folders.read"),
     retry: false,
   });
@@ -51,7 +51,7 @@ export default function KelolaFolder() {
   }, [bersama]);
 
   const hapus = useMutation({
-    mutationFn: ForgeHubApi.deleteFolder,
+    mutationFn: OpenOrchestratorApi.deleteFolder,
     onSuccess: () => klien.invalidateQueries({ queryKey: ["folders"] }),
     onError: (e) => setGalat(errorText(e)),
   });

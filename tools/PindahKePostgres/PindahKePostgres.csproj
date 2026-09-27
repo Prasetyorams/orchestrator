@@ -8,7 +8,7 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Versi disamakan dengan server/ForgeHub.Server.csproj. Dua versi
+    <!-- Versi disamakan dengan server/OpenOrchestrator.Server.csproj. Dua versi
          Microsoft.Data.Sqlite yang berbeda di satu repositori adalah cara
          paling mudah mendapat perbedaan perilaku yang tidak ada yang cari. -->
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />

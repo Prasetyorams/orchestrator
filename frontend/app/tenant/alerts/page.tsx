@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
-import { ForgeHubApi, errorText } from "@/lib/api";
+import { OpenOrchestratorApi, errorText } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
 import { cn, dateTimeOf } from "@/lib/utils";
@@ -29,7 +29,7 @@ export default function Peringatan() {
 
   const peringatan = useQuery({
     queryKey: ["alerts", "semua", tingkat, belumDibaca],
-    queryFn: () => ForgeHubApi.alerts({ severity: tingkat, unread: belumDibaca ? "1" : undefined, limit: 500 }),
+    queryFn: () => OpenOrchestratorApi.alerts({ severity: tingkat, unread: belumDibaca ? "1" : undefined, limit: 500 }),
     refetchInterval: 15_000,
     placeholderData: keepPreviousData,
   });
@@ -37,13 +37,13 @@ export default function Peringatan() {
   const segarkan = () => klien.invalidateQueries({ queryKey: ["alerts"] });
 
   const tandai = useMutation({
-    mutationFn: ForgeHubApi.readAlert,
+    mutationFn: OpenOrchestratorApi.readAlert,
     onSuccess: segarkan,
     onError: (e) => setGalat(errorText(e)),
   });
 
   const tandaiSemua = useMutation({
-    mutationFn: ForgeHubApi.readAllAlerts,
+    mutationFn: OpenOrchestratorApi.readAllAlerts,
     onSuccess: segarkan,
     onError: (e) => setGalat(errorText(e)),
   });

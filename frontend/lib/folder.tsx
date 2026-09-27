@@ -11,7 +11,7 @@ import {
 } from "react";
 import { usePathname } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ForgeHubApi, type FolderNode, type FolderTree } from "@/lib/api";
+import { OpenOrchestratorApi, type FolderNode, type FolderTree } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
 /**
@@ -27,7 +27,7 @@ import { useT } from "@/lib/i18n";
  * menyertakannya, dan satu tautan yang lupa melempar orang ke folder lain.
  */
 
-const KUNCI = "forgehub.folder";
+const KUNCI = "openorchestrator.folder";
 
 type Isi = {
   pohon: FolderTree | undefined;
@@ -70,7 +70,7 @@ export function FolderProvider({ children }: { children: ReactNode }) {
 
   const pohon = useQuery({
     queryKey: ["folders"],
-    queryFn: ForgeHubApi.folders,
+    queryFn: OpenOrchestratorApi.folders,
     // Layar masuk belum punya token; pohonnya baru ditarik sesudah masuk.
     enabled: pathname !== "/login",
     staleTime: 30_000,
@@ -119,7 +119,7 @@ export function FolderProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const baru = await ForgeHubApi.personalFolder();
+    const baru = await OpenOrchestratorApi.personalFolder();
     await klien.invalidateQueries({ queryKey: ["folders"] });
     pilih(baru.id);
   }, [klien, pilih, pohon.data?.personal]);

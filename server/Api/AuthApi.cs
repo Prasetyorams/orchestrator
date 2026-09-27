@@ -1,7 +1,7 @@
-using ForgeHub.Auth;
-using ForgeHub.Data;
+using OpenOrchestrator.Auth;
+using OpenOrchestrator.Data;
 
-namespace ForgeHub.Api;
+namespace OpenOrchestrator.Api;
 
 public static class AuthApi
 {
@@ -9,7 +9,7 @@ public static class AuthApi
     {
         app.MapGet("/api/health", () => Results.Ok(new
         {
-            product = "ForgeHub",
+            product = "OpenOrchestrator",
             status = "OK",
             time = Sql.Now(),
         }));

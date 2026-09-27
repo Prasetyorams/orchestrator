@@ -1,6 +1,6 @@
-using ForgeHub.Data;
+using OpenOrchestrator.Data;
 
-namespace ForgeHub.Api;
+namespace OpenOrchestrator.Api;
 
 public static class JobsApi
 {
@@ -76,7 +76,7 @@ public static class JobsApi
 
             if (Sql.Count(connection,
                     "SELECT COUNT(*) FROM processes WHERE tenant_id = @p0 AND name = @p1", tenantId, process) == 0)
-                return Results.BadRequest(new { error = "Proses '" + process + "' belum diterbitkan ke ForgeHub." });
+                return Results.BadRequest(new { error = "Proses '" + process + "' belum diterbitkan ke OpenOrchestrator." });
 
             var id = Sql.NewId();
 
@@ -291,7 +291,7 @@ public static class JobsApi
 
             if (Sql.Count(connection,
                     "SELECT COUNT(*) FROM processes WHERE tenant_id = @p0 AND name = @p1", tenantId, process) == 0)
-                return Results.BadRequest(new { error = "Proses '" + process + "' belum diterbitkan ke ForgeHub." });
+                return Results.BadRequest(new { error = "Proses '" + process + "' belum diterbitkan ke OpenOrchestrator." });
 
             var enabled = body.Flag("enabled", true);
 

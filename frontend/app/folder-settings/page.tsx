@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderPlus, Pencil, Trash2, UserMinus, X } from "lucide-react";
-import { ForgeHubApi, errorText, type FolderAnggota, type FolderNode } from "@/lib/api";
+import { OpenOrchestratorApi, errorText, type FolderAnggota, type FolderNode } from "@/lib/api";
 import { useFolder } from "@/lib/folder";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
@@ -39,7 +39,7 @@ function IsiSetelan({ folder }: { folder: FolderNode }) {
 
   const anggota = useQuery({
     queryKey: ["folderMembers", folder.id],
-    queryFn: () => ForgeHubApi.folderMembers(folder.id),
+    queryFn: () => OpenOrchestratorApi.folderMembers(folder.id),
   });
 
   const tabs: { kode: Tab; label: string }[] = [
@@ -102,7 +102,7 @@ function TabUmum({ folder }: { folder: FolderNode }) {
   const tutup = useCallback(() => setDialog(null), []);
 
   const hapus = useMutation({
-    mutationFn: () => ForgeHubApi.deleteFolder(folder.id),
+    mutationFn: () => OpenOrchestratorApi.deleteFolder(folder.id),
     onSuccess: async () => {
       await klien.invalidateQueries({ queryKey: ["folders"] });
       router.push("/");
@@ -202,7 +202,7 @@ function TabRobot({ folder, anggota }: { folder: FolderNode; anggota: FolderAngg
 
   const semua = useQuery({
     queryKey: ["robots", "semua"],
-    queryFn: () => ForgeHubApi.robots(),
+    queryFn: () => OpenOrchestratorApi.robots(),
     enabled: anggota.canManageRobots,
   });
 
@@ -216,7 +216,7 @@ function TabRobot({ folder, anggota }: { folder: FolderNode; anggota: FolderAngg
   }
 
   const tugaskan = useMutation({
-    mutationFn: (nama: string) => ForgeHubApi.assignRobot(folder.id, nama),
+    mutationFn: (nama: string) => OpenOrchestratorApi.assignRobot(folder.id, nama),
     onSuccess: () => {
       setPilihan("");
       segarkan();
@@ -225,7 +225,7 @@ function TabRobot({ folder, anggota }: { folder: FolderNode; anggota: FolderAngg
   });
 
   const lepas = useMutation({
-    mutationFn: (nama: string) => ForgeHubApi.unassignRobot(folder.id, nama),
+    mutationFn: (nama: string) => OpenOrchestratorApi.unassignRobot(folder.id, nama),
     onSuccess: segarkan,
     onError: (e) => setGalat(errorText(e)),
   });
@@ -307,7 +307,7 @@ function TabPengguna({ folder, anggota }: { folder: FolderNode; anggota: FolderA
   const [pilihan, setPilihan] = useState("");
   const [galat, setGalat] = useState("");
 
-  const semua = useQuery({ queryKey: ["users"], queryFn: ForgeHubApi.users, enabled: anggota.canManageUsers });
+  const semua = useQuery({ queryKey: ["users"], queryFn: OpenOrchestratorApi.users, enabled: anggota.canManageUsers });
 
   const sudah = new Set(anggota.users.map((u) => u.username));
   const tersedia = (semua.data ?? []).filter((u) => !sudah.has(u.username));
@@ -319,7 +319,7 @@ function TabPengguna({ folder, anggota }: { folder: FolderNode; anggota: FolderA
   }
 
   const tugaskan = useMutation({
-    mutationFn: (username: string) => ForgeHubApi.assignUser(folder.id, username),
+    mutationFn: (username: string) => OpenOrchestratorApi.assignUser(folder.id, username),
     onSuccess: () => {
       setPilihan("");
       segarkan();
@@ -328,7 +328,7 @@ function TabPengguna({ folder, anggota }: { folder: FolderNode; anggota: FolderA
   });
 
   const lepas = useMutation({
-    mutationFn: (username: string) => ForgeHubApi.unassignUser(folder.id, username),
+    mutationFn: (username: string) => OpenOrchestratorApi.unassignUser(folder.id, username),
     onSuccess: segarkan,
     onError: (e) => setGalat(errorText(e)),
   });

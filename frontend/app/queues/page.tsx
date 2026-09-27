@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderInput, ListChecks, Trash2 } from "lucide-react";
-import { ForgeHubApi, errorText, type FolderNode, type Queue } from "@/lib/api";
+import { OpenOrchestratorApi, errorText, type FolderNode, type Queue } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
 import { dateTimeOf } from "@/lib/utils";
@@ -29,7 +29,7 @@ function IsiAntrean({ folder }: { folder: FolderNode }) {
 
   const antrean = useQuery({
     queryKey: ["queues", folder.id],
-    queryFn: () => ForgeHubApi.queues(folder.id),
+    queryFn: () => OpenOrchestratorApi.queues(folder.id),
     refetchInterval: 10_000,
   });
 
@@ -39,7 +39,7 @@ function IsiAntrean({ folder }: { folder: FolderNode }) {
   }, [klien]);
 
   const hapus = useMutation({
-    mutationFn: ForgeHubApi.deleteQueue,
+    mutationFn: OpenOrchestratorApi.deleteQueue,
     onSuccess: segarkan,
     onError: (e) => setGalat(errorText(e)),
   });
@@ -149,7 +149,7 @@ function IsiAntrean({ folder }: { folder: FolderNode }) {
           folderSekarang={folder.id}
           onTutup={() => setPindah(null)}
           onPindah={async (tujuan) => {
-            await ForgeHubApi.moveQueue(pindah.name, tujuan);
+            await OpenOrchestratorApi.moveQueue(pindah.name, tujuan);
             segarkan();
           }}
         />
@@ -177,7 +177,7 @@ function DialogAntrean({
 
   const simpan = useMutation({
     mutationFn: () =>
-      ForgeHubApi.saveQueue({
+      OpenOrchestratorApi.saveQueue({
         name: nama.trim(),
         description: ket.trim() || undefined,
         maxRetries: maks,
@@ -255,12 +255,12 @@ function DialogButir({ antrean, onTutup }: { antrean: Queue | null; onTutup: () 
 
   const butir = useQuery({
     queryKey: ["queueItems", antrean?.name],
-    queryFn: () => ForgeHubApi.queueItems(antrean!.name, { limit: 500 }),
+    queryFn: () => OpenOrchestratorApi.queueItems(antrean!.name, { limit: 500 }),
     enabled: !!antrean,
   });
 
   const hapus = useMutation({
-    mutationFn: ForgeHubApi.deleteQueueItem,
+    mutationFn: OpenOrchestratorApi.deleteQueueItem,
     onSuccess: () => {
       klien.invalidateQueries({ queryKey: ["queueItems", antrean?.name] });
       klien.invalidateQueries({ queryKey: ["queues"] });

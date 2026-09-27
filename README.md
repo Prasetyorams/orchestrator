@@ -1,23 +1,23 @@
-# ForgeHub — Orchestrator JakForge
+# OpenOrchestrator — Orchestrator JakForge
 
 Pusat kendali untuk robot, proses, pekerjaan, antrean, aset, dan catatan
 jalannya automasi JakForge.
 
 ---
 
-## Mulai di sini: `start-forgehub.cmd`
+## Mulai di sini: `start-openorchestrator.cmd`
 
-Klik dua kali **`start-forgehub.cmd`**, lalu buka <http://localhost:8080>.
+Klik dua kali **`start-openorchestrator.cmd`**, lalu buka <http://localhost:8080>.
 
-    Nama pengguna : FH_Admin
-    Kata sandi    : forgehub
+    Nama pengguna : OO_Admin
+    Kata sandi    : openorchestrator
 
 Itu saja. Tidak ada basis data yang perlu dipasang, tidak ada layanan yang
 perlu dinyalakan, tidak ada berkas setelan yang perlu diisi lebih dulu.
 
-Yang berjalan adalah **`server/`** — ForgeHub di atas ASP.NET Core 10 dengan
+Yang berjalan adalah **`server/`** — OpenOrchestrator di atas ASP.NET Core 10 dengan
 SQLite. Sudah dibangun, dijalankan, dan diuji sampai ujung: Studio menerbitkan
-proyek ke sana, ForgeHub menjadwalkan pekerjaan, JakRunner menjemput dan
+proyek ke sana, OpenOrchestrator menjadwalkan pekerjaan, JakRunner menjemput dan
 menjalankannya, lalu hasilnya kembali ke dasbor.
 
 Datanya di `%LOCALAPPDATA%\JakForge\ForgeHub` — di luar folder proyek, jadi
@@ -30,8 +30,8 @@ Buat `jakrunner.json` di sebelah `JakRunner.exe`:
 ```json
 {
   "forgeHubUrl": "http://localhost:8080",
-  "username": "FH_Admin",
-  "password": "forgehub",
+  "username": "OO_Admin",
+  "password": "openorchestrator",
   "robotName": ""
 }
 ```
@@ -41,7 +41,7 @@ untuk memakai `<nama-mesin>-<nama-pengguna>`.
 
 ### Menyambungkan Studio
 
-Di Studio: tab **Design** → grup **ForgeHub** → **Sambungkan**, isi alamat dan
+Di Studio: tab **Design** → grup **OpenOrchestrator** → **Sambungkan**, isi alamat dan
 kredensialnya. Setelah itu **Terbitkan** mengirim proyek yang sedang terbuka
 sebagai paket, dan prosesnya langsung siap dijalankan robot.
 
@@ -49,7 +49,7 @@ sebagai paket, dan prosesnya langsung siap dijalankan robot.
 
 ## Repo ini dan repo Studio
 
-ForgeHub dulu tinggal di folder `ForgeHub/` di dalam repo Studio. Sejak
+OpenOrchestrator dulu tinggal di folder `OpenOrchestrator/` di dalam repo Studio. Sejak
 25 September 2026 ia berdiri sendiri di repo ini, lengkap dengan riwayatnya,
 supaya mengembangkan orchestrator tidak mengganggu Studio dan sebaliknya.
 
@@ -58,8 +58,8 @@ Keduanya hanya bersambung lewat API HTTP. Pemanggilnya tetap di
 
 | Klien | Berkas di repo Studio |
 |---|---|
-| Studio (Terbitkan, Sambungkan) | `OpenRPA/ForgeHub/StudioForgeHubClient.cs` |
-| JakRunner (denyut, pekerjaan, log) | `JakRunner/Core/ForgeHubClient.cs` |
+| Studio (Terbitkan, Sambungkan) | `OpenRPA/OpenOrchestrator/StudioOpenOrchestratorClient.cs` |
+| JakRunner (denyut, pekerjaan, log) | `JakRunner/Core/OpenOrchestratorClient.cs` |
 | Activity kategori Orchestrator | `Custom.Orchestrator/Runtime/HubConnection.cs` |
 
 Jadi yang harus dijaga di sini adalah **bentuk API-nya**. Mengganti alamat
@@ -139,11 +139,11 @@ docker compose up --build
 
 | Alamat | Isinya |
 |---|---|
-| http://localhost:3000 | ForgeHub |
+| http://localhost:3000 | OpenOrchestrator |
 | http://localhost:8080 | API |
 | http://localhost:8080/actuator/health | Pemeriksaan kesehatan |
 
-Masuk pertama kali: **FH_Admin** / **forgehub**
+Masuk pertama kali: **OO_Admin** / **openorchestrator**
 
 Sandi itu ada di dalam `V2__seed.sql` yang tersimpan di repositori ini, jadi ia
 bukan rahasia bagi siapa pun yang bisa membaca kodenya. Ganti begitu Anda masuk.
@@ -152,8 +152,8 @@ bukan rahasia bagi siapa pun yang bisa membaca kodenya. Ganti begitu Anda masuk.
 
 ```bash
 # Basis data
-docker run -d --name forgehub-db -p 5432:5432 \
-  -e POSTGRES_DB=forgehub -e POSTGRES_USER=forgehub -e POSTGRES_PASSWORD=forgehub \
+docker run -d --name openorchestrator-db -p 5432:5432 \
+  -e POSTGRES_DB=openorchestrator -e POSTGRES_USER=openorchestrator -e POSTGRES_PASSWORD=openorchestrator \
   postgres:17-alpine
 
 # Backend
@@ -168,9 +168,9 @@ cd frontend && npm install && npm run dev
 ## Susunan
 
 ```
-ForgeHub/
+OpenOrchestrator/
   backend/                     Spring Boot, Java 25, Maven
-    src/main/java/id/jakforge/forgehub/
+    src/main/java/id/jakforge/openorchestrator/
       auth/                    login dan token
       common/                  entity dasar, penanganan kesalahan, dashboard
       config/                  security dan Jackson

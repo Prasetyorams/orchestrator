@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, Lock, Pencil, Trash2 } from "lucide-react";
-import { ForgeHubApi, errorText, type Role, type SumberIzin } from "@/lib/api";
+import { OpenOrchestratorApi, errorText, type Role, type SumberIzin } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { cocokIzin, useIzin } from "@/lib/izin";
 import { cn } from "@/lib/utils";
@@ -18,7 +18,7 @@ import { BilahAlat } from "@/components/HalamanFolder";
  *
  * Administrator bawaan tidak bisa diubah atau dihapus — ia selalu berarti
  * semuanya, supaya tidak ada penyuntingan yang bisa mengunci semua orang di
- * luar ForgeHub. Yang lain, termasuk peran bawaan lainnya, bisa disunting.
+ * luar OpenOrchestrator. Yang lain, termasuk peran bawaan lainnya, bisa disunting.
  */
 
 /** Nama tiap sumber di matriks; kuncinya sama dengan kunci katalog di server. */
@@ -100,8 +100,8 @@ export default function Peran() {
   const [baru, setBaru] = useState(false);
   const [galat, setGalat] = useState("");
 
-  const peran = useQuery({ queryKey: ["roles"], queryFn: ForgeHubApi.roles });
-  const katalog = useQuery({ queryKey: ["permissions"], queryFn: ForgeHubApi.permissionCatalog, staleTime: Infinity });
+  const peran = useQuery({ queryKey: ["roles"], queryFn: OpenOrchestratorApi.roles });
+  const katalog = useQuery({ queryKey: ["permissions"], queryFn: OpenOrchestratorApi.permissionCatalog, staleTime: Infinity });
 
   const total = useMemo(() => (katalog.data ?? []).reduce((n, s) => n + s.actions.length, 0), [katalog.data]);
 
@@ -113,7 +113,7 @@ export default function Peran() {
   }, [klien]);
 
   const hapus = useMutation({
-    mutationFn: ForgeHubApi.deleteRole,
+    mutationFn: OpenOrchestratorApi.deleteRole,
     onSuccess: segarkan,
     onError: (e) => setGalat(errorText(e)),
   });
@@ -261,7 +261,7 @@ function DialogPeran({
   const simpan = useMutation({
     mutationFn: () => {
       const body = { name: nama.trim(), description: ket.trim(), permissions: [...dipilih] };
-      return awal ? ForgeHubApi.updateRole(awal.name, body) : ForgeHubApi.createRole(body);
+      return awal ? OpenOrchestratorApi.updateRole(awal.name, body) : OpenOrchestratorApi.createRole(body);
     },
     onSuccess: () => {
       onSelesai();
@@ -336,7 +336,7 @@ function DialogPeran({
       {awal?.locked ? (
         <p className="mb-3 flex items-center gap-2 rounded-lg bg-slate-100 px-3 py-2 text-sm text-muted">
           <Lock className="h-4 w-4 shrink-0" />
-          {t("Peran bawaan dengan semua izin. Tidak bisa diubah atau dihapus, supaya selalu ada yang bisa mengurus ForgeHub.")}
+          {t("Peran bawaan dengan semua izin. Tidak bisa diubah atau dihapus, supaya selalu ada yang bisa mengurus OpenOrchestrator.")}
         </p>
       ) : null}
 

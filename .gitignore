@@ -14,7 +14,7 @@ frontend/out/
 # Hasil alat pindah: dihasilkan ulang dari forgehub.db kapan saja, dan
 # memuat seluruh isi basis data — termasuk hash kata sandi dan kredensial
 # tersandi.
-forgehub-migrasi.sql
+openorchestrator-migrasi.sql
 
 # Kunci penyandian. Kalau ini masuk ke repositori, seluruh kredensial yang
 # disandikan dengannya ikut terbuka bagi siapa pun yang bisa membaca repo.
@@ -30,7 +30,7 @@ signing.key
 /.metadata/
 
 # Aturan yang dulu diwarisi dari .gitignore akar repo Studio, dan sejak
-# ForgeHub berdiri sendiri harus ditulis di sini. Tanpa bin/ dan obj/,
+# OpenOrchestrator berdiri sendiri harus ditulis di sini. Tanpa bin/ dan obj/,
 # hasil build server/ dan tools/PindahKePostgres muncul sebagai berkas baru
 # yang siap ter-commit.
 [Bb]in/

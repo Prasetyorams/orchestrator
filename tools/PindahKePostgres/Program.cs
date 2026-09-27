@@ -34,6 +34,13 @@ public static class Program
 {
     private const string TenantBenih = "11111111-1111-1111-1111-111111111111";
 
+    // Akun admin bawaan ForgeHub bernama OO_Admin di OpenOrchestrator. Backend
+    // sudah membuat OO_Admin sebelum pemindahan berjalan; dengan nama yang
+    // sama, akun lama bentrok lalu dilewati seperti dulu — bukan masuk sebagai
+    // admin kedua di sampingnya.
+    private const string AdminLama = "FH_Admin";
+    private const string AdminBaru = "OO_Admin";
+
 
     public static int Main(string[] args)
     {
@@ -45,7 +52,7 @@ public static class Program
 
         var keluaran = args.Length > 1
             ? args[1]
-            : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(dbPath)) ?? ".", "forgehub-migrasi.sql");
+            : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(dbPath)) ?? ".", "openorchestrator-migrasi.sql");
 
         if (!File.Exists(dbPath))
         {
@@ -57,7 +64,7 @@ public static class Program
         Console.WriteLine("Tujuan : " + keluaran);
         Console.WriteLine();
 
-        // Dibuka HANYA-BACA. ForgeHub .NET boleh terus berjalan selama ini;
+        // Dibuka HANYA-BACA. OpenOrchestrator .NET boleh terus berjalan selama ini;
         // yang tidak boleh adalah alat pindah ikut menulis ke basis data yang
         // sedang dipakai.
         var cs = new SqliteConnectionStringBuilder
@@ -116,7 +123,7 @@ public static class Program
     private static void Kepala(StringBuilder sb, string dbPath, string tenantLama)
     {
         sb.AppendLine("-- =====================================================================");
-        sb.AppendLine("-- Pindahan isi ForgeHub dari SQLite ke PostgreSQL.");
+        sb.AppendLine("-- Pindahan isi OpenOrchestrator dari SQLite ke PostgreSQL.");
         sb.AppendLine("--");
         sb.AppendLine("-- Dihasilkan : " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
         sb.AppendLine("-- Sumber     : " + dbPath);
@@ -162,6 +169,12 @@ public static class Program
             for (var i = 0; i < tabel.Kolom.Length; i++)
             {
                 nilai.Add(Ubah(r, i, tabel.Kolom[i], tabel.Jenis[i], tenantLama));
+            }
+
+            if (tabel.Nama == "users")
+            {
+                var k = Array.IndexOf(tabel.Kolom, "username");
+                if (nilai[k] == Kutip(AdminLama)) nilai[k] = Kutip(AdminBaru);
             }
 
             sb.Append("INSERT INTO ").Append(tabel.Nama)

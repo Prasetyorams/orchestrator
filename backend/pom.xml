@@ -12,9 +12,9 @@
     </parent>
 
     <groupId>id.jakforge</groupId>
-    <artifactId>forgehub</artifactId>
+    <artifactId>openorchestrator</artifactId>
     <version>1.0.0</version>
-    <name>ForgeHub</name>
+    <name>OpenOrchestrator</name>
     <description>Orchestrator JakForge: mengelola robot, proses, antrean, dan catatan jalannya automasi.</description>
 
     <properties>

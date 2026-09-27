@@ -1,8 +1,8 @@
-// Membangkitkan favicon.ico dan apple-icon.png untuk frontend ForgeHub.
+// Membangkitkan favicon.ico dan apple-icon.png untuk frontend OpenOrchestrator.
 //
 //   node tools/buat-ikon.mjs
 //
-// Bentuknya SAMA dengan frontend/app/icon.svg — kotak biru dengan "FH" putih —
+// Bentuknya SAMA dengan frontend/app/icon.svg — kotak biru dengan "OO" putih —
 // dan digambar ulang di sini sebagai piksel, bukan diambil dari SVG-nya: tidak
 // ada pengubah SVG ke PNG di Node tanpa memasang paket, dan ikon cukup
 // sederhana untuk dihitung langsung. Kalau bentuk di icon.svg berubah, ubah
@@ -26,29 +26,40 @@ const APP = join(dirname(fileURLToPath(import.meta.url)), "..", "frontend", "app
 // Koordinat dalam kotak 64 x 64, persis seperti icon.svg.
 const BENTUK = {
   latar: { warna: [0x2a, 0x6f, 0xdb], sudut: 14 },
-  huruf: [
-    [12, 17, 6, 30], // F: batang
-    [12, 17, 17, 6], //    atas
-    [12, 29, 14, 6], //    tengah
-    [34, 17, 6, 30], // H: kiri
-    [46, 17, 6, 30], //    kanan
-    [34, 29, 18, 6], //    tengah
-  ],
+  // Dua huruf O, masing-masing goresan setebal `tebal` di sepanjang tepi dalam
+  // kotak [x, y, lebar, tinggi, sudut]. Kotak ini tepi LUAR goresan; di
+  // icon.svg goresannya digambar di garis tengahnya (x + 3, sudut 8).
+  huruf: {
+    tebal: 6,
+    kotak: [
+      [8, 19, 22, 26, 11],
+      [34, 19, 22, 26, 11],
+    ],
+  },
 };
 
-/** Titik (x, y) di dalam kotak bersudut bulat selebar 64? */
-function dalamLatar(x, y, sudut) {
-  if (x < 0 || y < 0 || x > 64 || y > 64) return false;
+/** Titik (x, y) di dalam kotak bersudut bulat [x, y, lebar, tinggi, sudut]? */
+function dalamKotak(x, y, [kx, ky, lebar, tinggi, sudut]) {
+  if (x < kx || y < ky || x > kx + lebar || y > ky + tinggi) return false;
 
   // Hanya keempat sudut yang perlu diperiksa sebagai lingkaran.
-  const cx = x < sudut ? sudut : x > 64 - sudut ? 64 - sudut : x;
-  const cy = y < sudut ? sudut : y > 64 - sudut ? 64 - sudut : y;
+  const cx = Math.min(Math.max(x, kx + sudut), kx + lebar - sudut);
+  const cy = Math.min(Math.max(y, ky + sudut), ky + tinggi - sudut);
 
   return (x - cx) ** 2 + (y - cy) ** 2 <= sudut ** 2;
 }
 
+function dalamLatar(x, y, sudut) {
+  return dalamKotak(x, y, [0, 0, 64, 64, sudut]);
+}
+
+/** Di goresan O: di dalam tepi luarnya, tetapi tidak di lubangnya. */
 function dalamHuruf(x, y) {
-  return BENTUK.huruf.some(([hx, hy, w, h]) => x >= hx && x < hx + w && y >= hy && y < hy + h);
+  const { tebal, kotak } = BENTUK.huruf;
+
+  return kotak.some(([kx, ky, lebar, tinggi, sudut]) =>
+    dalamKotak(x, y, [kx, ky, lebar, tinggi, sudut]) &&
+    !dalamKotak(x, y, [kx + tebal, ky + tebal, lebar - 2 * tebal, tinggi - 2 * tebal, Math.max(sudut - tebal, 0)]));
 }
 
 /**

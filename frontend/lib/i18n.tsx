@@ -36,7 +36,7 @@ const Konteks = createContext<Isi>({
   tp: (s) => s ?? "",
 });
 
-const KUNCI = "forgehub.bahasa";
+const KUNCI = "openorchestrator.bahasa";
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   // Dimulai dari "id" di server DAN di render pertama peramban.
@@ -56,7 +56,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       const tersimpan = window.localStorage.getItem(KUNCI);
       if (bahasaDikenal(tersimpan)) setBahasaState(tersimpan);
     } catch {
-      // Peramban yang melarang penyimpanan tetap boleh memakai ForgeHub;
+      // Peramban yang melarang penyimpanan tetap boleh memakai OpenOrchestrator;
       // yang hilang cuma ingatan pilihan bahasanya.
     }
   }, []);

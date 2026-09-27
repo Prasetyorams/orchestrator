@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 
-namespace ForgeHub.Auth;
+namespace OpenOrchestrator.Auth;
 
 /// <summary>
 /// Penyimpanan kata sandi.

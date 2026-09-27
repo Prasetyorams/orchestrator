@@ -1,6 +1,6 @@
-using ForgeHub.Data;
+using OpenOrchestrator.Data;
 
-namespace ForgeHub.Api;
+namespace OpenOrchestrator.Api;
 
 public static class DashboardApi
 {

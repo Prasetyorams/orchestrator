@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ForgeHubApi } from "@/lib/api";
+import { OpenOrchestratorApi } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { dateTimeOf } from "@/lib/utils";
 import { Card, CardHeader } from "@/components/ui/primitives";
@@ -12,9 +12,9 @@ import { JudulHalaman } from "@/components/HalamanFolder";
 export default function Setelan() {
   const { t } = useT();
 
-  const s = useQuery({ queryKey: ["settings"], queryFn: ForgeHubApi.settings });
-  const lisensi = useQuery({ queryKey: ["licensing"], queryFn: ForgeHubApi.licensing });
-  const penyewa = useQuery({ queryKey: ["tenants"], queryFn: ForgeHubApi.tenants });
+  const s = useQuery({ queryKey: ["settings"], queryFn: OpenOrchestratorApi.settings });
+  const lisensi = useQuery({ queryKey: ["licensing"], queryFn: OpenOrchestratorApi.licensing });
+  const penyewa = useQuery({ queryKey: ["tenants"], queryFn: OpenOrchestratorApi.tenants });
 
   return (
     <div className="space-y-5">

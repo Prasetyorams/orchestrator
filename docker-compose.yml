@@ -1,20 +1,22 @@
+name: openorchestrator
+
 services:
   db:
     image: postgres:17-alpine
-    container_name: forgehub-db
+    container_name: openorchestrator-db
     environment:
-      POSTGRES_DB: forgehub
-      POSTGRES_USER: forgehub
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-forgehub}
+      POSTGRES_DB: openorchestrator
+      POSTGRES_USER: openorchestrator
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-openorchestrator}
     volumes:
-      - forgehub-data:/var/lib/postgresql/data
+      - openorchestrator-data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
       # Backend menunggu sampai basis datanya SIAP MENERIMA, bukan sekadar
       # sampai containernya hidup. Tanpa ini, Flyway berjalan lebih dulu dan
       # gagal pada percobaan pertama setiap kali docker compose up dijalankan.
-      test: ["CMD-SHELL", "pg_isready -U forgehub -d forgehub"]
+      test: ["CMD-SHELL", "pg_isready -U openorchestrator -d openorchestrator"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -22,27 +24,27 @@ services:
   backend:
     build:
       context: ./backend
-    container_name: forgehub-backend
+    container_name: openorchestrator-backend
     depends_on:
       db:
         condition: service_healthy
     environment:
-      DB_URL: jdbc:postgresql://db:5432/forgehub
-      DB_USER: forgehub
-      DB_PASSWORD: ${DB_PASSWORD:-forgehub}
+      DB_URL: jdbc:postgresql://db:5432/openorchestrator
+      DB_USER: openorchestrator
+      DB_PASSWORD: ${DB_PASSWORD:-openorchestrator}
       JWT_SECRET: ${JWT_SECRET:-ganti-nilai-ini-dengan-rahasia-minimal-32-karakter}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
-      FORGEHUB_SIGNING_KEY: /data/signing.key
-      FORGEHUB_TZ: ${FORGEHUB_TZ:-Asia/Jakarta}
+      OPENORCHESTRATOR_SIGNING_KEY: /data/signing.key
+      OPENORCHESTRATOR_TZ: ${OPENORCHESTRATOR_TZ:-Asia/Jakarta}
     volumes:
-      # signing.key MILIK ForgeHub .NET, dipasang apa adanya dan hanya-baca.
+      # signing.key MILIK OpenOrchestrator .NET, dipasang apa adanya dan hanya-baca.
       #
       # Ini bagian yang mudah terlewat dan akibatnya sunyi: kredensial di
       # basis data disandikan dengan kunci ini. Container yang membuat kunci
       # sendiri tetap menyala dengan gembira, lalu setiap kredensial terbaca
       # sebagai kosong — dan yang terlihat cuma "login gagal" di aplikasi yang
       # diotomasi robot, jauh dari sini.
-      - ${FORGEHUB_DATA:-${LOCALAPPDATA}/JakForge/ForgeHub}/signing.key:/data/signing.key:ro
+      - ${OPENORCHESTRATOR_DATA:-${LOCALAPPDATA}/JakForge/ForgeHub}/signing.key:/data/signing.key:ro
     ports:
       - "8080:8080"
     healthcheck:
@@ -61,7 +63,7 @@ services:
       context: ./frontend
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
-    container_name: forgehub-frontend
+    container_name: openorchestrator-frontend
     depends_on:
       backend:
         condition: service_healthy
@@ -85,22 +87,22 @@ services:
   # -------------------------------------------------------------------
   pindah:
     image: postgres:17-alpine
-    container_name: forgehub-pindah
+    container_name: openorchestrator-pindah
     profiles: ["pindah"]
     depends_on:
       backend:
         condition: service_healthy
     environment:
-      PGPASSWORD: ${DB_PASSWORD:-forgehub}
+      PGPASSWORD: ${DB_PASSWORD:-openorchestrator}
     volumes:
-      - ${FORGEHUB_DATA:-${LOCALAPPDATA}/JakForge/ForgeHub}:/pindahan:ro
+      - ${OPENORCHESTRATOR_DATA:-${LOCALAPPDATA}/JakForge/ForgeHub}:/pindahan:ro
     # ON_ERROR_STOP: tanpa ini psql melanjutkan sesudah pernyataan yang gagal
     # dan keluar dengan kode 0, jadi pindahan yang separuh gagal terlihat
     # persis seperti yang berhasil.
     command: >
-      psql -h db -U forgehub -d forgehub
+      psql -h db -U openorchestrator -d openorchestrator
            -v ON_ERROR_STOP=1
-           -f /pindahan/forgehub-migrasi.sql
+           -f /pindahan/openorchestrator-migrasi.sql
 
 volumes:
-  forgehub-data:
+  openorchestrator-data:

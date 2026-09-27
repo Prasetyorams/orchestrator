@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ForgeHubApi, setToken } from "@/lib/api";
+import { OpenOrchestratorApi, setToken } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { Button, Card, CardBody } from "@/components/ui/primitives";
 
@@ -10,7 +10,7 @@ export default function LoginPage() {
   const router = useRouter();
   const { t } = useT();
 
-  const [username, setUsername] = useState("FH_Admin");
+  const [username, setUsername] = useState("OO_Admin");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -21,7 +21,7 @@ export default function LoginPage() {
     setError(null);
 
     try {
-      const result = await ForgeHubApi.login(username, password);
+      const result = await OpenOrchestratorApi.login(username, password);
       setToken(result.token);
       router.push("/");
     } catch {
@@ -39,12 +39,9 @@ export default function LoginPage() {
         <CardBody>
           <div className="mb-6 flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-md bg-brand text-sm font-bold text-white">
-              FH
+              OO
             </div>
-            <div>
-              <p className="text-base font-semibold">JakForge Orchestrator</p>
-              <p className="text-xs text-muted">ForgeHub</p>
-            </div>
+            <p className="text-lg font-semibold">Open Orchestrator</p>
           </div>
 
           <form onSubmit={submit} className="space-y-3.5">

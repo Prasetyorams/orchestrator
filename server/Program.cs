@@ -1,11 +1,11 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using ForgeHub.Api;
-using ForgeHub.Auth;
-using ForgeHub.Data;
+using OpenOrchestrator.Api;
+using OpenOrchestrator.Auth;
+using OpenOrchestrator.Data;
 
 /// <summary>
-/// Titik masuk ForgeHub.
+/// Titik masuk OpenOrchestrator.
 /// </summary>
 public static class Program
 {
@@ -20,7 +20,7 @@ public static class Program
         // Program Files ia tidak bisa ditulisi tanpa hak administrator. LocalAppData
         // selalu bisa ditulis oleh pemiliknya dan tidak ikut terhapus saat program
         // dibangun ulang.
-        DataDirectory = Environment.GetEnvironmentVariable("FORGEHUB_DATA")
+        DataDirectory = Environment.GetEnvironmentVariable("OPENORCHESTRATOR_DATA")
             ?? Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "JakForge", "ForgeHub");
@@ -53,7 +53,7 @@ public static class Program
                 .AllowAnyMethod()));
 
         builder.WebHost.UseUrls(
-            Environment.GetEnvironmentVariable("FORGEHUB_URL") ?? "http://localhost:8080");
+            Environment.GetEnvironmentVariable("OPENORCHESTRATOR_URL") ?? "http://localhost:8080");
 
         var app = builder.Build();
 
@@ -61,7 +61,7 @@ public static class Program
         app.UseDefaultFiles();
         app.UseStaticFiles();
 
-        app.UseForgeHubAuth();
+        app.UseOpenOrchestratorAuth();
 
         app.MapAuth();
         app.MapDashboard();
@@ -79,8 +79,8 @@ public static class Program
         app.MapFallbackToFile("index.html");
 
         Console.WriteLine();
-        Console.WriteLine("  ForgeHub siap.");
-        Console.WriteLine("  Dasbor : " + (Environment.GetEnvironmentVariable("FORGEHUB_URL") ?? "http://localhost:8080"));
+        Console.WriteLine("  OpenOrchestrator siap.");
+        Console.WriteLine("  Dasbor : " + (Environment.GetEnvironmentVariable("OPENORCHESTRATOR_URL") ?? "http://localhost:8080"));
         Console.WriteLine("  Masuk  : " + Seed.DefaultUser + " / " + Seed.DefaultPassword);
         Console.WriteLine("  Data   : " + DataDirectory);
         Console.WriteLine();

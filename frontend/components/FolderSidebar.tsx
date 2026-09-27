@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Building2, ChevronRight, Folder, FolderLock, FolderOpen, FolderPlus, Search, X } from "lucide-react";
 import type { FolderNode } from "@/lib/api";
-import { ForgeHubApi, errorText } from "@/lib/api";
+import { OpenOrchestratorApi, errorText } from "@/lib/api";
 import { useFolder } from "@/lib/folder";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { IconButton } from "@/components/ui/primitives";
 import { DialogFolder } from "@/components/DialogFolder";
 
-const KUNCI_TERBUKA = "forgehub.folder.terbuka";
+const KUNCI_TERBUKA = "openorchestrator.folder.terbuka";
 
 /**
  * Bilah kiri: penyewa di puncaknya, lalu Folder Saya, pencarian, dan pohon
@@ -38,7 +38,7 @@ export function FolderSidebar({ terbuka, onTutup }: { terbuka: boolean; onTutup:
   const router = useRouter();
   const { pohon, folder, pilih, bukaPribadi, memuat, galat, bolehKelola, jalur } = useFolder();
   const { boleh } = useIzin();
-  const me = useQuery({ queryKey: ["me"], queryFn: ForgeHubApi.me, staleTime: 30_000 });
+  const me = useQuery({ queryKey: ["me"], queryFn: OpenOrchestratorApi.me, staleTime: 30_000 });
 
   const konteks = konteksDari(pathname);
 

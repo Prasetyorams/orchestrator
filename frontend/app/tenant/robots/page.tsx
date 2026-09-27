@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
-import { ForgeHubApi, errorText } from "@/lib/api";
+import { OpenOrchestratorApi, errorText } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
 import { dateTimeOf } from "@/lib/utils";
@@ -24,10 +24,10 @@ export default function RobotPenyewa() {
   const klien = useQueryClient();
   const [galat, setGalat] = useState("");
 
-  const robots = useQuery({ queryKey: ["robots", "semua"], queryFn: () => ForgeHubApi.robots(), refetchInterval: 10_000 });
+  const robots = useQuery({ queryKey: ["robots", "semua"], queryFn: () => OpenOrchestratorApi.robots(), refetchInterval: 10_000 });
 
   const hapus = useMutation({
-    mutationFn: ForgeHubApi.deleteRobot,
+    mutationFn: OpenOrchestratorApi.deleteRobot,
     onSuccess: () => klien.invalidateQueries({ queryKey: ["robots"] }),
     onError: (e) => setGalat(errorText(e)),
   });

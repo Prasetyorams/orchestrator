@@ -1,7 +1,7 @@
-using ForgeHub.Auth;
-using ForgeHub.Data;
+using OpenOrchestrator.Auth;
+using OpenOrchestrator.Data;
 
-namespace ForgeHub.Api;
+namespace OpenOrchestrator.Api;
 
 public static class AdminApi
 {
@@ -99,7 +99,7 @@ public static class AdminApi
             if (!IsAdministrator(context))
                 return Forbidden("Hanya Administrator yang boleh menghapus pengguna.");
 
-            // Menghapus diri sendiri akan mengunci orangnya keluar dari ForgeHub
+            // Menghapus diri sendiri akan mengunci orangnya keluar dari OpenOrchestrator
             // miliknya sendiri, dan tidak ada jalan masuk lain untuk membatalkannya.
             if (string.Equals(username, context.User()?.Username, StringComparison.OrdinalIgnoreCase))
                 return Results.BadRequest(new { error = "Tidak bisa menghapus akun yang sedang dipakai." });

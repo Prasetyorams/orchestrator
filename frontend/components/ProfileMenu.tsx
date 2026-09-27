@@ -3,7 +3,7 @@
 import { useCallback, useState, type ComponentType, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, KeyRound, LogOut, UserCog } from "lucide-react";
-import { ForgeHubApi, errorText, setToken, type Profil } from "@/lib/api";
+import { OpenOrchestratorApi, errorText, setToken, type Profil } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/primitives";
@@ -27,7 +27,7 @@ export function ProfileMenu({
   onTutup: () => void;
 }) {
   const { t } = useT();
-  const me = useQuery({ queryKey: ["me"], queryFn: ForgeHubApi.me });
+  const me = useQuery({ queryKey: ["me"], queryFn: OpenOrchestratorApi.me });
   const [dialog, setDialog] = useState<"profil" | "sandi" | null>(null);
 
   // Stabil, bukan fungsi baru tiap render. Dialog menjalankan ulang efek
@@ -134,7 +134,7 @@ function ItemMenu({
 
 /**
  * Dua huruf dari nama: huruf pertama dua kata pertama, atau dua huruf pertama
- * kalau namanya satu kata. "ForgeHub Admin" menjadi FA, bukan FO.
+ * kalau namanya satu kata. "OpenOrchestrator Admin" menjadi FA, bukan FO.
  */
 function inisialDari(nama: string): string {
   const kata = nama.trim().split(/\s+/).filter(Boolean);
@@ -170,7 +170,7 @@ function DialogProfil({ awal, onTutup }: { awal: Profil; onTutup: () => void }) 
   const [galat, setGalat] = useState("");
 
   const simpan = useMutation({
-    mutationFn: ForgeHubApi.updateProfile,
+    mutationFn: OpenOrchestratorApi.updateProfile,
     onSuccess: (profil) => {
       // Jawaban server langsung menjadi data "me": bilah atas berganti nama
       // saat itu juga, tanpa menunggu penarikan berikutnya.
@@ -258,7 +258,7 @@ function DialogSandi({ onTutup }: { onTutup: () => void }) {
   const [selesai, setSelesai] = useState(false);
 
   const ganti = useMutation({
-    mutationFn: () => ForgeHubApi.changePassword(lama, baru),
+    mutationFn: () => OpenOrchestratorApi.changePassword(lama, baru),
     onSuccess: () => {
       // Isian dikosongkan begitu tidak dibutuhkan: kata sandi tidak perlu
       // tinggal di memori halaman lebih lama dari satu permintaan.

@@ -1,6 +1,6 @@
-using ForgeHub.Data;
+using OpenOrchestrator.Data;
 
-namespace ForgeHub.Api;
+namespace OpenOrchestrator.Api;
 
 /// <summary>
 /// Penjalan pemicu terjadwal.
@@ -9,7 +9,7 @@ namespace ForgeHub.Api;
 /// satu kueri berindeks ke basis data lokal — dan alternatifnya, memeriksa tiap
 /// menit, membuat pemicu yang dipasang untuk "tiap 1 menit" meleset separuh waktu.
 ///
-/// Pemicu yang terlewat TIDAK dikejar. Kalau ForgeHub mati semalaman, yang
+/// Pemicu yang terlewat TIDAK dikejar. Kalau OpenOrchestrator mati semalaman, yang
 /// dijalankan saat menyala lagi adalah satu kali, bukan dua belas kali sekaligus
 /// menumpuk di robot yang sama.
 /// </summary>
@@ -27,7 +27,7 @@ public sealed class Scheduler : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Jeda awal supaya pemeriksaan pertama tidak berebut dengan penyiapan
-        // basis data saat ForgeHub baru dinyalakan.
+        // basis data saat OpenOrchestrator baru dinyalakan.
         try
         {
             await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);

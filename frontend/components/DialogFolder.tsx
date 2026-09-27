@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ForgeHubApi, errorText, type FolderNode } from "@/lib/api";
+import { OpenOrchestratorApi, errorText, type FolderNode } from "@/lib/api";
 import { useFolder } from "@/lib/folder";
 import { useT } from "@/lib/i18n";
 import { Button, Galat } from "@/components/ui/primitives";
@@ -48,11 +48,11 @@ export function DialogFolder({
       const body = { name: nama.trim(), description: ket.trim(), parentId: induk || null };
 
       if (awal) {
-        await ForgeHubApi.updateFolder(awal.id, body);
+        await OpenOrchestratorApi.updateFolder(awal.id, body);
         return awal.id;
       }
 
-      return (await ForgeHubApi.createFolder(body)).id;
+      return (await OpenOrchestratorApi.createFolder(body)).id;
     },
     onSuccess: async (id) => {
       await klien.invalidateQueries({ queryKey: ["folders"] });

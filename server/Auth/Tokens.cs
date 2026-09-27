@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
-namespace ForgeHub.Auth;
+namespace OpenOrchestrator.Auth;
 
 /// <summary>Siapa yang sedang meminta, hasil pembacaan token.</summary>
 public sealed class Principal
@@ -23,9 +23,9 @@ public sealed class Principal
 /// JWT umum membawa serta penguraian banyak algoritma lain — termasuk "none" —
 /// dan yang paling sering jadi lubang keamanan justru bagian itu.
 ///
-/// Kuncinya dibuat acak saat ForgeHub pertama kali dijalankan dan disimpan di
+/// Kuncinya dibuat acak saat OpenOrchestrator pertama kali dijalankan dan disimpan di
 /// sebelah basis data. Kunci yang ditanam di kode akan sama di semua pemasangan,
-/// dan token buatan satu orang akan berlaku di ForgeHub milik orang lain.
+/// dan token buatan satu orang akan berlaku di OpenOrchestrator milik orang lain.
 /// </summary>
 public static class Tokens
 {

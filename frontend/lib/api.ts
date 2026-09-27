@@ -2,7 +2,7 @@ import axios, { AxiosError } from "axios";
 import { bahasaAktif, terjemahkan, terjemahkanPesan } from "@/lib/bahasa";
 
 /**
- * Klien HTTP ke backend ForgeHub.
+ * Klien HTTP ke backend OpenOrchestrator.
  *
  * Token disimpan di localStorage, bukan cookie. Konsekuensinya disebut di sini
  * supaya tidak jadi kejutan: pilihan ini kebal CSRF (header tidak ikut terkirim
@@ -20,7 +20,7 @@ import { bahasaAktif, terjemahkan, terjemahkanPesan } from "@/lib/bahasa";
  * mengizinkan Authorization dan Content-Type, dan permintaan TANPA folder tetap
  * berarti seluruh penyewa — bentuk yang dipakai Studio dan JakRunner.
  */
-const TOKEN_KEY = "forgehub.token";
+const TOKEN_KEY = "openorchestrator.token";
 
 export const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080",
@@ -507,7 +507,7 @@ const seg = (s: string) => encodeURIComponent(s);
 /** Parameter folder: dihilangkan sama sekali kalau tidak ada, bukan dikirim kosong. */
 const dalam = (folderId?: string | null) => (folderId ? { folderId } : undefined);
 
-export const ForgeHubApi = {
+export const OpenOrchestratorApi = {
   login: (username: string, password: string) =>
     post<LoginResult>("/api/auth/login", { username, password }),
 

@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Power, PowerOff, Trash2 } from "lucide-react";
-import { ForgeHubApi, errorText, type FolderNode, type Trigger } from "@/lib/api";
+import { OpenOrchestratorApi, errorText, type FolderNode, type Trigger } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
 import { dateTimeOf } from "@/lib/utils";
@@ -45,7 +45,7 @@ function IsiPemicu({ folder }: { folder: FolderNode }) {
 
   const pemicu = useQuery({
     queryKey: ["triggers", folder.id],
-    queryFn: () => ForgeHubApi.triggers(folder.id),
+    queryFn: () => OpenOrchestratorApi.triggers(folder.id),
     refetchInterval: 10_000,
   });
 
@@ -55,13 +55,13 @@ function IsiPemicu({ folder }: { folder: FolderNode }) {
   }, [klien]);
 
   const alihkan = useMutation({
-    mutationFn: (nama: string) => ForgeHubApi.toggleTrigger(nama, folder.id),
+    mutationFn: (nama: string) => OpenOrchestratorApi.toggleTrigger(nama, folder.id),
     onSuccess: segarkan,
     onError: (e) => setGalat(errorText(e)),
   });
 
   const hapus = useMutation({
-    mutationFn: (nama: string) => ForgeHubApi.deleteTrigger(nama, folder.id),
+    mutationFn: (nama: string) => OpenOrchestratorApi.deleteTrigger(nama, folder.id),
     onSuccess: segarkan,
     onError: (e) => setGalat(errorText(e)),
   });
@@ -182,11 +182,11 @@ function DialogPemicu({
 }) {
   const { t } = useT();
 
-  const proses = useQuery({ queryKey: ["processes", folder.id], queryFn: () => ForgeHubApi.processes(folder.id) });
+  const proses = useQuery({ queryKey: ["processes", folder.id], queryFn: () => OpenOrchestratorApi.processes(folder.id) });
   const { boleh } = useIzin();
   const robot = useQuery({
     queryKey: ["robots", folder.id],
-    queryFn: () => ForgeHubApi.robots(folder.id),
+    queryFn: () => OpenOrchestratorApi.robots(folder.id),
     enabled: boleh("robots.read"),
   });
 
@@ -201,7 +201,7 @@ function DialogPemicu({
   const [galat, setGalat] = useState("");
 
   const simpan = useMutation({
-    mutationFn: ForgeHubApi.saveTrigger,
+    mutationFn: OpenOrchestratorApi.saveTrigger,
     onSuccess: () => {
       onSelesai();
       onTutup();

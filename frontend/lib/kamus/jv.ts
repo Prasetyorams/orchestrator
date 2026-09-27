@@ -179,8 +179,8 @@ export const JV: Record<string, string> = {
   Terbaru: "Paling anyar",
   "Satu baris per paket, dengan versi tertingginya. Klik ganda untuk melihat semua versinya.":
     "Siji baris saben pakèt, karo vèrsi paling dhuwuré. Klik kaping pindho kanggo ndeleng kabèh vèrsiné.",
-  "Belum ada paket yang diterbitkan. Terbitkan dari Studio: tab Design → grup ForgeHub → Terbitkan.":
-    "Durung ana pakèt sing diterbitaké. Terbitaké saka Studio: tab Design → grup ForgeHub → Terbitkan.",
+  "Belum ada paket yang diterbitkan. Terbitkan dari Studio: tab Design → grup OpenOrchestrator → Terbitkan.":
+    "Durung ana pakèt sing diterbitaké. Terbitaké saka Studio: tab Design → grup OpenOrchestrator → Terbitkan.",
 
   // aset
   "Tambah aset": "Tambah asèt",
@@ -520,7 +520,7 @@ export const JV: Record<string, string> = {
   "Hapus peran \"{0}\"?": "Busak peran \"{0}\"?",
   "Akun robot (JakRunner) sebaiknya memakai peran Robot: izinnya persis yang dibutuhkan robot, tidak lebih.": "Akun robot (JakRunner) luwih becik nganggo peran Robot: idiné pas sing dibutuhaké robot, ora luwih.",
   "Nama peran wajib diisi.": "Jeneng peran kudu diisi.",
-  "Peran bawaan dengan semua izin. Tidak bisa diubah atau dihapus, supaya selalu ada yang bisa mengurus ForgeHub.": "Peran gawan kanthi kabèh idin. Ora bisa diowahi utawa dibusak, supaya tansah ana sing bisa ngurus ForgeHub.",
+  "Peran bawaan dengan semua izin. Tidak bisa diubah atau dihapus, supaya selalu ada yang bisa mengurus OpenOrchestrator.": "Peran gawan kanthi kabèh idin. Ora bisa diowahi utawa dibusak, supaya tansah ana sing bisa ngurus OpenOrchestrator.",
   "Salin izin dari": "Salin idin saka",
   "Mulai dari izin peran lain, lalu ubah seperlunya.": "Miwiti saka idin peran liya, banjur owahi sak perluné.",
   "Semua: {0}": "Kabèh: {0}",

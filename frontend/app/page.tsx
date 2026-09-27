@@ -16,7 +16,7 @@ import {
   Users,
   Zap,
 } from "lucide-react";
-import { ForgeHubApi, type Dashboard, type FolderNode, type Periode } from "@/lib/api";
+import { OpenOrchestratorApi, type Dashboard, type FolderNode, type Periode } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useTema } from "@/lib/tema";
 import { lokalTanggal } from "@/lib/bahasa";
@@ -43,7 +43,7 @@ const PERIODE: { kode: Periode; label: string }[] = [
 const TINGKAT_PERINGATAN = ["Info", "Warning", "Error"];
 
 /** Awalan kunci penyimpanan pilihan periode; setiap donat menambahkan namanya. */
-const KUNCI_PERIODE = "forgehub.dasbor.periode";
+const KUNCI_PERIODE = "openorchestrator.dasbor.periode";
 
 /**
  * Keadaan pekerjaan di donat, dalam URUTAN CINCINNYA.
@@ -110,7 +110,7 @@ function IsiBeranda({ folder }: { folder: FolderNode }) {
   // pilihan di sebuah donat langsung mengganti isinya — tanpa permintaan baru.
   const d = useQuery({
     queryKey: ["dashboard", folder.id],
-    queryFn: () => ForgeHubApi.dashboard(folder.id),
+    queryFn: () => OpenOrchestratorApi.dashboard(folder.id),
     refetchInterval: 5_000,
   });
 
@@ -118,7 +118,7 @@ function IsiBeranda({ folder }: { folder: FolderNode }) {
   // terlihat dari folder mana pun.
   const peringatan = useQuery({
     queryKey: ["alerts", "dasbor", tingkat],
-    queryFn: () => ForgeHubApi.alerts({ severity: tingkat, limit: 20 }),
+    queryFn: () => OpenOrchestratorApi.alerts({ severity: tingkat, limit: 20 }),
     refetchInterval: 10_000,
     placeholderData: keepPreviousData,
   });

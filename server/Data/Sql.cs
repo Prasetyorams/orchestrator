@@ -1,11 +1,11 @@
 using Microsoft.Data.Sqlite;
 
-namespace ForgeHub.Data;
+namespace OpenOrchestrator.Data;
 
 /// <summary>
 /// Pembantu kueri yang tipis.
 ///
-/// Tidak ada ORM di sini dengan sengaja. Endpoint ForgeHub semuanya berupa
+/// Tidak ada ORM di sini dengan sengaja. Endpoint OpenOrchestrator semuanya berupa
 /// "ambil beberapa baris lalu kirim sebagai JSON"; sebuah ORM di tengahnya
 /// hanya menambah lapisan yang harus dipahami tanpa menghilangkan satu pun SQL
 /// yang benar-benar ditulis.

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { ForgeHubApi, type FolderNode } from "@/lib/api";
+import { OpenOrchestratorApi, type FolderNode } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
 import { dateTimeOf } from "@/lib/utils";
@@ -27,7 +27,7 @@ function IsiRobot({ folder }: { folder: FolderNode }) {
 
   const robots = useQuery({
     queryKey: ["robots", folder.id],
-    queryFn: () => ForgeHubApi.robots(folder.id),
+    queryFn: () => OpenOrchestratorApi.robots(folder.id),
     refetchInterval: 10_000,
   });
 

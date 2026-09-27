@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, EyeOff, FolderInput, KeyRound, Pencil, Trash2 } from "lucide-react";
-import { ForgeHubApi, errorText, type Asset, type FolderNode } from "@/lib/api";
+import { OpenOrchestratorApi, errorText, type Asset, type FolderNode } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
 import { cn, dateTimeOf } from "@/lib/utils";
@@ -43,7 +43,7 @@ function IsiAset({ folder }: { folder: FolderNode }) {
     if (tipe && TIPE.includes(tipe)) setSaringTipe(tipe);
   }, []);
 
-  const aset = useQuery({ queryKey: ["assets", folder.id], queryFn: () => ForgeHubApi.assets(folder.id) });
+  const aset = useQuery({ queryKey: ["assets", folder.id], queryFn: () => OpenOrchestratorApi.assets(folder.id) });
 
   const segarkan = useCallback(() => {
     klien.invalidateQueries({ queryKey: ["assets"] });
@@ -51,7 +51,7 @@ function IsiAset({ folder }: { folder: FolderNode }) {
   }, [klien]);
 
   const hapus = useMutation({
-    mutationFn: ForgeHubApi.deleteAsset,
+    mutationFn: OpenOrchestratorApi.deleteAsset,
     onSuccess: segarkan,
     onError: (e) => setGalat(errorText(e)),
   });
@@ -59,7 +59,7 @@ function IsiAset({ folder }: { folder: FolderNode }) {
   /** Isi Secret diambil satu per satu, hanya saat diminta. */
   async function lihat(nama: string) {
     try {
-      const r = await ForgeHubApi.assetValue(nama);
+      const r = await OpenOrchestratorApi.assetValue(nama);
       setTerbuka((s) => ({ ...s, [nama]: r.value ?? "" }));
     } catch (e) {
       setGalat(errorText(e));
@@ -181,7 +181,7 @@ function IsiAset({ folder }: { folder: FolderNode }) {
           folderSekarang={folder.id}
           onTutup={() => setPindah(null)}
           onPindah={async (tujuan) => {
-            await ForgeHubApi.moveAsset(pindah.name, tujuan);
+            await OpenOrchestratorApi.moveAsset(pindah.name, tujuan);
             segarkan();
           }}
         />
@@ -292,7 +292,7 @@ function DialogAset({
   const [galat, setGalat] = useState("");
 
   const simpan = useMutation({
-    mutationFn: ForgeHubApi.saveAsset,
+    mutationFn: OpenOrchestratorApi.saveAsset,
     onSuccess: () => {
       onSelesai();
       onTutup();
@@ -398,7 +398,7 @@ function DialogAset({
                 onChange={(e) => setNilai(e.target.value)}
                 placeholder={bolehKosong && awal?.hasValue ? SAMARAN : undefined}
                 // new-password: pengelola sandi peramban tidak boleh mengisi
-                // kata sandi ForgeHub milik orang yang sedang masuk ke sini.
+                // kata sandi OpenOrchestrator milik orang yang sedang masuk ke sini.
                 autoComplete="new-password"
                 className={`${kelasIsian} pr-10`}
               />

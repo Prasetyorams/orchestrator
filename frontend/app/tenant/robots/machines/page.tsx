@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
-import { ForgeHubApi, errorText } from "@/lib/api";
+import { OpenOrchestratorApi, errorText } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
 import { dateTimeOf } from "@/lib/utils";
@@ -18,10 +18,10 @@ export default function Mesin() {
   const klien = useQueryClient();
   const [galat, setGalat] = useState("");
 
-  const mesin = useQuery({ queryKey: ["machines"], queryFn: ForgeHubApi.machines });
+  const mesin = useQuery({ queryKey: ["machines"], queryFn: OpenOrchestratorApi.machines });
 
   const hapus = useMutation({
-    mutationFn: ForgeHubApi.deleteMachine,
+    mutationFn: OpenOrchestratorApi.deleteMachine,
     onSuccess: () => klien.invalidateQueries({ queryKey: ["machines"] }),
     onError: (e) => setGalat(errorText(e)),
   });

@@ -1,5 +1,5 @@
 # Menguji kontrak yang benar-benar dipanggil Studio, JakRunner, dan activity
-# Orchestrator — terhadap ForgeHub Java + PostgreSQL yang sedang berjalan.
+# Orchestrator — terhadap OpenOrchestrator Java + PostgreSQL yang sedang berjalan.
 #
 # Setiap pemeriksaan menyebut apa yang DIHARAPKAN, bukan sekadar "tidak error".
 # Uji yang hanya memastikan panggilan tidak melempar akan tetap hijau ketika
@@ -28,7 +28,7 @@ function CekBenar($nama, $syarat, $nilai) {
 # ---------- kesehatan (tanpa token) ----------
 $health = Invoke-RestMethod "$base/api/health"
 Cek "GET /api/health tanpa token" $health.status "OK"
-Cek "  produknya" $health.product "ForgeHub"
+Cek "  produknya" $health.product "OpenOrchestrator"
 
 # ---------- endpoint tertutup harus 401 ----------
 try {
@@ -40,10 +40,10 @@ try {
 
 # ---------- masuk dengan kata sandi dari basis data lama ----------
 $login = Invoke-RestMethod "$base/api/auth/login" -Method Post -ContentType 'application/json' `
-    -Body (@{ username = 'FH_Admin'; password = 'forgehub' } | ConvertTo-Json)
+    -Body (@{ username = 'OO_Admin'; password = 'openorchestrator' } | ConvertTo-Json)
 
 CekBenar "POST /api/auth/login mengembalikan token" ($login.token.Length -gt 20) $login.token
-Cek "  penggunanya" $login.username "FH_Admin"
+Cek "  penggunanya" $login.username "OO_Admin"
 Cek "  perannya" $login.role "Administrator"
 Cek "  penyewanya" $login.tenantName "default"
 
@@ -52,7 +52,7 @@ $h = @{ Authorization = "Bearer $($login.token)" }
 # ---------- kata sandi salah harus ditolak ----------
 try {
     Invoke-RestMethod "$base/api/auth/login" -Method Post -ContentType 'application/json' `
-        -Body (@{ username = 'FH_Admin'; password = 'salah' } | ConvertTo-Json) | Out-Null
+        -Body (@{ username = 'OO_Admin'; password = 'salah' } | ConvertTo-Json) | Out-Null
     Cek "kata sandi salah ditolak" "diterima" "401"
 } catch {
     Cek "kata sandi salah ditolak" $_.Exception.Response.StatusCode.value__ 401

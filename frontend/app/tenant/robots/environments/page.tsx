@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ForgeHubApi, errorText } from "@/lib/api";
+import { OpenOrchestratorApi, errorText } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
 import { dateTimeOf } from "@/lib/utils";
@@ -21,11 +21,11 @@ export default function Lingkungan() {
   const [ket, setKet] = useState("");
   const [galat, setGalat] = useState("");
 
-  const lingkungan = useQuery({ queryKey: ["environments"], queryFn: ForgeHubApi.environments });
+  const lingkungan = useQuery({ queryKey: ["environments"], queryFn: OpenOrchestratorApi.environments });
   const segarkan = () => klien.invalidateQueries({ queryKey: ["environments"] });
 
   const simpan = useMutation({
-    mutationFn: ForgeHubApi.saveEnvironment,
+    mutationFn: OpenOrchestratorApi.saveEnvironment,
     onSuccess: () => {
       segarkan();
       setBaru(false);
@@ -36,7 +36,7 @@ export default function Lingkungan() {
   });
 
   const hapus = useMutation({
-    mutationFn: ForgeHubApi.deleteEnvironment,
+    mutationFn: OpenOrchestratorApi.deleteEnvironment,
     onSuccess: segarkan,
     onError: (e) => setGalat(errorText(e)),
   });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ForgeHubApi } from "@/lib/api";
+import { OpenOrchestratorApi } from "@/lib/api";
 
 /**
  * Izin peran orang yang sedang masuk, dari /api/auth/me.
@@ -25,7 +25,7 @@ export function cocokIzin(pola: readonly string[], izin: string): boolean {
 }
 
 export function useIzin() {
-  const me = useQuery({ queryKey: ["me"], queryFn: ForgeHubApi.me, staleTime: 30_000 });
+  const me = useQuery({ queryKey: ["me"], queryFn: OpenOrchestratorApi.me, staleTime: 30_000 });
   const pola = me.data?.permissions;
 
   return {

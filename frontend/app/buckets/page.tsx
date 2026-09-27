@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, FolderInput, FolderOpen, Trash2 } from "lucide-react";
-import { ForgeHubApi, errorText, unduh, type Bucket, type FolderNode } from "@/lib/api";
+import { OpenOrchestratorApi, errorText, unduh, type Bucket, type FolderNode } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
 import { dateTimeOf, ukuranBerkas } from "@/lib/utils";
@@ -31,7 +31,7 @@ function IsiEmber({ folder }: { folder: FolderNode }) {
   const [pindah, setPindah] = useState<Bucket | null>(null);
   const [galat, setGalat] = useState("");
 
-  const ember = useQuery({ queryKey: ["buckets", folder.id], queryFn: () => ForgeHubApi.buckets(folder.id) });
+  const ember = useQuery({ queryKey: ["buckets", folder.id], queryFn: () => OpenOrchestratorApi.buckets(folder.id) });
 
   const segarkan = useCallback(() => {
     klien.invalidateQueries({ queryKey: ["buckets"] });
@@ -39,7 +39,7 @@ function IsiEmber({ folder }: { folder: FolderNode }) {
   }, [klien]);
 
   const hapus = useMutation({
-    mutationFn: ForgeHubApi.deleteBucket,
+    mutationFn: OpenOrchestratorApi.deleteBucket,
     onSuccess: segarkan,
     onError: (e) => setGalat(errorText(e)),
   });
@@ -131,7 +131,7 @@ function IsiEmber({ folder }: { folder: FolderNode }) {
           folderSekarang={folder.id}
           onTutup={() => setPindah(null)}
           onPindah={async (tujuan) => {
-            await ForgeHubApi.moveBucket(pindah.name, tujuan);
+            await OpenOrchestratorApi.moveBucket(pindah.name, tujuan);
             segarkan();
           }}
         />
@@ -149,7 +149,7 @@ function DialogEmber({ folder, onTutup, onSelesai }: { folder: FolderNode; onTut
 
   const simpan = useMutation({
     mutationFn: () =>
-      ForgeHubApi.saveBucket({ name: nama.trim(), description: ket.trim() || undefined, folderId: folder.id }),
+      OpenOrchestratorApi.saveBucket({ name: nama.trim(), description: ket.trim() || undefined, folderId: folder.id }),
     onSuccess: () => {
       onSelesai();
       onTutup();
@@ -199,7 +199,7 @@ function DialogBerkas({ ember, onTutup }: { ember: Bucket | null; onTutup: () =>
 
   const berkas = useQuery({
     queryKey: ["bucketFiles", ember?.name],
-    queryFn: () => ForgeHubApi.bucketFiles(ember!.name),
+    queryFn: () => OpenOrchestratorApi.bucketFiles(ember!.name),
     enabled: !!ember,
   });
 
@@ -209,7 +209,7 @@ function DialogBerkas({ ember, onTutup }: { ember: Bucket | null; onTutup: () =>
   }
 
   const hapus = useMutation({
-    mutationFn: (id: string) => ForgeHubApi.deleteBucketFile(ember!.name, id),
+    mutationFn: (id: string) => OpenOrchestratorApi.deleteBucketFile(ember!.name, id),
     onSuccess: segarkan,
     onError: (e) => setGalat(errorText(e)),
   });
@@ -227,7 +227,7 @@ function DialogBerkas({ ember, onTutup }: { ember: Bucket | null; onTutup: () =>
           const b64 = String(pembaca.result).split(",")[1] ?? "";
 
           try {
-            await ForgeHubApi.uploadBucketFile(ember!.name, {
+            await OpenOrchestratorApi.uploadBucketFile(ember!.name, {
               fileName: f.name,
               contentBase64: b64,
               contentType: f.type || "application/octet-stream",
@@ -301,8 +301,8 @@ function DialogBerkas({ ember, onTutup }: { ember: Bucket | null; onTutup: () =>
                   onClick={() =>
                     // Alamat penuh ke API, bukan jalur relatif: unduh() tidak
                     // memakai baseURL, dan jalur relatif akan mendarat di
-                    // server dasbor, bukan di ForgeHub.
-                    unduh(ForgeHubApi.bucketFileUrl(ember.name, b.id), b.fileName).catch((e) => setGalat(errorText(e)))
+                    // server dasbor, bukan di OpenOrchestrator.
+                    unduh(OpenOrchestratorApi.bucketFileUrl(ember.name, b.id), b.fileName).catch((e) => setGalat(errorText(e)))
                   }
                 >
                   <Download size={16} />

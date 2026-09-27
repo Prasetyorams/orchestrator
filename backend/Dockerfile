@@ -30,10 +30,10 @@ RUN apt-get update \
 
 # Berjalan sebagai pengguna biasa, bukan root: kalau ada celah di aplikasi,
 # yang didapat penyerang bukan root di dalam container.
-RUN useradd --system --uid 10001 forgehub
-USER forgehub
+RUN useradd --system --uid 10001 openorchestrator
+USER openorchestrator
 
-COPY --from=build /build/target/forgehub-1.0.0.jar app.jar
+COPY --from=build /build/target/openorchestrator-1.0.0.jar app.jar
 
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

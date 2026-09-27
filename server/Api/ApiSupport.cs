@@ -1,9 +1,9 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
-using ForgeHub.Auth;
-using ForgeHub.Data;
+using OpenOrchestrator.Auth;
+using OpenOrchestrator.Data;
 
-namespace ForgeHub.Api;
+namespace OpenOrchestrator.Api;
 
 /// <summary>
 /// Hal-hal yang dipakai semua endpoint: siapa peminta, penyewa mana, dan cara
@@ -11,7 +11,7 @@ namespace ForgeHub.Api;
 /// </summary>
 public static class ApiSupport
 {
-    private const string PrincipalKey = "forgehub.principal";
+    private const string PrincipalKey = "openorchestrator.principal";
 
     /// <summary>
     /// Middleware pemeriksa token.
@@ -21,7 +21,7 @@ public static class ApiSupport
     /// Daftarnya berupa IZIN, bukan larangan: endpoint baru yang lupa didaftar
     /// akan tertutup, bukan terbuka.
     /// </summary>
-    public static void UseForgeHubAuth(this WebApplication app)
+    public static void UseOpenOrchestratorAuth(this WebApplication app)
     {
         app.Use(async (context, next) =>
         {

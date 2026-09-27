@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ForgeHubApi, errorText } from "@/lib/api";
+import { OpenOrchestratorApi, errorText } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { cn, dateTimeOf } from "@/lib/utils";
 import { Button, Card, Galat } from "@/components/ui/primitives";
@@ -33,13 +33,13 @@ export default function Audit() {
 
   const daftarKomponen = useQuery({
     queryKey: ["audit", "komponen"],
-    queryFn: ForgeHubApi.auditComponents,
+    queryFn: OpenOrchestratorApi.auditComponents,
     retry: false,
   });
 
   const jejak = useQuery({
     queryKey: ["audit", komponen, tunda],
-    queryFn: () => ForgeHubApi.audit({ component: komponen, q: tunda, limit: 500 }),
+    queryFn: () => OpenOrchestratorApi.audit({ component: komponen, q: tunda, limit: 500 }),
     refetchInterval: 30_000,
     placeholderData: keepPreviousData,
     retry: false,

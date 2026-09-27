@@ -1,0 +1,223 @@
+package id.jakforge.openorchestrator.repository;
+
+import id.jakforge.openorchestrator.model.JobState;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Repository;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+
+/**
+ * Akses data pekerjaan.
+ *
+ * <p>SELURUH SQL tentang pekerjaan ada di sini dan tidak di tempat lain. Itu
+ * gunanya lapisan ini: kalau kolom {@code jobs} berubah, yang harus dibaca
+ * hanya berkas ini.
+ *
+ * <p>Yang dikembalikan adalah BARIS, bukan entitas bertipe. Bentuk baris SQL
+ * adalah bentuk JSON yang dibaca Studio, JakRunner, dan dasbor — memetakannya
+ * lewat entitas berarti bentuk itu ditentukan kebetulan penamaan medan, bukan
+ * oleh kolom yang benar-benar dipilih di sini.
+ */
+@Repository
+@RequiredArgsConstructor
+public class JobRepository {
+
+    private static final String LIST_COLUMNS = """
+            id, process_name, robot_name, machine_name, state, source, priority,
+            progress, info, created_at, started_at, ended_at, folder_id
+            """;
+
+    private static final String DETAIL_COLUMNS = """
+            id, process_name, robot_name, machine_name, state, source, priority,
+            progress, info, input_json, output_json, created_at, started_at, ended_at, folder_id
+            """;
+
+    private final Database database;
+
+    /** @param folderId null berarti seluruh penyewa. */
+    public List<Map<String, Object>> search(UUID tenantId, String state, String processName, UUID folderId,
+                                            int limit) {
+        // Penyaring dirangkai, bukan dijabarkan jadi empat kueri terpisah.
+        // Halaman detail proses memerlukan "jalan milik proses ini saja", dan
+        // menambahkannya sebagai cabang baru berarti empat kombinasi yang harus
+        // dijaga tetap sama isinya.
+        List<String> conditions = new ArrayList<>();
+        List<Object> args = new ArrayList<>();
+
+        conditions.add("tenant_id = ?");
+        args.add(tenantId);
+
+        if (state != null && !state.isBlank()) {
+            conditions.add("state = ?");
+            args.add(state);
+        }
+
+        if (processName != null && !processName.isBlank()) {
+            conditions.add("process_name = ?");
+            args.add(processName);
+        }
+
+        if (folderId != null) {
+            conditions.add("folder_id = ?");
+            args.add(folderId);
+        }
+
+        args.add(limit);
+
+        return database.queryRows("""
+                SELECT %s
+                  FROM jobs
+                 WHERE %s
+                 ORDER BY created_at DESC
+                 LIMIT ?
+                """.formatted(LIST_COLUMNS, String.join(" AND ", conditions)), args.toArray());
+    }
+
+    public Optional<Map<String, Object>> findById(UUID tenantId, UUID jobId) {
+        return database.queryRow("SELECT %s FROM jobs WHERE tenant_id = ? AND id = ?".formatted(DETAIL_COLUMNS),
+                tenantId, jobId);
+    }
+
+    public Optional<String> findProcessName(UUID tenantId, UUID jobId) {
+        return database.queryScalar("SELECT process_name FROM jobs WHERE tenant_id = ? AND id = ?", tenantId, jobId)
+                .map(String::valueOf);
+    }
+
+    /**
+     * @param folderId folder PROSESNYA. Nama proses unik per folder, jadi
+     *                 folder tidak bisa lagi disimpulkan dari nama saja.
+     */
+    public void insert(UUID jobId, UUID tenantId, UUID folderId, String processName, String robotName,
+                       String machineName, String source, String priority, String info, String inputJson) {
+        database.update("""
+                INSERT INTO jobs
+                    (id, tenant_id, folder_id, process_name, robot_name, machine_name, state, source,
+                     priority, progress, info, input_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, 0, ?, ?, now())
+                """, jobId, tenantId, folderId, processName, robotName, machineName, source, priority, info,
+                inputJson);
+    }
+
+    /**
+     * Ambil satu pekerjaan untuk sebuah robot, dalam SATU langkah tak terbagi.
+     *
+     * <p>RETURNING mengembalikan baris yang benar-benar diubah, jadi tidak ada
+     * kemungkinan salah tebak: mencarinya kembali lewat SELECT terpisah akan
+     * memberi baris yang salah begitu satu robot memegang dua pekerjaan.
+     *
+     * <p>FOR UPDATE SKIP LOCKED menutup sisi satunya: dua robot yang bertanya
+     * bersamaan tidak melihat baris yang sama sebagai PENDING, sehingga satu
+     * pekerjaan tidak pernah dijalankan dua kali.
+     *
+     * <p>Robot hanya mengambil pekerjaan dari FOLDER tempat ia ditugaskan.
+     * Pekerjaan yang menyebut nama robotnya langsung tetap diambil di mana pun
+     * foldernya: yang memilih robot itu sudah menyatakan maksudnya.
+     */
+    public Optional<Map<String, Object>> claimNext(UUID tenantId, String robotName) {
+        return database.queryRows("""
+                UPDATE jobs
+                   SET state = 'RUNNING',
+                       robot_name = ?,
+                       started_at = now(),
+                       info = 'Sedang dijalankan.'
+                 WHERE id = (
+                       SELECT j.id FROM jobs j
+                        WHERE j.tenant_id = ?
+                          AND j.state = 'PENDING'
+                          AND (j.robot_name = ?
+                               OR ((j.robot_name IS NULL OR j.robot_name = '')
+                                   AND EXISTS (SELECT 1
+                                                 FROM folder_robots fr
+                                                 JOIN robots r ON r.id = fr.robot_id
+                                                WHERE fr.folder_id = j.folder_id
+                                                  AND r.tenant_id = j.tenant_id
+                                                  AND r.name = ?)))
+                        ORDER BY CASE j.priority
+                                   WHEN 'High' THEN 0
+                                   WHEN 'Normal' THEN 1
+                                   ELSE 2
+                                 END,
+                                 j.created_at
+                        LIMIT 1
+                        FOR UPDATE SKIP LOCKED)
+             RETURNING id, process_name, robot_name, state, priority, input_json,
+                       created_at, started_at
+                """, robotName, tenantId, robotName, robotName).stream().findFirst();
+    }
+
+    /**
+     * Perbarui keadaan.
+     *
+     * <p>COALESCE pada info dan output: medan yang tidak dikirim TIDAK menghapus
+     * yang sudah ada. Robot melaporkan kemajuan berkali-kali dan hanya mengisi
+     * sebagian medan tiap kali.
+     */
+    public void updateState(UUID tenantId, UUID jobId, JobState state, int progress,
+                            String info, String outputJson) {
+        database.update("""
+                UPDATE jobs
+                   SET state = ?,
+                       progress = ?,
+                       info = COALESCE(?, info),
+                       output_json = COALESCE(?, output_json),
+                       ended_at = CASE WHEN ? THEN now() ELSE ended_at END
+                 WHERE tenant_id = ? AND id = ?
+                """, state.name(), progress, info, outputJson, state.isFinished(), tenantId, jobId);
+    }
+
+    /**
+     * Minta berhenti.
+     *
+     * <p>Yang RUNNING menjadi STOPPING, bukan langsung STOPPED: yang benar-benar
+     * bisa menghentikan proses adalah robotnya, dan ia baru tahu pada denyut
+     * berikutnya. Yang masih PENDING belum dipegang siapa pun, jadi boleh
+     * langsung berhenti.
+     */
+    public int requestStop(UUID tenantId, UUID jobId) {
+        return database.update("""
+                UPDATE jobs
+                   SET state = CASE WHEN state = 'PENDING' THEN 'STOPPED' ELSE 'STOPPING' END,
+                       info = 'Diminta berhenti.',
+                       ended_at = CASE WHEN state = 'PENDING' THEN now() ELSE ended_at END
+                 WHERE tenant_id = ? AND id = ? AND state IN ('PENDING', 'RUNNING')
+                """, tenantId, jobId);
+    }
+
+    public int delete(UUID tenantId, UUID jobId) {
+        return database.update("DELETE FROM jobs WHERE tenant_id = ? AND id = ?", tenantId, jobId);
+    }
+
+    /**
+     * Tandai gagal pekerjaan yang robotnya berhenti berdenyut.
+     *
+     * <p>RETURNING dipakai supaya peringatan hanya dibuat untuk baris yang
+     * BENAR-BENAR berubah. Memilih dulu lalu memperbarui membuka celah:
+     * pekerjaan yang selesai di antara kedua langkah tetap mendapat peringatan
+     * "terputus" padahal berhasil.
+     *
+     * @param silenceSeconds berapa lama robotnya diam sebelum dianggap terputus
+     */
+    public List<Map<String, Object>> markJobsOfSilentRobotsFaulted(int silenceSeconds) {
+        return database.queryRows("""
+                UPDATE jobs j
+                   SET state = 'FAULTED',
+                       info = 'Robot ' || COALESCE(j.robot_name, '?')
+                              || ' berhenti berdenyut saat pekerjaan masih berjalan.',
+                       ended_at = now()
+                  FROM (SELECT j2.id
+                          FROM jobs j2
+                          LEFT JOIN robots r
+                                 ON r.tenant_id = j2.tenant_id AND r.name = j2.robot_name
+                         WHERE j2.state = 'RUNNING'
+                           AND (r.last_heartbeat_at IS NULL
+                                OR now() - r.last_heartbeat_at > make_interval(secs => ?))
+                         FOR UPDATE OF j2 SKIP LOCKED) AS stale
+                 WHERE j.id = stale.id AND j.state = 'RUNNING'
+             RETURNING j.id, j.tenant_id, j.process_name, j.robot_name
+                """, silenceSeconds);
+    }
+}
