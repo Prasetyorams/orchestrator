@@ -5,17 +5,6 @@ frontend/.next/
 frontend/node_modules/
 frontend/out/
 
-# Basis data SQLite milik server/ .NET. Isinya data sungguhan milik
-# pemakainya, bukan bagian dari kode.
-*.db
-*.db-shm
-*.db-wal
-
-# Hasil alat pindah: dihasilkan ulang dari forgehub.db kapan saja, dan
-# memuat seluruh isi basis data — termasuk hash kata sandi dan kredensial
-# tersandi.
-openorchestrator-migrasi.sql
-
 # Kunci penyandian. Kalau ini masuk ke repositori, seluruh kredensial yang
 # disandikan dengannya ikut terbuka bagi siapa pun yang bisa membaca repo.
 signing.key
@@ -29,12 +18,7 @@ signing.key
 *.tsbuildinfo
 /.metadata/
 
-# Aturan yang dulu diwarisi dari .gitignore akar repo Studio, dan sejak
-# OpenOrchestrator berdiri sendiri harus ditulis di sini. Tanpa bin/ dan obj/,
-# hasil build server/ dan tools/PindahKePostgres muncul sebagai berkas baru
-# yang siap ter-commit.
-[Bb]in/
-[Oo]bj/
+# Berkas milik editor dan catatan lokal.
 .vs/
 *.user
 .idea/

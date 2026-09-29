@@ -1,256 +1,138 @@
-# OpenOrchestrator — Orchestrator JakForge
+# Open Orchestrator
 
 Pusat kendali untuk robot, proses, pekerjaan, antrean, aset, dan catatan
-jalannya automasi JakForge.
+jalannya automasi JakForge — pasangan orchestrator untuk JakForge Studio dan
+JakRunner.
+
+| Bagian | Tumpukan |
+|---|---|
+| `backend/` | Spring Boot 3.5, Java 25, Maven, PostgreSQL 17 (skema lewat Flyway) |
+| `frontend/` | Next.js 15, TypeScript, Tailwind |
+| `docker-compose.yml` | db + backend + frontend dalam satu perintah |
 
 ---
 
-## Mulai di sini: `start-openorchestrator.cmd`
+## Menjalankan di komputer sendiri
 
-Klik dua kali **`start-openorchestrator.cmd`**, lalu buka <http://localhost:8080>.
+Butuh Docker Desktop.
 
-    Nama pengguna : OO_Admin
-    Kata sandi    : openorchestrator
+```bash
+cp .env.example .env      # lalu isi — setiap variabel dijelaskan di dalamnya
+docker compose up -d --build
+```
 
-Itu saja. Tidak ada basis data yang perlu dipasang, tidak ada layanan yang
-perlu dinyalakan, tidak ada berkas setelan yang perlu diisi lebih dulu.
+`signing.key` harus sudah ada di folder `OPENORCHESTRATOR_DATA` sebelum
+menyalakan; cara membuatnya ada di `.env.example`.
 
-Yang berjalan adalah **`server/`** — OpenOrchestrator di atas ASP.NET Core 10 dengan
-SQLite. Sudah dibangun, dijalankan, dan diuji sampai ujung: Studio menerbitkan
-proyek ke sana, OpenOrchestrator menjadwalkan pekerjaan, JakRunner menjemput dan
-menjalankannya, lalu hasilnya kembali ke dasbor.
+| Alamat | Isinya |
+|---|---|
+| http://localhost:3000 | Dasbor |
+| http://localhost:8080 | API |
+| http://localhost:8080/actuator/health | Pemeriksaan kesehatan |
 
-Datanya di `%LOCALAPPDATA%\JakForge\ForgeHub` — di luar folder proyek, jadi
-tidak ikut terhapus saat proyek dibangun ulang.
+Masuk pertama kali: **OO_Admin** / **openorchestrator**. Akun ini dibuat
+otomatis saat basis datanya masih kosong (setelan `openorchestrator.bootstrap`
+di `backend/src/main/resources/application.yml`). Sandinya tertulis di repo
+ini, jadi **ganti begitu masuk**.
 
-### Menyambungkan JakRunner
+Memasang di server sungguhan: lihat **[DEPLOY.md](DEPLOY.md)** (beserta
+daftar periksanya, `DEPLOY-checklist.xlsx`).
 
-Buat `jakrunner.json` di sebelah `JakRunner.exe`:
+### Pengembangan tanpa container backend
+
+```bash
+docker compose up -d db                       # basis data saja
+cd backend && mvn spring-boot:run             # DB_PASSWORD diisi seperti di .env
+cd frontend && npm install && npm run dev
+```
+
+Uji backend: `mvn test` di `backend/`. Pemeriksaan tipe frontend:
+`node node_modules/typescript/bin/tsc --noEmit -p .` di `frontend/`.
+
+---
+
+## Menyambungkan Studio dan JakRunner
+
+**Studio:** tab **Design** → grup **ForgeHub** (nama lama di Studio) → **Sambungkan**, isi alamat
+API (`http://localhost:8080`) dan akunmu. **Terbitkan** mengirim proyek yang
+terbuka sebagai paket, dan prosesnya langsung bisa dijalankan robot.
+
+**JakRunner:** buat `jakrunner.json` di sebelah `JakRunner.exe`:
 
 ```json
 {
   "forgeHubUrl": "http://localhost:8080",
-  "username": "OO_Admin",
-  "password": "openorchestrator",
+  "username": "Robot_Saya",
+  "password": "...",
   "robotName": ""
 }
 ```
 
-Robot mendaftarkan dirinya sendiri pada denyut pertama. Kosongkan `robotName`
-untuk memakai `<nama-mesin>-<nama-pengguna>`.
-
-### Menyambungkan Studio
-
-Di Studio: tab **Design** → grup **OpenOrchestrator** → **Sambungkan**, isi alamat dan
-kredensialnya. Setelah itu **Terbitkan** mengirim proyek yang sedang terbuka
-sebagai paket, dan prosesnya langsung siap dijalankan robot.
+Nama kuncinya memang masih `forgeHubUrl` — JakRunner membacanya dengan nama
+itu. Pakai akun robot (peran **Robot**), bukan akun admin. Robot mendaftar
+sendiri pada denyut pertama; `robotName` kosong berarti
+`<nama-mesin>-<nama-pengguna>`.
 
 ---
 
 ## Repo ini dan repo Studio
 
-OpenOrchestrator dulu tinggal di folder `OpenOrchestrator/` di dalam repo Studio. Sejak
-25 September 2026 ia berdiri sendiri di repo ini, lengkap dengan riwayatnya,
-supaya mengembangkan orchestrator tidak mengganggu Studio dan sebaliknya.
-
-Keduanya hanya bersambung lewat API HTTP. Pemanggilnya tetap di
-[repo Studio](https://github.com/Fahib16/Studio):
+Orchestrator dulu tinggal di dalam repo Studio dan berdiri sendiri di repo
+ini sejak 25 September 2026. Keduanya hanya bersambung lewat API HTTP.
+Pemanggilnya ada di [repo Studio](https://github.com/Fahib16/Studio):
 
 | Klien | Berkas di repo Studio |
 |---|---|
-| Studio (Terbitkan, Sambungkan) | `OpenRPA/OpenOrchestrator/StudioOpenOrchestratorClient.cs` |
-| JakRunner (denyut, pekerjaan, log) | `JakRunner/Core/OpenOrchestratorClient.cs` |
+| Studio (Terbitkan, Sambungkan) | `OpenRPA/ForgeHub/StudioForgeHubClient.cs` |
+| JakRunner (denyut, pekerjaan, log) | `JakRunner/Core/ForgeHubClient.cs` |
 | Activity kategori Orchestrator | `Custom.Orchestrator/Runtime/HubConnection.cs` |
 
-Jadi yang harus dijaga di sini adalah **bentuk API-nya**. Mengganti alamat
-atau nama medan JSON tanpa menyesuaikan ketiga klien itu mematahkan robot
-yang sudah terpasang — dan gejalanya muncul di mesin robot, jauh dari sini.
-`tools/uji-api.ps1` memeriksa kontrak itu terhadap backend yang berjalan;
-jalankan sebelum mengubah endpoint.
+Jadi yang harus dijaga di sini adalah **bentuk API-nya**: mengganti alamat
+atau nama medan JSON tanpa menyesuaikan klien-klien itu mematahkan robot yang
+sudah terpasang, dan gejalanya muncul di mesin robot, jauh dari sini.
 
----
-
-## Dua penerapan dalam satu folder
-
-| | `server/` | `backend/` + `frontend/` |
-|---|---|---|
-| Tumpukan | ASP.NET Core 10, SQLite | Spring Boot 3.5, Next.js 15, PostgreSQL |
-| Perlu dipasang | tidak ada (SDK .NET saja) | JDK 25, Maven, Node, Docker, PostgreSQL |
-| Keadaan | **dibangun dan diuji jalan** | **belum pernah dikompilasi** |
-| Untuk apa | satu mesin, pemakaian nyata sekarang | penyebaran banyak mesin nanti |
-
-Keduanya berbicara **API yang sama** dan memakai bentuk tabel yang sama — nama
-kolom, indeks yang selalu diawali `tenant_id`, keadaan pekerjaan yang sama.
-Pindah dari yang satu ke yang lain nanti tidak mengubah Studio maupun JakRunner.
-
-**Peringatan tentang `backend/` dan `frontend/`:** kode Java dan Next.js di
-folder ini belum pernah dikompilasi atau dijalankan. Mesin tempat ia ditulis
-tidak punya Java, Maven, Node, npm, maupun Docker. Untuk bagian itu yang bisa
-saya janjikan hanya kode yang ditulis dengan hati-hati, bukan bukti dari sebuah
-build yang hijau — jadi bacalah sisa dokumen ini sebagai rencana penerapan,
-bukan sebagai catatan sesuatu yang sudah terbukti berjalan.
-
----
-
-## Rencana penerapan, langkah demi langkah
-
-Ini urutan yang saya ikuti saat menulisnya, dan urutan yang sama yang saya
-sarankan saat Anda menelaahnya.
-
-**1. Basis data lebih dulu.** `V1__init.sql` mendefinisikan seluruh tabel, dan
-Hibernate disetel `ddl-auto: validate` — skema dikelola Flyway, bukan
-Hibernate. Membiarkan Hibernate mengubah skema berarti bentuk basis data
-bergantung pada versi kode yang kebetulan jalan terakhir, dan itu tidak bisa
-ditinjau sebelum dijalankan.
-
-**2. Pemisahan tenant di lapisan skema.** Setiap tabel data membawa
-`tenant_id`, dan setiap indeks diawali `tenant_id`. Pemisahan yang hanya
-diperiksa di kode akan bocor pada kueri pertama yang lupa menyaringnya.
-
-**3. Autentikasi.** Login memeriksa BCrypt lalu mengeluarkan JWT yang membawa
-`tenantId`. Setiap service membaca tenant dari token, TIDAK PERNAH dari badan
-permintaan — nilai yang datang dari klien tidak boleh menentukan data siapa
-yang terlihat.
-
-**4. API baca dulu, tulis kemudian.** Dashboard, Jobs, Robots, Queues, Assets,
-Processes, dan Logs sudah lengkap. Formulir untuk Environments, Credentials,
-Packages, Libraries, Tenants, dan Settings belum — tabelnya ada, endpoint-nya
-belum, dan layarnya mengatakan itu apa adanya alih-alih memajang tabel kosong
-yang tampak rusak.
-
-**5. Penerimaan log.** JakRunner dan Studio mengirim per bundel ke
-`POST /api/logs`. Panel Real-Time Logs menariknya kembali dengan `afterId`,
-jadi setiap penarikan hanya membawa baris yang benar-benar baru.
-
-**6. Frontend menyusul API.** Setiap layar memakai React Query dengan
-`refetchInterval` yang sesuai isinya: 2 detik untuk log, 5 detik untuk job,
-10 detik untuk ringkasan dan robot.
-
-**7. Docker paling akhir**, setelah keduanya berdiri sendiri.
-
----
-
-## Menjalankan
-
-```bash
-cp .env.example .env      # lalu isi — setiap variabel dijelaskan di dalamnya
-docker compose up --build
-```
-
-| Alamat | Isinya |
-|---|---|
-| http://localhost:3000 | OpenOrchestrator |
-| http://localhost:8080 | API |
-| http://localhost:8080/actuator/health | Pemeriksaan kesehatan |
-
-Masuk pertama kali: **OO_Admin** / **openorchestrator**
-
-Sandi itu ada di dalam `V2__seed.sql` yang tersimpan di repositori ini, jadi ia
-bukan rahasia bagi siapa pun yang bisa membaca kodenya. Ganti begitu Anda masuk.
-
-### Tanpa Docker
-
-```bash
-# Basis data
-docker run -d --name openorchestrator-db -p 5432:5432 \
-  -e POSTGRES_DB=openorchestrator -e POSTGRES_USER=openorchestrator -e POSTGRES_PASSWORD=openorchestrator \
-  postgres:17-alpine
-
-# Backend
-cd backend && mvn spring-boot:run
-
-# Frontend
-cd frontend && npm install && npm run dev
-```
+Kontrak lengkapnya — yang berlaku sekarang (v1) dan usulan untuk Robot Agent
+unattended (v2) — ada di **[ROBOT-API.md](ROBOT-API.md)**.
+`tools/uji-api.ps1` memeriksa kontrak v1 terhadap backend yang berjalan.
 
 ---
 
 ## Susunan
 
 ```
-OpenOrchestrator/
-  backend/                     Spring Boot, Java 25, Maven
-    src/main/java/id/jakforge/openorchestrator/
-      auth/                    login dan token
-      common/                  entity dasar, penanganan kesalahan, dashboard
-      config/                  security dan Jackson
-      security/                JWT
-      robot/                   robot, machine, environment, credential
-      process/                 process dan package
-      job/                     job dan trigger
-      queue/                   antrean dan itemnya
-      asset/                   aset
-      log/                     penerimaan dan pembacaan log
-    src/main/resources/
-      application.yml
-      db/migration/            V1 skema, V2 data awal
-  frontend/                    Next.js 15, TypeScript, Tailwind
-    app/                       satu folder per layar
-    components/                Sidebar, TopNav, RealTimeLogs, komponen dasar
-    lib/api.ts                 klien HTTP dan tipe balasan
-  docker-compose.yml
+backend/
+  src/main/java/id/jakforge/openorchestrator/
+    controller/     satu controller per sumber daya, di bawah /api/<sumber>
+    service/        logika; menerima principal dan memeriksa folder
+    repository/     semua SQL (JDBC, tanpa JPA)
+    dto/            request (tervalidasi) dan response bertipe
+    security/       JWT, izin per endpoint, SecretBox, hash kata sandi
+    audit/          pencatatan jejak audit
+    config/         setelan (@ConfigurationProperties), keamanan, penjadwal
+    common/, model/ pembantu dan enum bersama
+  src/main/resources/
+    application.yml
+    db/migration/   V1–V7 (Flyway; berkas yang sudah dijalankan tidak diubah)
+  legacy/           kode JPA lama, tidak dikompilasi
+frontend/
+  app/              satu folder per halaman
+  components/       Shell, TopNav, FolderSidebar, NavBar, dialog, tabel
+  lib/              klien API, izin, folder, tema, bahasa (kamus en/jv)
+tools/
+  buat-ikon.mjs     membangkitkan favicon.ico dan apple-icon.png dari icon.svg
+  uji-*.ps1         uji API manual; butuh data proses yang sudah ada
 ```
-
-Komponen dasar (Card, Badge, Button, Table) ditulis langsung di
-`components/ui/primitives.tsx` dengan gaya shadcn/ui. shadcn/ui memang bekerja
-dengan cara menyalin komponennya ke dalam proyek, bukan dipasang sebagai
-dependensi — jadi bentuk akhirnya sama, tanpa menuntut `npx shadcn add`
-dijalankan lebih dulu sebelum proyek ini bisa dibangun.
 
 ---
 
-## API
+## Catatan penting
 
-| Metode | Alamat | Gunanya |
-|---|---|---|
-| POST | `/api/auth/login` | Masuk, menghasilkan JWT |
-| GET | `/api/auth/me` | Siapa yang sedang masuk |
-| GET | `/api/dashboard/summary` | Angka untuk kartu ringkasan |
-| GET | `/api/robots` | Daftar robot |
-| POST | `/api/robots/{name}/heartbeat` | Denyut dari JakRunner atau Studio |
-| GET | `/api/processes` | Daftar proses |
-| GET | `/api/jobs` | Daftar pekerjaan |
-| POST | `/api/jobs` | Mulai pekerjaan |
-| PATCH | `/api/jobs/{id}` | Robot melaporkan perubahan keadaan |
-| GET | `/api/queues` | Antrean beserta hitungannya |
-| POST | `/api/queues/{id}/next` | Ambil satu item untuk dikerjakan |
-| GET | `/api/assets` | Daftar aset |
-| POST | `/api/logs` | Kirim bundel log |
-| GET | `/api/logs?afterId=` | Tarik log yang lebih baru |
-
-Semuanya menuntut `Authorization: Bearer <token>` kecuali `login` dan
-`actuator/health`.
-
----
-
-## Menyambungkan JakRunner dan Studio
-
-Robot mengirim denyut dan log lewat dua panggilan ini:
-
-```
-POST /api/robots/{namaRobot}/heartbeat
-  { "status": "AVAILABLE", "cpuPercent": 12.5, "memoryMb": 340 }
-
-POST /api/logs
-  { "lines": [ { "message": "...", "level": "INFO", "robotName": "...", "jobId": "..." } ] }
-```
-
-Keduanya sengaja dibuat sesederhana ini supaya bisa dipanggil dari mana saja —
-termasuk dari activity di dalam workflow.
-
----
-
-## Kalau gagal dibangun
-
-Yang paling mungkin, sesuai urutan kemungkinannya:
-
-1. **Java 25 belum tersedia di image Maven.** Java 25 baru; kalau
-   `maven:3.9-eclipse-temurin-25` belum ada, turunkan ke `-21` di
-   `backend/Dockerfile` dan ubah `<java.version>` di `pom.xml` menjadi `21`.
-   Tidak ada kode di sini yang memakai fitur khusus Java 25.
-2. **Versi Spring Boot.** `pom.xml` memakai 3.5.0. Kalau versinya belum ada di
-   repositori Anda, pakai versi 3.x terbaru yang ada.
-3. **`package-lock.json` belum ada.** Jalankan `npm install` sekali di
-   `frontend/` supaya terbentuk, lalu bangun ulang image-nya.
-4. **Rentang versi npm.** `package.json` memakai `^`, jadi versi minor terbaru
-   yang diambil. Kalau ada yang bentrok, kunci ke versi pastinya.
+- **`signing.key`** menyandikan kredensial di basis data. Kunci yang berbeda
+  membuat semua kredensial terbaca kosong, jadi cadangkan bersama basis
+  datanya dan jangan pernah dibuat ulang untuk data yang sudah ada.
+- Hash kata sandi dan bentuk sandi kredensial sengaja sama dengan versi
+  .NET lama (yang sudah dihapus dari repo ini), supaya data yang dipindah
+  dari sana tetap terbaca; `DotNetCompatTest` menjaganya.
+- Flyway V1–V6 tidak boleh disunting — checksum-nya sudah tercatat di setiap
+  basis data yang pernah menjalankannya. Perubahan skema selalu berupa
+  migrasi baru.

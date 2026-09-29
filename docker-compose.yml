@@ -37,7 +37,7 @@ services:
       OPENORCHESTRATOR_SIGNING_KEY: /data/signing.key
       OPENORCHESTRATOR_TZ: ${OPENORCHESTRATOR_TZ:-Asia/Jakarta}
     volumes:
-      # signing.key MILIK OpenOrchestrator .NET, dipasang apa adanya dan hanya-baca.
+      # signing.key dari folder data mesin ini, dipasang apa adanya dan hanya-baca.
       #
       # Ini bagian yang mudah terlewat dan akibatnya sunyi: kredensial di
       # basis data disandikan dengan kunci ini. Container yang membuat kunci
@@ -69,40 +69,6 @@ services:
         condition: service_healthy
     ports:
       - "3000:3000"
-
-  # -------------------------------------------------------------------
-  # Pemindah data, sekali jalan.
-  #
-  # TIDAK ikut "docker compose up" biasa — hanya lewat profil:
-  #
-  #     docker compose --profile pindah run --rm pindah
-  #
-  # Alasannya: memasukkan data yang sama dua kali bukan sekadar mubazir.
-  # Tabel yang tidak punya batasan UNIQUE (jobs, logs, queue_items) akan
-  # benar-benar bertambah ganda, dan tidak ada cara membedakan mana salinan
-  # kedua sesudahnya.
-  #
-  # Menunggu backend SEHAT, bukan sekadar hidup: berkas SQL-nya menyisipkan
-  # ke tabel yang baru dibuat Flyway, dan Flyway berjalan saat backend naik.
-  # -------------------------------------------------------------------
-  pindah:
-    image: postgres:17-alpine
-    container_name: openorchestrator-pindah
-    profiles: ["pindah"]
-    depends_on:
-      backend:
-        condition: service_healthy
-    environment:
-      PGPASSWORD: ${DB_PASSWORD:-openorchestrator}
-    volumes:
-      - ${OPENORCHESTRATOR_DATA:-${LOCALAPPDATA}/JakForge/ForgeHub}:/pindahan:ro
-    # ON_ERROR_STOP: tanpa ini psql melanjutkan sesudah pernyataan yang gagal
-    # dan keluar dengan kode 0, jadi pindahan yang separuh gagal terlihat
-    # persis seperti yang berhasil.
-    command: >
-      psql -h db -U openorchestrator -d openorchestrator
-           -v ON_ERROR_STOP=1
-           -f /pindahan/openorchestrator-migrasi.sql
 
 volumes:
   openorchestrator-data:
