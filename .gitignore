@@ -18,7 +18,9 @@ signing.key
 *.tsbuildinfo
 /.metadata/
 
-# Berkas milik editor dan catatan lokal.
+# Berkas milik editor dan catatan lokal. backend/bin/ adalah keluaran
+# kompilasi Eclipse/STS, terpisah dari backend/target/ milik Maven.
+backend/bin/
 .vs/
 *.user
 .idea/
