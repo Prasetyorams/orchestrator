@@ -58,6 +58,7 @@ public class FolderAccessService {
 
     /** Folder yang boleh dibuka seseorang. */
     public FolderAccess accessibleFolders(OpenOrchestratorPrincipal principal) {
+        if (principal.isExecutor()) return FolderAccess.only(executorFolders(principal));
         if (canManageFolders(principal)) return FolderAccess.all();
 
         Set<UUID> folderIds = new HashSet<>(
@@ -96,6 +97,11 @@ public class FolderAccessService {
         Map<String, Object> folder = folderRepository.findById(principal.tenantId(), folderId)
                 .orElseThrow(() -> ApiException.notFound(FOLDER_NOT_FOUND));
 
+        if (principal.isExecutor()) {
+            if (!executorFolders(principal).contains(folderId)) throw ApiException.notFound(FOLDER_NOT_FOUND);
+            return folder;
+        }
+
         if (canManageFolders(principal)) return folder;
 
         Object ownerId = folder.get(OWNER_ID_COLUMN);
@@ -110,5 +116,15 @@ public class FolderAccessService {
         }
 
         return folder;
+    }
+
+    /**
+     * Executor sebuah job melihat folder tempat robotnya ditugaskan, ditambah
+     * folder job-nya sendiri — seperti robot UiPath di foldernya.
+     */
+    private Set<UUID> executorFolders(OpenOrchestratorPrincipal executor) {
+        Set<UUID> folderIds = new HashSet<>(folderRepository.findRobotFolderIds(executor.tenantId(), executor.robotId()));
+        if (executor.folderId() != null) folderIds.add(executor.folderId());
+        return folderIds;
     }
 }

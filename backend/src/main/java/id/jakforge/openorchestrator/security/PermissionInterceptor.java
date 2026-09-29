@@ -1,6 +1,7 @@
 package id.jakforge.openorchestrator.security;
 
 import id.jakforge.openorchestrator.common.ApiException;
+import id.jakforge.openorchestrator.service.AgentAccessService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.HandlerMapping;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.springframework.http.HttpMethod.DELETE;
 import static org.springframework.http.HttpMethod.GET;
@@ -37,6 +39,10 @@ import static org.springframework.http.HttpMethod.PUT;
  * cukup meminta salah satunya di sini; layanannya yang memutuskan mana yang
  * benar-benar diperlukan, sesudah tahu apakah namanya sudah ada (lihat
  * {@link PermissionChecker#requireSave}).
+ *
+ * <p>Token Robot Agent hanya berlaku di endpoint {@link Access#AGENT}, ditambah
+ * unduhan paket yang sedang dijalankan robotnya. Token executor diperlakukan
+ * seperti peran robot yang sempit, dan berhenti berlaku begitu job-nya selesai.
  */
 @Slf4j
 @Component
@@ -50,7 +56,9 @@ public class PermissionInterceptor implements HandlerInterceptor {
         /** Siapa pun yang sudah masuk; isinya disaring layanannya. */
         AUTHENTICATED,
         /** Peran yang punya SALAH SATU izin di {@code anyOfPermissions}. */
-        PERMISSION
+        PERMISSION,
+        /** Hanya Robot Agent, dengan token dari machine key. */
+        AGENT
     }
 
     record PermissionRule(HttpMethod method, String pathPattern, Access access, List<String> anyOfPermissions) {
@@ -67,6 +75,13 @@ public class PermissionInterceptor implements HandlerInterceptor {
     private static PermissionRule requires(HttpMethod method, String pathPattern, String... anyOfPermissions) {
         return new PermissionRule(method, pathPattern, Access.PERMISSION, List.of(anyOfPermissions));
     }
+
+    private static PermissionRule agent(HttpMethod method, String pathPattern) {
+        return new PermissionRule(method, pathPattern, Access.AGENT, List.of());
+    }
+
+    /** Satu-satunya endpoint di luar /api/agent yang boleh dipanggil token agent. */
+    static final String PACKAGE_CONTENT_PATH = "/api/packages/{name}/{version}/content";
 
     static final List<PermissionRule> RULES = List.of(
             // --- sesi dan profil ---
@@ -102,7 +117,7 @@ public class PermissionInterceptor implements HandlerInterceptor {
             requires(DELETE, "/api/processes/{name}", "processes.delete"),
             requires(GET, "/api/packages", "packages.read"),
             requires(POST, "/api/packages", "packages.create", "packages.update"),
-            requires(GET, "/api/packages/{name}/{version}/content", "packages.read"),
+            requires(GET, PACKAGE_CONTENT_PATH, "packages.read"),
             requires(DELETE, "/api/packages/{name}/{version}", "packages.delete"),
 
             // --- pekerjaan: mengambil dan melaporkan pekerjaan adalah tugas robot ---
@@ -113,6 +128,8 @@ public class PermissionInterceptor implements HandlerInterceptor {
             requires(POST, "/api/jobs/{id}/state", "jobs.update"),
             requires(POST, "/api/jobs/{id}/stop", "jobs.update"),
             requires(DELETE, "/api/jobs/{id}", "jobs.delete"),
+            requires(GET, "/api/jobs/{id}/attachments", "jobs.read"),
+            requires(GET, "/api/jobs/{id}/attachments/{attachmentId}/content", "jobs.read"),
 
             // --- pemicu ---
             requires(GET, "/api/triggers", "triggers.read"),
@@ -152,18 +169,35 @@ public class PermissionInterceptor implements HandlerInterceptor {
             requires(GET, "/api/buckets/{name}/files/{id}/content", "buckets.read"),
             requires(DELETE, "/api/buckets/{name}/files/{id}", "buckets.delete"),
 
-            // --- robot, mesin, lingkungan: denyut adalah robots.update ---
+            // --- robot, mesin, lingkungan ---
+            //
+            // robots.update adalah izin DENYUT robot v1 — peran Robot memegangnya.
+            // Karena itu mengubah SETELAN robot (termasuk akun Windows-nya) memakai
+            // robots.create: akun robot tidak boleh mengubah sandi Windows robot lain.
             requires(GET, "/api/robots", "robots.read"),
             requires(GET, "/api/robots/{name}", "robots.read"),
             requires(POST, "/api/robots/{name}/heartbeat", "robots.update"),
             requires(POST, "/api/robots", "robots.create"),
+            requires(PUT, "/api/robots/{name}", "robots.create"),
             requires(DELETE, "/api/robots/{name}", "robots.delete"),
             requires(GET, "/api/machines", "machines.read"),
             requires(POST, "/api/machines", "machines.create"),
+            requires(PUT, "/api/machines/{name}", "machines.update"),
+            requires(POST, "/api/machines/{name}/key", "machines.update"),
+            requires(DELETE, "/api/machines/{name}/key", "machines.update"),
             requires(DELETE, "/api/machines/{name}", "machines.delete"),
             requires(GET, "/api/environments", "environments.read"),
             requires(POST, "/api/environments", "environments.create"),
             requires(DELETE, "/api/environments/{name}", "environments.delete"),
+
+            // --- Robot Agent unattended (kontrak v2, ROBOT-API.md) ---
+            open(POST, "/api/agent/login"),
+            agent(POST, "/api/agent/heartbeat"),
+            agent(POST, "/api/agent/jobs/claim"),
+            agent(POST, "/api/agent/jobs/{id}/state"),
+            agent(POST, "/api/agent/jobs/{id}/windows-credential"),
+            agent(POST, "/api/agent/jobs/{id}/attachments"),
+            agent(POST, "/api/agent/logs"),
 
             // --- catatan dan peringatan ---
             requires(GET, "/api/logs", "logs.read"),
@@ -192,6 +226,7 @@ public class PermissionInterceptor implements HandlerInterceptor {
             requires(GET, "/api/audit/components", "audit.read"));
 
     private final PermissionChecker permissionChecker;
+    private final AgentAccessService agentAccessService;
 
     @Override
     public boolean preHandle(@NonNull HttpServletRequest request, @NonNull HttpServletResponse response,
@@ -215,6 +250,37 @@ public class PermissionInterceptor implements HandlerInterceptor {
         OpenOrchestratorPrincipal principal = CurrentPrincipal.find()
                 .orElseThrow(() -> ApiException.unauthorized(JwtAuthenticationFilter.INVALID_TOKEN_MESSAGE));
 
+        if (principal.isAgent()) {
+            agentAccessService.requireCurrentKey(principal);
+
+            if (rule.access() == Access.AGENT) return true;
+
+            if (PACKAGE_CONTENT_PATH.equals(rule.pathPattern())) {
+                Map<String, String> variables = pathVariables(request);
+
+                if (agentAccessService.canDownloadPackage(principal, variables.get("name"), variables.get("version"))) {
+                    return true;
+                }
+
+                throw ApiException.forbidden("Paket ini tidak sedang dijalankan robot di mesin ini.");
+            }
+
+            throw ApiException.forbidden("Token Robot Agent hanya berlaku di /api/agent.");
+        }
+
+        if (rule.access() == Access.AGENT) {
+            throw ApiException.forbidden("Endpoint ini khusus Robot Agent (masuk dengan machine key).");
+        }
+
+        if (principal.isExecutor()) {
+            agentAccessService.requireActiveExecutor(principal);
+
+            // Endpoint untuk orang (profil, beranda, folder): executor tidak punya urusan di sana.
+            if (rule.access() == Access.AUTHENTICATED) {
+                throw ApiException.forbidden("Token executor tidak berlaku untuk endpoint ini.");
+            }
+        }
+
         if (rule.access() == Access.AUTHENTICATED) return true;
 
         for (String permission : rule.anyOfPermissions()) {
@@ -230,5 +296,11 @@ public class PermissionInterceptor implements HandlerInterceptor {
         }
 
         return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, String> pathVariables(HttpServletRequest request) {
+        Object variables = request.getAttribute(HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE);
+        return variables instanceof Map<?, ?> map ? (Map<String, String>) map : Map.of();
     }
 }

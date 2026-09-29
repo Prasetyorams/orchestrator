@@ -102,6 +102,13 @@ public class FolderRepository {
                 """.formatted(COLUMNS), tenantId);
     }
 
+    /** Folder tempat sebuah robot ditugaskan — yang boleh dibuka Executor-nya. */
+    public Set<UUID> findRobotFolderIds(UUID tenantId, UUID robotId) {
+        return toUuidSet(database.query("""
+                SELECT folder_id FROM folder_robots WHERE tenant_id = ? AND robot_id = ?
+                """, (rs, rowNumber) -> rs.getObject(1), tenantId, robotId));
+    }
+
     /** Folder tempat seorang pengguna ditugaskan. */
     public Set<UUID> findAssignedFolderIds(UUID tenantId, UUID userId) {
         return toUuidSet(database.query("""

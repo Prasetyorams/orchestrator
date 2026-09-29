@@ -106,6 +106,36 @@ public class LogRepository {
                 """, tenantId, level.name(), message, robotName, machineName, processName, jobId, loggedAt);
     }
 
+    /**
+     * Satu baris dari Robot Agent.
+     *
+     * <p>Baris dengan (job, seq) yang sudah ada DILEWATI tanpa galat: kiriman
+     * ulang dari antrean agent sesudah jaringan pulih adalah hal biasa, bukan
+     * kesalahan.
+     *
+     * @return 1 kalau tertulis, 0 kalau kiriman ulang
+     */
+    public int insertAgentLine(UUID tenantId, LogLevel level, String message, String robotName, String machineName,
+                               String processName, UUID jobId, String loggedAt, Long seq, String source,
+                               Integer sessionId) {
+        return database.update("""
+                INSERT INTO logs (tenant_id, level, message, robot_name, machine_name, process_name, job_id,
+                                  logged_at, seq, source, session_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?::timestamptz, now()), ?, ?, ?)
+                ON CONFLICT (job_id, seq) WHERE job_id IS NOT NULL AND seq IS NOT NULL DO NOTHING
+                """, tenantId, level.name(), message, robotName, machineName, processName, jobId, loggedAt, seq,
+                source, sessionId);
+    }
+
+    /** Baris dari Orchestrator sendiri untuk sebuah job, dengan tingkat tertentu. */
+    public void insertJobEntry(UUID tenantId, LogLevel level, String message, String robotName, String processName,
+                               UUID jobId) {
+        database.update("""
+                INSERT INTO logs (tenant_id, level, message, robot_name, process_name, job_id, logged_at, source)
+                VALUES (?, ?, ?, ?, ?, ?, now(), 'Orchestrator')
+                """, tenantId, level.name(), message, robotName, processName, jobId);
+    }
+
     /** Baris tanpa robot: dipakai saat OpenOrchestrator sendiri yang mencatat. */
     public void insertSystemEntry(UUID tenantId, String message, String processName, UUID jobId) {
         database.update("""

@@ -1,6 +1,7 @@
 package id.jakforge.openorchestrator.service;
 
 import id.jakforge.openorchestrator.common.ApiException;
+import id.jakforge.openorchestrator.common.Hashes;
 import id.jakforge.openorchestrator.config.OpenOrchestratorProperties;
 import id.jakforge.openorchestrator.dto.request.PublishPackageRequest;
 import id.jakforge.openorchestrator.dto.response.PublishPackageResponse;
@@ -72,12 +73,16 @@ public class PackageService {
         byte[] content = decodeContent(request.contentBase64());
         long sizeBytes = content == null ? 0 : content.length;
 
+        // Sidik isinya: robot memeriksa unduhannya terhadap nilai ini sebelum
+        // menjalankan apa pun dari dalamnya.
+        String sha256 = content == null ? null : Hashes.sha256Hex(content);
+
         if (alreadyExists) {
             packageRepository.update(tenantId, request.name(), request.version(), request.description(),
-                    request.entryPoint(), publisher, sizeBytes, content);
+                    request.entryPoint(), publisher, sizeBytes, content, sha256);
         } else {
             packageRepository.insert(tenantId, request.name(), request.version(), request.description(),
-                    request.entryPoint(), publisher, sizeBytes, content);
+                    request.entryPoint(), publisher, sizeBytes, content, sha256);
         }
 
         // Menerbitkan paket hampir selalu berarti ingin proses dengan nama yang

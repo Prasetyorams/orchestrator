@@ -19,7 +19,28 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ProcessRepository {
 
+    /** Pekerjaan yang belum selesai, termasuk yang dipegang Robot Agent. */
+    private static final String ACTIVE_STATES =
+            "('PENDING', 'ASSIGNED', 'PREPARING_SESSION', 'RUNNING', 'STOPPING', 'UNRESPONSIVE')";
+
     private final Database database;
+
+    /**
+     * Setelan robot unattended untuk proses ini.
+     *
+     * @param timeoutSeconds null = tidak diubah; 0 = tanpa batas waktu
+     */
+    public void updateRunSettings(UUID tenantId, UUID folderId, String name, Integer timeoutSeconds,
+                                  Integer stopGraceSeconds, Integer maxRetries) {
+        database.update("""
+                UPDATE processes
+                   SET timeout_seconds = CASE WHEN ? THEN NULLIF(?, 0) ELSE timeout_seconds END,
+                       stop_grace_seconds = COALESCE(?, stop_grace_seconds),
+                       max_retries = COALESCE(?, max_retries)
+                 WHERE tenant_id = ? AND folder_id = ? AND name = ?
+                """, timeoutSeconds != null, timeoutSeconds == null ? 0 : timeoutSeconds, stopGraceSeconds,
+                maxRetries, tenantId, folderId, name);
+    }
 
     /**
      * Daftar proses, beserta pekerjaannya yang BELUM selesai.
@@ -46,6 +67,7 @@ public class ProcessRepository {
         return database.queryRows("""
                 SELECT p.id, p.name, p.package_name, p.package_version, p.environment,
                        p.description, p.created_at, p.folder_id,
+                       p.timeout_seconds, p.stop_grace_seconds, p.max_retries,
                        (SELECT count(*) FROM jobs j
                          WHERE j.tenant_id = p.tenant_id AND j.folder_id = p.folder_id
                            AND j.process_name = p.name) AS job_count,
@@ -55,17 +77,17 @@ public class ProcessRepository {
                        (SELECT count(*) FROM jobs j
                          WHERE j.tenant_id = p.tenant_id AND j.folder_id = p.folder_id
                            AND j.process_name = p.name
-                           AND j.state IN ('PENDING', 'RUNNING', 'STOPPING')) AS active_jobs,
+                           AND j.state IN %2$s) AS active_jobs,
                        (SELECT j.state FROM jobs j
                          WHERE j.tenant_id = p.tenant_id AND j.folder_id = p.folder_id
                            AND j.process_name = p.name
-                           AND j.state IN ('PENDING', 'RUNNING', 'STOPPING')
+                           AND j.state IN %2$s
                          ORDER BY CASE j.state WHEN 'RUNNING' THEN 0 WHEN 'STOPPING' THEN 1 ELSE 2 END
                          LIMIT 1) AS active_state
                   FROM processes p
-                 WHERE p.tenant_id = ?%s
+                 WHERE p.tenant_id = ?%1$s
                  ORDER BY p.name, p.created_at
-                """.formatted(folderFilter), args.toArray());
+                """.formatted(folderFilter, ACTIVE_STATES), args.toArray());
     }
 
     /** Ada proses bernama itu di folder mana pun. */

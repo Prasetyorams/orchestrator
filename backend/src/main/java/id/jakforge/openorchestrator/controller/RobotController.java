@@ -2,6 +2,7 @@ package id.jakforge.openorchestrator.controller;
 
 import id.jakforge.openorchestrator.dto.request.CreateRobotRequest;
 import id.jakforge.openorchestrator.dto.request.HeartbeatRequest;
+import id.jakforge.openorchestrator.dto.request.UpdateRobotRequest;
 import id.jakforge.openorchestrator.dto.response.HeartbeatResponse;
 import id.jakforge.openorchestrator.dto.response.OkResponse;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -54,6 +56,15 @@ public class RobotController {
     public OkResponse create(@AuthenticationPrincipal OpenOrchestratorPrincipal principal,
                              @Valid @RequestBody CreateRobotRequest request) {
         robotService.create(principal, request);
+
+        return OkResponse.success();
+    }
+
+    /** Setelan robot, termasuk mesin dan akun Windows-nya untuk Robot Agent. */
+    @PutMapping("/{name}")
+    public OkResponse update(@AuthenticationPrincipal OpenOrchestratorPrincipal principal, @PathVariable String name,
+                             @Valid @RequestBody UpdateRobotRequest request) {
+        robotService.update(principal, name, request);
 
         return OkResponse.success();
     }

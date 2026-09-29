@@ -157,8 +157,12 @@ public class AuditInterceptor implements HandlerInterceptor {
             rule(DELETE, "/api/buckets/{name}/files/{id}", "Ember Penyimpanan", "Hapus berkas", path("name")),
 
             rule(POST, "/api/robots", "Robot", "Buat", body("name")),
+            rule(PUT, "/api/robots/{name}", "Robot", "Ubah", path("name")),
             rule(DELETE, "/api/robots/{name}", "Robot", "Hapus", path("name")),
             rule(POST, "/api/machines", "Mesin", "Buat", body("name")),
+            rule(PUT, "/api/machines/{name}", "Mesin", "Ubah", path("name")),
+            rule(POST, "/api/machines/{name}/key", "Mesin", "Buat machine key", path("name")),
+            rule(DELETE, "/api/machines/{name}/key", "Mesin", "Cabut machine key", path("name")),
             rule(DELETE, "/api/machines/{name}", "Mesin", "Hapus", path("name")),
             rule(POST, "/api/environments", "Lingkungan", "Buat", body("name")),
             rule(DELETE, "/api/environments/{name}", "Lingkungan", "Hapus", path("name")),

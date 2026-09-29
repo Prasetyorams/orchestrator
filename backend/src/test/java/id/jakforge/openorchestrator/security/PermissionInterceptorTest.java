@@ -141,7 +141,7 @@ class PermissionInterceptorTest {
                 .map(rule -> rule.method().name() + " " + rule.pathPattern())
                 .toList();
 
-        assertEquals(List.of("GET /api/health", "POST /api/auth/login"), publicEndpoints);
+        assertEquals(List.of("GET /api/health", "POST /api/auth/login", "POST /api/agent/login"), publicEndpoints);
     }
 
     /** Yang dipanggil JakRunner dan activity Studio selama automasi berjalan. */
@@ -183,6 +183,46 @@ class PermissionInterceptorTest {
 
                 if (!allowed) fail("Peran " + rolePatterns + " tidak bisa memanggil " + endpoint + " (" + rule + ")");
             }
+        }
+    }
+
+    /** Yang dipanggil activity kategori Orchestrator dari dalam workflow, lewat token executor. */
+    private static final List<String> ACTIVITY_ENDPOINTS = List.of(
+            "GET /api/assets/{name}/value",
+            "GET /api/credentials/{name}/value",
+            "POST /api/queues/{name}/items",
+            "POST /api/queues/{name}/next",
+            "POST /api/queues/items/{id}/result",
+            "POST /api/jobs",
+            "GET /api/jobs/{id}");
+
+    @Test
+    @DisplayName("token executor cukup untuk semua activity Orchestrator, dan tidak untuk mengambil job")
+    void executorRunsActivities() {
+        for (String endpoint : ACTIVITY_ENDPOINTS) {
+            PermissionRule rule = ruleFor(endpoint);
+
+            assertNotNull(rule, endpoint);
+
+            boolean allowed = rule.anyOfPermissions().stream()
+                    .anyMatch(permission -> PermissionCatalog.matches(PermissionService.EXECUTOR_PATTERNS, permission));
+
+            if (!allowed) fail("Executor tidak bisa memanggil " + endpoint + " (" + rule + ")");
+        }
+
+        PermissionRule claim = ruleFor("GET /api/jobs/next");
+        assertTrue(claim.anyOfPermissions().stream()
+                .noneMatch(permission -> PermissionCatalog.matches(PermissionService.EXECUTOR_PATTERNS, permission)));
+    }
+
+    @Test
+    @DisplayName("semua endpoint /api/agent kecuali login hanya untuk token agent")
+    void agentEndpointsAreAgentOnly() {
+        for (PermissionRule rule : PermissionInterceptor.RULES) {
+            if (!rule.pathPattern().startsWith("/api/agent/")) continue;
+
+            Access expected = rule.pathPattern().equals("/api/agent/login") ? Access.PUBLIC : Access.AGENT;
+            assertEquals(expected, rule.access(), rule.method() + " " + rule.pathPattern());
         }
     }
 }

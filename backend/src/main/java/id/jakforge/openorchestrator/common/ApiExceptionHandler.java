@@ -44,7 +44,8 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ApiError> handleApiException(ApiException ex) {
-        return errorResponse(ex.status(), ex.getMessage());
+        return ResponseEntity.status(ex.status())
+                .body(new ApiError(ex.getMessage(), ex.errorCode(), ex.state(), ex.minAgentVersion()));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

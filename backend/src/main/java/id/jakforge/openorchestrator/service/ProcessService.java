@@ -83,6 +83,16 @@ public class ProcessService {
                     request.environment() == null ? DEFAULT_ENVIRONMENT : request.environment(),
                     request.description(), folderId);
         }
+
+        if (request.hasRunSettings()) {
+            // Proses baru tanpa folder jatuh ke folder bawaan lewat pemicu
+            // basis data; foldernya baru diketahui sesudah baris itu ada.
+            UUID processFolder = existingFolderId != null ? existingFolderId
+                    : resolveProcessFolder(tenantId, request.name(), folderId);
+
+            processRepository.updateRunSettings(tenantId, processFolder, request.name(), request.timeoutSeconds(),
+                    request.stopGraceSeconds(), request.maxRetries());
+        }
     }
 
     /**

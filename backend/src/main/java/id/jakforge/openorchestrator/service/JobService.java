@@ -8,9 +8,13 @@ import id.jakforge.openorchestrator.dto.request.CreateJobRequest;
 import id.jakforge.openorchestrator.dto.request.UpdateJobStateRequest;
 import id.jakforge.openorchestrator.dto.response.CreatedResponse;
 import id.jakforge.openorchestrator.dto.response.NextJobResponse;
+import id.jakforge.openorchestrator.model.FileContent;
 import id.jakforge.openorchestrator.model.JobState;
+import id.jakforge.openorchestrator.model.JobTransitions;
+import id.jakforge.openorchestrator.model.LogLevel;
 import id.jakforge.openorchestrator.model.Severity;
 import id.jakforge.openorchestrator.repository.AlertRepository;
+import id.jakforge.openorchestrator.repository.AttachmentRepository;
 import id.jakforge.openorchestrator.repository.FolderRepository;
 import id.jakforge.openorchestrator.repository.JobRepository;
 import id.jakforge.openorchestrator.repository.LogRepository;
@@ -20,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -59,6 +64,7 @@ public class JobService {
     private final FolderRepository folderRepository;
     private final LogRepository logRepository;
     private final AlertRepository alertRepository;
+    private final AttachmentRepository attachmentRepository;
     private final FolderAccessService folderAccessService;
     private final OpenOrchestratorProperties properties;
 
@@ -144,36 +150,111 @@ public class JobService {
             throw ApiException.badRequest("Parameter 'robot' wajib diisi.");
         }
 
-        return new NextJobResponse(jobRepository.claimNext(principal.tenantId(), robotName).orElse(null));
+        Map<String, Object> job = jobRepository.claimNext(principal.tenantId(), robotName).orElse(null);
+        if (job == null) return new NextJobResponse(null);
+
+        // Kemampuan jobs.next.package: robot langsung tahu paket, versi, titik
+        // masuk, dan sidiknya — tanpa izin tambahan untuk membaca daftar proses
+        // dan paket, dan tanpa kemungkinan membaca versi yang sudah berganti.
+        UUID jobId = Uuids.parseOrNull((String) job.get("id"));
+        UUID folderId = Uuids.parseOrNull((String) job.get("folderId"));
+        Map<String, Object> plan = jobRepository.findExecutionPlan(principal.tenantId(), folderId,
+                (String) job.get("processName")).orElseGet(HashMap::new);
+
+        job.put("packageName", plan.get("packageName"));
+        job.put("packageVersion", plan.get("packageVersion"));
+        job.put("entryPoint", plan.get("entryPoint"));
+        job.put("packageSha256", plan.get("sha256"));
+
+        jobRepository.recordExecutionPlan(jobId, (String) plan.get("packageName"), (String) plan.get("packageVersion"),
+                (String) plan.get("sha256"), null, null);
+
+        return new NextJobResponse(job);
     }
 
-    @Transactional
+    /**
+     * Laporan keadaan dari robot v1 (JakRunner, atau agent yang masuk dengan
+     * akun pengguna).
+     *
+     * <p>Dua penjagaan ({@code jobs.state.guard}, diminta sisi robot): RUNNING
+     * sesudah STOPPING ditolak 409, dan job yang sudah selesai tidak berubah
+     * lagi — KECUALI kegagalannya kesimpulan server (robot sempat diam), yang
+     * boleh digantikan laporan asli robotnya. Laporan akhir yang ditolak tetap
+     * dicatat di log job, jadi transaksinya tidak dibatalkan oleh 409 itu.
+     */
+    @Transactional(noRollbackFor = ApiException.class)
     public void updateState(OpenOrchestratorPrincipal principal, String jobIdText, UpdateJobStateRequest request) {
         UUID tenantId = principal.tenantId();
         UUID jobId = parseJobId(jobIdText);
 
         JobState state = JobState.parse(request.state());
 
-        if (state == null) {
+        if (state == null || !JobState.V1_STATES.contains(state)) {
             throw ApiException.badRequest("Keadaan tidak dikenal: '" + request.state() + "'.");
         }
 
-        String processName = jobRepository.findProcessName(tenantId, jobId)
+        Map<String, Object> job = jobRepository.lockById(tenantId, jobId)
                 .orElseThrow(() -> ApiException.notFound(JOB_NOT_FOUND));
+
+        String processName = (String) job.get("processName");
+        JobState current = JobState.valueOf((String) job.get("state"));
+
+        if (((Number) job.get("contractVersion")).intValue() == 2) {
+            throw ApiException.conflict("Pekerjaan ini dijalankan Robot Agent; laporannya lewat /api/agent.")
+                    .withCode("AgentJob").withState(current.name());
+        }
+
+        var snapshot = new JobTransitions.Snapshot(current, Boolean.TRUE.equals(job.get("failureInferred")),
+                Boolean.TRUE.equals(job.get("retried")), job.get("stopRequestedAt") != null, 0);
+
+        JobTransitions.Decision decision = JobTransitions.forV1(snapshot, state);
+
+        if (decision.verdict() == JobTransitions.Verdict.REJECT) {
+            if (decision.lateFinal()) {
+                logRepository.insertJobEntry(tenantId, LogLevel.WARN,
+                        "Laporan terlambat dari robot: " + state
+                                + (request.info() == null ? "" : " — " + request.info())
+                                + ". Pekerjaan ini sudah " + current + " dan tidak diubah.",
+                        (String) job.get("robotName"), processName, jobId);
+            }
+
+            throw ApiException.conflict("Pekerjaan ini sudah " + current + "; laporan " + state + " ditolak.")
+                    .withCode("InvalidTransition").withState(current.name());
+        }
+
+        JobState next = decision.state();
 
         // Yang sudah selesai selalu 100%. Pekerjaan berhasil yang tercatat 40%
         // membuat orang mengira ada yang terhenti di tengah.
-        int progress = state.isFinished() ? MAX_PROGRESS : Math.clamp(request.progress(), MIN_PROGRESS, MAX_PROGRESS);
+        int progress = next.isFinished() ? MAX_PROGRESS : Math.clamp(request.progress(), MIN_PROGRESS, MAX_PROGRESS);
 
-        jobRepository.updateState(tenantId, jobId, state, progress, request.info(), request.outputJson());
+        jobRepository.updateState(tenantId, jobId, next, progress, request.info(), request.outputJson(),
+                decision.revived());
 
-        if (state == JobState.FAULTED) {
+        if (next == JobState.FAULTED) {
             alertRepository.insert(tenantId, Severity.Error, "Pekerjaan gagal",
                     processName + " gagal: " + (request.info() == null ? "tanpa keterangan" : request.info()),
                     ALERT_SOURCE);
         }
     }
 
+    /** Lampiran job (screenshot dari Robot Agent), tanpa isinya. */
+    public List<Map<String, Object>> findAttachments(OpenOrchestratorPrincipal principal, String jobId) {
+        return attachmentRepository.findForJob(principal.tenantId(), parseJobId(jobId));
+    }
+
+    public FileContent getAttachment(OpenOrchestratorPrincipal principal, String jobId, String attachmentId) {
+        UUID id = Uuids.parseOrNull(attachmentId);
+        if (id == null) throw ApiException.notFound("Lampiran tidak ada.");
+
+        return attachmentRepository.findContent(principal.tenantId(), parseJobId(jobId), id)
+                .orElseThrow(() -> ApiException.notFound("Lampiran tidak ada."));
+    }
+
+    /**
+     * Minta berhenti. Robot v1 menerimanya di jawaban denyut berikutnya
+     * (StopJob); Robot Agent juga, lalu KillJob kalau jeda berhenti rapinya lewat.
+     */
     public void requestStop(OpenOrchestratorPrincipal principal, String jobId) {
         if (jobRepository.requestStop(principal.tenantId(), parseJobId(jobId)) == 0) {
             throw ApiException.badRequest("Pekerjaan itu tidak sedang menunggu atau berjalan.");

@@ -20,6 +20,14 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
 
+  # Screenshot dari Robot Agent (multipart). Sedikit di atas batas lampiran
+  # (openorchestrator.agent.max-attachment-size), supaya berkas yang terlalu
+  # besar ditolak dengan pesan kita sendiri, bukan pesan bawaan Spring.
+  servlet:
+    multipart:
+      max-file-size: 3MB
+      max-request-size: 4MB
+
 # Seluruh setelan OpenOrchestrator, dibaca ke satu record bertipe: OpenOrchestratorProperties.
 # Nilai yang dulu tertulis di dalam kode ada di sini, supaya bisa diubah lewat
 # variabel lingkungan tanpa membangun ulang — mis. OPENORCHESTRATOR_ROBOT_HEARTBEATTIMEOUT=60s.
@@ -82,6 +90,36 @@ openorchestrator:
     admin-display-name: OpenOrchestrator Administrator
     # Nama mesin tempat OpenOrchestrator berjalan; kosong berarti nama host.
     machine-name: ${OPENORCHESTRATOR_MACHINE_NAME:}
+
+  # Robot Agent unattended: /api/agent, lihat ROBOT-API.md bagian 2.
+  agent:
+    # Umur token yang diberikan saat agent masuk dengan machine key.
+    token-ttl: 1h
+    # Jeda denyut yang diminta dari agent: saat diam, dan selama ada job.
+    heartbeat-seconds: 15
+    heartbeat-busy-seconds: 5
+    # Tanpa denyut selama ini robot tampil Offline, dan job RUNNING-nya
+    # menjadi UNRESPONSIVE — hilang kontak, belum gagal.
+    offline-after: 60s
+    # UNRESPONSIVE selama ini baru dianggap gagal (AgentLost). Workflow di
+    # mesin robot bisa tetap berjalan selama jaringan putus; menggagalkannya
+    # terlalu cepat membuat hasil aslinya ditolak.
+    lost-after: 5m
+    # Job yang baru diambil belum direkonsiliasi selama ini: denyut yang
+    # berangkat sebelum klaim selesai memang belum menyebutnya.
+    reconcile-grace: 30s
+    # Jaring pengaman batas waktu job: agent yang menghitung, Orchestrator
+    # baru turun tangan sesudah batas + jeda stop + selang ini.
+    timeout-margin: 5m
+    # Selang pemeriksaan lease, UNRESPONSIVE, dan batas waktu.
+    monitor-interval: 10s
+    # Agent di bawah versi ini tidak diberi token (426).
+    min-version: ${OPENORCHESTRATOR_AGENT_MIN_VERSION:1.0.0}
+    # Selama ini percobaan ulang tidak diambil robot yang baru gagal.
+    retry-avoid-window: 60s
+    max-attachment-size: 2MB
+    max-attachments-per-job: 5
+    max-output-size: 1MB
 
 management:
   endpoints:

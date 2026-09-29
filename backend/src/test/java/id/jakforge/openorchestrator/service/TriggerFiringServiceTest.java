@@ -20,6 +20,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -59,9 +60,10 @@ class TriggerFiringServiceTest {
         assertEquals(tenantId, jobArgs.get(1));
         assertEquals(folderId, jobArgs.get(2));
         assertEquals("Tagihan", jobArgs.get(3));
-        assertEquals("Trigger", jobArgs.get(6));
-        assertEquals("Normal", jobArgs.get(7), "prioritas kosong berarti Normal");
-        assertEquals("Dijadwalkan oleh pemicu 'Harian'.", jobArgs.get(8));
+        assertNull(jobArgs.get(5), "pemicu tanpa robot: robot mana pun di folder");
+        assertEquals("Trigger", jobArgs.get(7));
+        assertEquals("Normal", jobArgs.get(8), "prioritas kosong berarti Normal");
+        assertEquals("Dijadwalkan oleh pemicu 'Harian'.", jobArgs.get(9));
 
         assertEquals(List.of(OffsetDateTime.parse("2026-09-27T10:30:00Z")), triggers.recordedNextRuns);
         assertEquals(1, database.statementsContaining("INSERT INTO logs").size());

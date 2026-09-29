@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -26,14 +27,29 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class JobRepository {
 
+    /** Keadaan "sedang dipegang robot" untuk SQL. */
+    public static final String HELD_STATES = JobState.sqlList(JobState.HELD);
+
     private static final String LIST_COLUMNS = """
             id, process_name, robot_name, machine_name, state, source, priority,
-            progress, info, created_at, started_at, ended_at, folder_id
+            progress, info, created_at, started_at, ended_at, folder_id,
+            contract_version, attempt, retry_of, error_code, running_at
             """;
 
     private static final String DETAIL_COLUMNS = """
             id, process_name, robot_name, machine_name, state, source, priority,
-            progress, info, input_json, output_json, created_at, started_at, ended_at, folder_id
+            progress, info, input_json, output_json, created_at, started_at, ended_at, folder_id,
+            contract_version, attempt, retry_of, retried, error_code, failure_inferred,
+            lease_expires_at, running_at, unresponsive_since, stop_requested_at,
+            session_id, windows_user, executor_pid, timeout_seconds, stop_grace_seconds,
+            package_name, package_version, package_sha256,
+            (SELECT count(*) FROM job_attachments a WHERE a.job_id = jobs.id) AS attachment_count
+            """;
+
+    /** Yang dikembalikan saat job berubah keadaan — cukup untuk peringatan dan percobaan ulang. */
+    private static final String OUTCOME_COLUMNS = """
+            id, tenant_id, folder_id, process_name, robot_name, robot_id, machine_id, target_robot_name,
+            state, error_code, info, attempt, retried, running_at, source, priority, input_json
             """;
 
     private final Database database;
@@ -95,15 +111,15 @@ public class JobRepository {
                        String machineName, String source, String priority, String info, String inputJson) {
         database.update("""
                 INSERT INTO jobs
-                    (id, tenant_id, folder_id, process_name, robot_name, machine_name, state, source,
-                     priority, progress, info, input_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, 0, ?, ?, now())
-                """, jobId, tenantId, folderId, processName, robotName, machineName, source, priority, info,
-                inputJson);
+                    (id, tenant_id, folder_id, process_name, robot_name, target_robot_name, machine_name,
+                     state, source, priority, progress, info, input_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, 0, ?, ?, now())
+                """, jobId, tenantId, folderId, processName, robotName, robotName, machineName, source, priority,
+                info, inputJson);
     }
 
     /**
-     * Ambil satu pekerjaan untuk sebuah robot, dalam SATU langkah tak terbagi.
+     * Ambil satu pekerjaan untuk sebuah robot v1, dalam SATU langkah tak terbagi.
      *
      * <p>RETURNING mengembalikan baris yang benar-benar diubah, jadi tidak ada
      * kemungkinan salah tebak: mencarinya kembali lewat SELECT terpisah akan
@@ -123,6 +139,7 @@ public class JobRepository {
                    SET state = 'RUNNING',
                        robot_name = ?,
                        started_at = now(),
+                       running_at = now(),
                        info = 'Sedang dijalankan.'
                  WHERE id = (
                        SELECT j.id FROM jobs j
@@ -145,45 +162,204 @@ public class JobRepository {
                         LIMIT 1
                         FOR UPDATE SKIP LOCKED)
              RETURNING id, process_name, robot_name, state, priority, input_json,
-                       created_at, started_at
+                       created_at, started_at, folder_id
                 """, robotName, tenantId, robotName, robotName).stream().findFirst();
     }
 
     /**
-     * Perbarui keadaan.
+     * Ambil satu pekerjaan untuk robot unattended lewat Robot Agent (v2).
+     *
+     * <p>Aturan pilihnya sama dengan {@link #claimNext}, ditambah satu:
+     * percobaan ulang yang baru dibuat tidak diambil robot yang baru saja
+     * gagal menjalankannya, selama {@code avoidSeconds} — memberi robot lain
+     * kesempatan lebih dulu. Sesudah itu siapa pun boleh, termasuk robot yang
+     * sama: satu-satunya robot di folder tidak boleh membuat job tertahan.
+     *
+     * <p>Keadaannya ASSIGNED, bukan RUNNING: agent masih harus menyiapkan
+     * sesi Windows dan menyalakan Executor, dan lease-nya menjaga job yang
+     * agentnya hilang di tengah penyiapan.
+     */
+    public Optional<Map<String, Object>> claimNextForAgent(UUID tenantId, UUID robotId, String robotName,
+                                                           UUID machineId, String machineName, int leaseSeconds,
+                                                           long avoidSeconds) {
+        return database.queryRows("""
+                UPDATE jobs
+                   SET state = 'ASSIGNED',
+                       robot_name = ?,
+                       robot_id = ?,
+                       machine_name = ?,
+                       machine_id = ?,
+                       contract_version = 2,
+                       started_at = now(),
+                       lease_expires_at = now() + make_interval(secs => ?),
+                       info = 'Diambil Robot Agent; menyiapkan sesi.'
+                 WHERE id = (
+                       SELECT j.id FROM jobs j
+                        WHERE j.tenant_id = ?
+                          AND j.state = 'PENDING'
+                          AND (j.robot_name = ?
+                               OR ((j.robot_name IS NULL OR j.robot_name = '')
+                                   AND EXISTS (SELECT 1 FROM folder_robots fr
+                                                WHERE fr.folder_id = j.folder_id AND fr.robot_id = ?)))
+                          AND NOT (j.retry_of IS NOT NULL
+                                   AND j.created_at > now() - make_interval(secs => ?)
+                                   AND EXISTS (SELECT 1 FROM jobs x WHERE x.id = j.retry_of AND x.robot_id = ?))
+                        ORDER BY CASE j.priority
+                                   WHEN 'High' THEN 0
+                                   WHEN 'Normal' THEN 1
+                                   ELSE 2
+                                 END,
+                                 j.created_at
+                        LIMIT 1
+                        FOR UPDATE SKIP LOCKED)
+             RETURNING id, process_name, folder_id, input_json, attempt, priority, lease_expires_at
+                """, robotName, robotId, machineName, machineId, leaseSeconds, tenantId, robotName, robotId,
+                avoidSeconds, robotId).stream().findFirst();
+    }
+
+    /**
+     * Paket dan setelan proses sebuah job: proses dicari lewat nama DAN folder.
+     *
+     * <p>LEFT JOIN ke paket: proses yang paketnya sudah dihapus tetap
+     * menghasilkan baris, dengan medan paket kosong — robot yang menerimanya
+     * melaporkan PackageNotFound, bukan menunggu selamanya.
+     */
+    public Optional<Map<String, Object>> findExecutionPlan(UUID tenantId, UUID folderId, String processName) {
+        return database.queryRow("""
+                SELECT p.package_name, p.package_version, p.timeout_seconds, p.stop_grace_seconds, p.max_retries,
+                       k.entry_point, k.sha256, k.size_bytes
+                  FROM processes p
+                  LEFT JOIN packages k
+                         ON k.tenant_id = p.tenant_id AND k.name = p.package_name AND k.version = p.package_version
+                 WHERE p.tenant_id = ? AND p.folder_id = ? AND p.name = ?
+                """, tenantId, folderId, processName);
+    }
+
+    /** Paket yang benar-benar dijalankan, dicatat saat diambil — proses bisa pindah versi sesudahnya. */
+    public void recordExecutionPlan(UUID jobId, String packageName, String packageVersion, String sha256,
+                                    Integer timeoutSeconds, Integer stopGraceSeconds) {
+        database.update("""
+                UPDATE jobs
+                   SET package_name = ?, package_version = ?, package_sha256 = ?,
+                       timeout_seconds = ?, stop_grace_seconds = ?
+                 WHERE id = ?
+                """, packageName, packageVersion, sha256, timeoutSeconds, stopGraceSeconds, jobId);
+    }
+
+    /** Job robot di mesin ini yang sedang dipegang — untuk batas slot mesin. */
+    public long countHeldOnMachine(UUID machineId) {
+        return database.count("SELECT count(*) FROM jobs WHERE machine_id = ? AND contract_version = 2 AND state IN "
+                + HELD_STATES, machineId);
+    }
+
+    /** Satu robot = satu akun Windows = satu job pada satu waktu. */
+    public boolean robotHoldsJob(UUID robotId) {
+        return database.exists("SELECT count(*) FROM jobs WHERE robot_id = ? AND contract_version = 2 AND state IN "
+                + HELD_STATES, robotId);
+    }
+
+    /**
+     * Job beserta mesin robotnya, DIKUNCI sampai transaksi selesai.
+     *
+     * <p>Dikunci supaya dua laporan untuk job yang sama — kiriman ulang dari
+     * outbox yang kebetulan bersamaan — tidak sama-sama membaca {@code last_seq}
+     * yang lama lalu sama-sama menerapkan dirinya.
+     */
+    public Optional<Map<String, Object>> lockById(UUID tenantId, UUID jobId) {
+        return database.queryRow("""
+                SELECT j.id, j.tenant_id, j.folder_id, j.process_name, j.robot_name, j.robot_id, j.machine_id,
+                       j.state, j.contract_version, j.failure_inferred, j.retried, j.last_seq, j.attempt,
+                       j.stop_requested_at, j.running_at, j.error_code
+                  FROM jobs j
+                 WHERE j.tenant_id = ? AND j.id = ?
+                 FOR UPDATE
+                """, tenantId, jobId);
+    }
+
+    /**
+     * Perbarui keadaan dari laporan v1.
      *
      * <p>COALESCE pada info dan output: medan yang tidak dikirim TIDAK menghapus
      * yang sudah ada. Robot melaporkan kemajuan berkali-kali dan hanya mengisi
      * sebagian medan tiap kali.
+     *
+     * @param revived kegagalan hasil kesimpulan server digantikan laporan robot
      */
     public void updateState(UUID tenantId, UUID jobId, JobState state, int progress,
-                            String info, String outputJson) {
+                            String info, String outputJson, boolean revived) {
         database.update("""
                 UPDATE jobs
                    SET state = ?,
                        progress = ?,
                        info = COALESCE(?, info),
                        output_json = COALESCE(?, output_json),
-                       ended_at = CASE WHEN ? THEN now() ELSE ended_at END
+                       running_at = CASE WHEN ? = 'RUNNING' THEN COALESCE(running_at, now()) ELSE running_at END,
+                       ended_at = CASE WHEN ? THEN COALESCE(CASE WHEN ? THEN NULL ELSE ended_at END, now())
+                                       ELSE NULL END,
+                       failure_inferred = CASE WHEN ? THEN FALSE ELSE failure_inferred END,
+                       error_code = CASE WHEN ? THEN NULL ELSE error_code END
                  WHERE tenant_id = ? AND id = ?
-                """, state.name(), progress, info, outputJson, state.isFinished(), tenantId, jobId);
+                """, state.name(), progress, info, outputJson, state.name(), state.isFinished(), revived,
+                revived, revived, tenantId, jobId);
+    }
+
+    /**
+     * Terapkan laporan agent v2.
+     *
+     * <p>Konteks eksekusi (sesi, akun Windows, PID Executor) memakai COALESCE:
+     * agent mengirimnya sekali saat tahu, bukan di setiap laporan.
+     */
+    public void applyAgentReport(UUID jobId, JobState state, long seq, Integer progress, String info,
+                                 String errorCode, String outputJson, Integer sessionId, String windowsUser,
+                                 Integer executorPid, int leaseSeconds, boolean revived) {
+        boolean finished = state.isFinished();
+        boolean leased = state == JobState.ASSIGNED || state == JobState.PREPARING_SESSION;
+
+        database.update("""
+                UPDATE jobs
+                   SET state = ?,
+                       last_seq = ?,
+                       progress = CASE WHEN ? THEN 100 ELSE COALESCE(?, progress) END,
+                       info = COALESCE(?, info),
+                       error_code = CASE WHEN ? THEN ? WHEN ? THEN NULL ELSE error_code END,
+                       output_json = CASE WHEN ? THEN COALESCE(?, output_json) ELSE output_json END,
+                       session_id = COALESCE(?, session_id),
+                       windows_user = COALESCE(?, windows_user),
+                       executor_pid = COALESCE(?, executor_pid),
+                       running_at = CASE WHEN ? = 'RUNNING' THEN COALESCE(running_at, now()) ELSE running_at END,
+                       lease_expires_at = CASE WHEN ? THEN now() + make_interval(secs => ?) ELSE lease_expires_at END,
+                       unresponsive_since = NULL,
+                       failure_inferred = CASE WHEN ? THEN FALSE ELSE failure_inferred END,
+                       ended_at = CASE WHEN ? THEN COALESCE(CASE WHEN ? THEN NULL ELSE ended_at END, now())
+                                       ELSE NULL END
+                 WHERE id = ?
+                """, state.name(), seq, finished, progress, info, finished, errorCode, revived, finished,
+                outputJson, sessionId, windowsUser, executorPid, state.name(), leased, leaseSeconds, revived,
+                finished, revived, jobId);
+    }
+
+    /** Laporan lama yang terlambat: hanya nomor urutnya yang dicatat, supaya kiriman ulangnya dijawab DUPLICATE. */
+    public void recordSeq(UUID jobId, long seq) {
+        database.update("UPDATE jobs SET last_seq = GREATEST(last_seq, ?) WHERE id = ?", seq, jobId);
     }
 
     /**
      * Minta berhenti.
      *
-     * <p>Yang RUNNING menjadi STOPPING, bukan langsung STOPPED: yang benar-benar
-     * bisa menghentikan proses adalah robotnya, dan ia baru tahu pada denyut
-     * berikutnya. Yang masih PENDING belum dipegang siapa pun, jadi boleh
-     * langsung berhenti.
+     * <p>Yang sedang dipegang robot menjadi STOPPING, bukan langsung STOPPED:
+     * yang benar-benar bisa menghentikan proses adalah robotnya, dan ia baru
+     * tahu pada denyut berikutnya. Yang masih PENDING belum dipegang siapa
+     * pun, jadi boleh langsung berhenti.
      */
     public int requestStop(UUID tenantId, UUID jobId) {
         return database.update("""
                 UPDATE jobs
                    SET state = CASE WHEN state = 'PENDING' THEN 'STOPPED' ELSE 'STOPPING' END,
                        info = 'Diminta berhenti.',
+                       stop_requested_at = COALESCE(stop_requested_at, now()),
                        ended_at = CASE WHEN state = 'PENDING' THEN now() ELSE ended_at END
-                 WHERE tenant_id = ? AND id = ? AND state IN ('PENDING', 'RUNNING')
+                 WHERE tenant_id = ? AND id = ?
+                   AND state IN ('PENDING', 'RUNNING', 'ASSIGNED', 'PREPARING_SESSION', 'UNRESPONSIVE')
                 """, tenantId, jobId);
     }
 
@@ -191,13 +367,208 @@ public class JobRepository {
         return database.update("DELETE FROM jobs WHERE tenant_id = ? AND id = ?", tenantId, jobId);
     }
 
+    // -----------------------------------------------------------------
+    // Perintah untuk robot
+    // -----------------------------------------------------------------
+
+    /** Job robot v1 yang diminta berhenti — dikirim di jawaban denyutnya. */
+    public List<Map<String, Object>> findStopRequestsForV1Robot(UUID tenantId, String robotName) {
+        return database.queryRows("""
+                SELECT id FROM jobs
+                 WHERE tenant_id = ? AND robot_name = ? AND state = 'STOPPING' AND contract_version = 1
+                """, tenantId, robotName);
+    }
+
     /**
-     * Tandai gagal pekerjaan yang robotnya berhenti berdenyut.
+     * Job di mesin ini yang diminta berhenti, beserta apakah jeda berhenti
+     * rapinya sudah lewat — sesudah itu perintahnya menjadi kill.
+     */
+    public List<Map<String, Object>> findStopRequestsForMachine(UUID machineId, int defaultGraceSeconds) {
+        return database.queryRows("""
+                SELECT id, COALESCE(stop_grace_seconds, ?) AS grace_seconds,
+                       now() > COALESCE(stop_requested_at, now())
+                               + make_interval(secs => COALESCE(stop_grace_seconds, ?)) AS kill
+                  FROM jobs
+                 WHERE machine_id = ? AND contract_version = 2 AND state = 'STOPPING'
+                """, defaultGraceSeconds, defaultGraceSeconds, machineId);
+    }
+
+    /**
+     * Dari job yang dilaporkan agent masih ia pegang: yang menurut
+     * Orchestrator sudah selesai. Agent harus menghentikannya — misalnya job
+     * yang sudah diulang di robot lain karena lease-nya habis.
+     */
+    public List<Map<String, Object>> findFinishedAmong(UUID machineId, Collection<UUID> jobIds) {
+        if (jobIds.isEmpty()) return List.of();
+
+        List<Object> args = new ArrayList<>(List.of(machineId));
+        args.addAll(jobIds);
+
+        return database.queryRows("""
+                SELECT id, stop_grace_seconds FROM jobs
+                 WHERE machine_id = ? AND id IN (%s) AND state IN ('SUCCESSFUL', 'FAULTED', 'STOPPED')
+                """.formatted(Database.placeholders(jobIds.size())), args.toArray());
+    }
+
+    // -----------------------------------------------------------------
+    // Rekonsiliasi dari denyut agent
+    // -----------------------------------------------------------------
+
+    /**
+     * Job yang dilaporkan agent masih ia pegang: perpanjang lease penyiapan,
+     * pulihkan yang sempat UNRESPONSIVE, dan hidupkan kembali yang
+     * kegagalannya hanya kesimpulan server (selama belum diulang).
+     */
+    public int confirmHeldJobs(UUID robotId, Collection<UUID> jobIds, int leaseSeconds) {
+        if (jobIds.isEmpty()) return 0;
+
+        List<Object> args = new ArrayList<>(List.of(leaseSeconds, robotId));
+        args.addAll(jobIds);
+
+        return database.update("""
+                UPDATE jobs
+                   SET state = CASE
+                                 WHEN state IN ('ASSIGNED', 'PREPARING_SESSION', 'RUNNING', 'STOPPING') THEN state
+                                 WHEN stop_requested_at IS NOT NULL THEN 'STOPPING'
+                                 WHEN running_at IS NULL THEN 'PREPARING_SESSION'
+                                 ELSE 'RUNNING'
+                               END,
+                       lease_expires_at = CASE
+                                            WHEN running_at IS NULL THEN now() + make_interval(secs => ?)
+                                            ELSE lease_expires_at
+                                          END,
+                       unresponsive_since = NULL,
+                       info = CASE WHEN state IN ('UNRESPONSIVE', 'FAULTED', 'STOPPED')
+                                   THEN 'Robot Agent kembali; pekerjaan masih berjalan.' ELSE info END,
+                       ended_at = CASE WHEN state IN ('FAULTED', 'STOPPED') THEN NULL ELSE ended_at END,
+                       error_code = CASE WHEN state IN ('FAULTED', 'STOPPED') THEN NULL ELSE error_code END,
+                       failure_inferred = FALSE
+                 WHERE robot_id = ? AND contract_version = 2 AND id IN (%s)
+                   AND (state IN ('ASSIGNED', 'PREPARING_SESSION', 'RUNNING', 'STOPPING', 'UNRESPONSIVE')
+                        OR (state IN ('FAULTED', 'STOPPED') AND failure_inferred AND NOT retried))
+                """.formatted(Database.placeholders(jobIds.size())), args.toArray());
+    }
+
+    /**
+     * Job yang menurut Orchestrator dipegang robot ini, tapi TIDAK disebut
+     * agent — agent-nya sudah tidak menjalankannya (dimulai ulang, atau job
+     * hilang). Yang sudah diminta berhenti menjadi STOPPED; sisanya FAULTED
+     * dengan AgentRestarted.
+     *
+     * <p>Job yang baru diambil dalam {@code graceSeconds} terakhir tidak
+     * disentuh: denyut yang berangkat sebelum klaimnya selesai memang belum
+     * menyebutnya.
+     *
+     * <p>"Disebut" berarti masih berjalan ATAU laporan akhirnya masih antre di
+     * outbox agent — keduanya belum selesai dilaporkan.
+     */
+    public List<Map<String, Object>> failUnreportedJobs(UUID robotId, Collection<UUID> reportedIds,
+                                                        int graceSeconds) {
+        List<Object> args = new ArrayList<>(List.of(robotId, graceSeconds));
+        String exclusion = "";
+
+        if (!reportedIds.isEmpty()) {
+            exclusion = " AND id NOT IN (" + Database.placeholders(reportedIds.size()) + ")";
+            args.addAll(reportedIds);
+        }
+
+        return database.queryRows("""
+                UPDATE jobs
+                   SET state = CASE WHEN stop_requested_at IS NOT NULL THEN 'STOPPED' ELSE 'FAULTED' END,
+                       error_code = CASE WHEN stop_requested_at IS NOT NULL THEN error_code ELSE 'AgentRestarted' END,
+                       failure_inferred = TRUE,
+                       progress = 100,
+                       ended_at = now(),
+                       info = 'Robot Agent tidak lagi menjalankan pekerjaan ini.'
+                 WHERE robot_id = ? AND contract_version = 2
+                   AND state IN ('ASSIGNED', 'PREPARING_SESSION', 'RUNNING', 'STOPPING', 'UNRESPONSIVE')
+                   AND started_at < now() - make_interval(secs => ?)%s
+             RETURNING %s
+                """.formatted(exclusion, OUTCOME_COLUMNS), args.toArray());
+    }
+
+    // -----------------------------------------------------------------
+    // Pemantauan berkala (JobSupervisionService)
+    // -----------------------------------------------------------------
+
+    /** Lease penyiapan habis tanpa kabar: agent hilang sebelum workflow mulai. */
+    public List<Map<String, Object>> expireLeases() {
+        return database.queryRows("""
+                UPDATE jobs
+                   SET state = 'FAULTED',
+                       error_code = 'LeaseExpired',
+                       failure_inferred = TRUE,
+                       progress = 100,
+                       ended_at = now(),
+                       info = 'Robot Agent tidak memberi kabar selama penyiapan (lease habis).'
+                 WHERE contract_version = 2
+                   AND state IN ('ASSIGNED', 'PREPARING_SESSION')
+                   AND lease_expires_at < now()
+             RETURNING %s
+                """.formatted(OUTCOME_COLUMNS));
+    }
+
+    /** Agent berhenti berdenyut saat job berjalan: hilang kontak, belum gagal. */
+    public List<Map<String, Object>> markUnresponsive(long silenceSeconds) {
+        return database.queryRows("""
+                UPDATE jobs j
+                   SET state = 'UNRESPONSIVE',
+                       unresponsive_since = now(),
+                       info = 'Robot Agent tidak berdenyut; menunggu kabar.'
+                  FROM robots r
+                 WHERE j.contract_version = 2
+                   AND j.state IN ('RUNNING', 'STOPPING')
+                   AND r.id = j.robot_id
+                   AND (r.last_heartbeat_at IS NULL OR r.last_heartbeat_at < now() - make_interval(secs => ?))
+             RETURNING j.id, j.tenant_id, j.process_name, j.robot_name
+                """, silenceSeconds);
+    }
+
+    /** Terlalu lama tanpa kabar: dianggap gagal (atau berhenti, kalau memang diminta berhenti). */
+    public List<Map<String, Object>> markLost(long lostSeconds) {
+        return database.queryRows("""
+                UPDATE jobs
+                   SET state = CASE WHEN stop_requested_at IS NOT NULL THEN 'STOPPED' ELSE 'FAULTED' END,
+                       error_code = 'AgentLost',
+                       failure_inferred = TRUE,
+                       progress = 100,
+                       ended_at = now(),
+                       info = 'Robot Agent tidak memberi kabar terlalu lama; pekerjaan dianggap gagal.'
+                 WHERE contract_version = 2
+                   AND state = 'UNRESPONSIVE'
+                   AND unresponsive_since < now() - make_interval(secs => ?)
+             RETURNING %s
+                """.formatted(OUTCOME_COLUMNS), lostSeconds);
+    }
+
+    /**
+     * Jaring pengaman batas waktu: agent yang seharusnya menghentikan job pada
+     * batasnya ternyata tidak melakukannya. Orchestrator memintanya berhenti.
+     */
+    public List<Map<String, Object>> requestTimeoutStops(long marginSeconds) {
+        return database.queryRows("""
+                UPDATE jobs
+                   SET state = 'STOPPING',
+                       stop_requested_at = now(),
+                       info = 'Melewati batas waktu proses; Orchestrator meminta berhenti.'
+                 WHERE contract_version = 2
+                   AND state = 'RUNNING'
+                   AND timeout_seconds IS NOT NULL
+                   AND running_at < now() - make_interval(secs => timeout_seconds + COALESCE(stop_grace_seconds, 30) + ?)
+             RETURNING id, tenant_id, process_name, robot_name
+                """, marginSeconds);
+    }
+
+    /**
+     * Tandai gagal pekerjaan v1 yang robotnya berhenti berdenyut.
      *
      * <p>RETURNING dipakai supaya peringatan hanya dibuat untuk baris yang
      * BENAR-BENAR berubah. Memilih dulu lalu memperbarui membuka celah:
      * pekerjaan yang selesai di antara kedua langkah tetap mendapat peringatan
      * "terputus" padahal berhasil.
+     *
+     * <p>Kegagalan ini kesimpulan, jadi {@code failure_inferred}: laporan akhir
+     * robot yang datang sesudahnya masih diterima.
      *
      * @param silenceSeconds berapa lama robotnya diam sebelum dianggap terputus
      */
@@ -207,17 +578,83 @@ public class JobRepository {
                    SET state = 'FAULTED',
                        info = 'Robot ' || COALESCE(j.robot_name, '?')
                               || ' berhenti berdenyut saat pekerjaan masih berjalan.',
+                       failure_inferred = TRUE,
                        ended_at = now()
                   FROM (SELECT j2.id
                           FROM jobs j2
                           LEFT JOIN robots r
                                  ON r.tenant_id = j2.tenant_id AND r.name = j2.robot_name
                          WHERE j2.state = 'RUNNING'
+                           AND j2.contract_version = 1
                            AND (r.last_heartbeat_at IS NULL
                                 OR now() - r.last_heartbeat_at > make_interval(secs => ?))
                          FOR UPDATE OF j2 SKIP LOCKED) AS stale
                  WHERE j.id = stale.id AND j.state = 'RUNNING'
              RETURNING j.id, j.tenant_id, j.process_name, j.robot_name
                 """, silenceSeconds);
+    }
+
+    // -----------------------------------------------------------------
+    // Percobaan ulang
+    // -----------------------------------------------------------------
+
+    /** Setelan percobaan ulang proses sebuah job. */
+    public int findMaxRetries(UUID tenantId, UUID folderId, String processName) {
+        return database.queryScalar("""
+                SELECT max_retries FROM processes WHERE tenant_id = ? AND folder_id = ? AND name = ?
+                """, tenantId, folderId, processName)
+                .map(value -> ((Number) value).intValue())
+                .orElse(0);
+    }
+
+    /**
+     * Job baru untuk mengulang yang gagal. Robot sasarannya sama dengan
+     * permintaan ASLI — bukan robot yang kebetulan mengambilnya.
+     *
+     * @return false kalau job lama sudah pernah diulang (dua pemanggil bersamaan)
+     */
+    public boolean insertRetry(UUID retryId, Map<String, Object> failed, String info) {
+        int marked = database.update("UPDATE jobs SET retried = TRUE WHERE id = ? AND NOT retried",
+                UUID.fromString((String) failed.get("id")));
+
+        if (marked == 0) return false;
+
+        database.update("""
+                INSERT INTO jobs
+                    (id, tenant_id, folder_id, process_name, robot_name, target_robot_name, state, source,
+                     priority, progress, info, input_json, created_at, attempt, retry_of)
+                SELECT ?, tenant_id, folder_id, process_name, target_robot_name, target_robot_name, 'PENDING',
+                       'Retry', priority, 0, ?, input_json, now(), attempt + 1, id
+                  FROM jobs WHERE id = ?
+                """, retryId, info, UUID.fromString((String) failed.get("id")));
+
+        return true;
+    }
+
+    // -----------------------------------------------------------------
+    // Akses agent dan executor
+    // -----------------------------------------------------------------
+
+    /** Agent boleh mengunduh paket yang dijalankan job robot di mesinnya. */
+    public boolean machineRunsPackage(UUID machineId, String packageName, String packageVersion) {
+        return database.exists("""
+                SELECT count(*) FROM jobs
+                 WHERE machine_id = ? AND contract_version = 2 AND package_name = ? AND package_version = ?
+                   AND state IN %s
+                """.formatted(HELD_STATES), machineId, packageName, packageVersion);
+    }
+
+    /** Pemilik sebuah job — untuk memeriksa bahwa catatan agent memang tentang job mesinnya. */
+    public Optional<Map<String, Object>> findOwnership(UUID tenantId, UUID jobId) {
+        return database.queryRow("""
+                SELECT id, machine_id, robot_name, process_name, contract_version
+                  FROM jobs WHERE tenant_id = ? AND id = ?
+                """, tenantId, jobId);
+    }
+
+    /** Token executor hanya berlaku selama job-nya dipegang robot. */
+    public boolean isHeld(UUID tenantId, UUID jobId) {
+        return database.exists("SELECT count(*) FROM jobs WHERE tenant_id = ? AND id = ? AND state IN " + HELD_STATES,
+                tenantId, jobId);
     }
 }

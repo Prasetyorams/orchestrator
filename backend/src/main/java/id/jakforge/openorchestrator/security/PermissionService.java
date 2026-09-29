@@ -34,6 +34,16 @@ public class PermissionService implements PermissionChecker {
     private record CachedPatterns(Set<String> patterns, Instant expiresAt) {
     }
 
+    /**
+     * Yang boleh dilakukan Executor lewat token job-nya: yang dipanggil activity
+     * kategori Orchestrator — aset dan kredensial, antrean, ember, Start Job,
+     * catatan. Tidak lebih: token itu hidup di mesin robot, di tangan workflow
+     * yang ditulis siapa saja.
+     */
+    static final Set<String> EXECUTOR_PATTERNS = Set.of(
+            "assets.read", "queues.read", "queues.update", "buckets.read", "buckets.update",
+            "jobs.read", "jobs.create", "processes.read", "logs.create");
+
     private final UserRepository userRepository;
     private final OpenOrchestratorProperties properties;
     private final Clock clock;
@@ -42,6 +52,11 @@ public class PermissionService implements PermissionChecker {
 
     /** Pola izin peran orang itu saat ini; kosong untuk pengguna nonaktif atau yang sudah dihapus. */
     public Set<String> patternsOf(OpenOrchestratorPrincipal principal) {
+        // Agent tidak memegang izin peran sama sekali — yang boleh ia panggil
+        // ditentukan PermissionInterceptor (Access.AGENT), bukan izin.
+        if (principal.isAgent()) return Set.of();
+        if (principal.isExecutor()) return EXECUTOR_PATTERNS;
+
         Instant now = clock.instant();
         CachedPatterns cached = cache.get(principal.userId());
 

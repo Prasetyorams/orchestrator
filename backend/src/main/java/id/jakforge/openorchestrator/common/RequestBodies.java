@@ -1,5 +1,6 @@
 package id.jakforge.openorchestrator.common;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -25,6 +26,58 @@ import java.util.Map;
 public final class RequestBodies {
 
     private RequestBodies() {
+    }
+
+    // -----------------------------------------------------------------
+    // Nilai yang boleh tidak ada — "tidak dikirim" berbeda dari 0 atau false
+    // -----------------------------------------------------------------
+
+    /** Bilangan bulat, atau null kalau tidak dikirim atau tidak bisa dibaca. */
+    public static Integer optionalInteger(Map<String, Object> body, String field) {
+        Double value = optionalDecimal(body, field);
+        return value == null ? null : value.intValue();
+    }
+
+    public static Long optionalLong(Map<String, Object> body, String field) {
+        Object value = valueOf(body, field);
+        if (value == null) return null;
+        if (value instanceof Number number) return number.longValue();
+
+        try {
+            return Long.parseLong(String.valueOf(value).trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    public static Double optionalDecimal(Map<String, Object> body, String field) {
+        Object value = valueOf(body, field);
+        if (value == null) return null;
+        if (value instanceof Number number) return number.doubleValue();
+
+        try {
+            return Double.parseDouble(String.valueOf(value).trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    public static Boolean optionalBool(Map<String, Object> body, String field) {
+        Object value = valueOf(body, field);
+        if (value == null) return null;
+
+        return bool(body, field, false);
+    }
+
+    /** Objek bersarang, atau peta kosong kalau tidak ada. */
+    @SuppressWarnings("unchecked")
+    public static Map<String, Object> object(Map<String, Object> body, String field) {
+        return valueOf(body, field) instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
+    }
+
+    /** Daftar, atau daftar kosong kalau tidak ada. */
+    public static List<?> list(Map<String, Object> body, String field) {
+        return valueOf(body, field) instanceof List<?> list ? list : List.of();
     }
 
     /** Teks apa adanya, atau null kalau tidak dikirim atau kosong. */

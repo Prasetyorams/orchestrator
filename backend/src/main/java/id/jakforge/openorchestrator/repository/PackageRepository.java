@@ -37,7 +37,7 @@ public class PackageRepository {
         }
 
         return database.queryRows("""
-                SELECT id, name, version, description, entry_point, published_by, published_at, size_bytes
+                SELECT id, name, version, description, entry_point, published_by, published_at, size_bytes, sha256
                   FROM packages
                  WHERE tenant_id = ?%s
                  ORDER BY name, published_at DESC
@@ -55,25 +55,27 @@ public class PackageRepository {
      * tidak boleh MENGHAPUS isi paket yang sudah ada.
      */
     public void update(UUID tenantId, String name, String version, String description,
-                       String entryPoint, String publishedBy, long sizeBytes, byte[] content) {
+                       String entryPoint, String publishedBy, long sizeBytes, byte[] content, String sha256) {
         database.update("""
                 UPDATE packages
                    SET description = ?, entry_point = ?, published_by = ?,
                        published_at = now(), size_bytes = ?,
-                       content = COALESCE(?, content)
+                       content = COALESCE(?, content),
+                       sha256 = COALESCE(?, sha256)
                  WHERE tenant_id = ? AND name = ? AND version = ?
-                """, description, entryPoint, publishedBy, sizeBytes, content, tenantId, name, version);
+                """, description, entryPoint, publishedBy, sizeBytes, content, sha256, tenantId, name, version);
     }
 
+    /** @param sha256 sidik isi paket (heksa kecil), dicocokkan robot sebelum menjalankannya */
     public void insert(UUID tenantId, String name, String version, String description,
-                       String entryPoint, String publishedBy, long sizeBytes, byte[] content) {
+                       String entryPoint, String publishedBy, long sizeBytes, byte[] content, String sha256) {
         database.update("""
                 INSERT INTO packages
                     (id, tenant_id, name, version, description, entry_point,
-                     published_by, published_at, size_bytes, content)
-                VALUES (?, ?, ?, ?, ?, ?, ?, now(), ?, ?)
+                     published_by, published_at, size_bytes, content, sha256)
+                VALUES (?, ?, ?, ?, ?, ?, ?, now(), ?, ?, ?)
                 """, UUID.randomUUID(), tenantId, name, version, description, entryPoint, publishedBy,
-                sizeBytes, content);
+                sizeBytes, content, sha256);
     }
 
     /**

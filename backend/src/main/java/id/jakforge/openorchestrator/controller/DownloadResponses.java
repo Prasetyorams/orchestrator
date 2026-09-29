@@ -24,4 +24,14 @@ final class DownloadResponses {
                         ContentDisposition.attachment().filename(file.fileName()).build().toString())
                 .body(file.content());
     }
+
+    /** Tampil di peramban (gambar), bukan diunduh. */
+    static ResponseEntity<byte[]> inline(FileContent file) {
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(file.contentType()))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.inline().filename(file.fileName()).build().toString())
+                .header("X-Content-Type-Options", "nosniff")
+                .body(file.content());
+    }
 }

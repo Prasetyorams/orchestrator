@@ -26,7 +26,14 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class DashboardRepository {
 
-    private static final String UNFINISHED_STATES = "('PENDING', 'RUNNING', 'STOPPING')";
+    private static final String UNFINISHED_STATES =
+            "('PENDING', 'ASSIGNED', 'PREPARING_SESSION', 'RUNNING', 'STOPPING', 'UNRESPONSIVE')";
+
+    /**
+     * Dihitung sebagai "berjalan" di kartu dasbor: job Robot Agent yang sedang
+     * menyiapkan sesi atau hilang kontak juga sedang memegang robotnya.
+     */
+    private static final String RUNNING_STATES = "('ASSIGNED', 'PREPARING_SESSION', 'RUNNING', 'UNRESPONSIVE')";
 
     /**
      * Awal hari, minggu (Senin), bulan, dan tahun ini — tengah malam di zona
@@ -83,7 +90,7 @@ public class DashboardRepository {
         return database.queryRow("""
                 WITH period_start AS (SELECT ?::timestamptz AS today_start, ?::timestamptz AS week_start,
                                              ?::timestamptz AS month_start, ?::timestamptz AS year_start)
-                SELECT count(*) FILTER (WHERE j.state = 'RUNNING')  AS running,
+                SELECT count(*) FILTER (WHERE j.state IN %2$s)      AS running,
                        count(*) FILTER (WHERE j.state = 'PENDING')  AS pending,
                        count(*) FILTER (WHERE j.state = 'STOPPING') AS stopping,
                        count(*) FILTER (WHERE j.state = 'SUCCESSFUL' AND j.ended_at >= s.today_start) AS today_successful,
@@ -103,8 +110,8 @@ public class DashboardRepository {
                        count(*) FILTER (WHERE j.state = 'STOPPED'    AND j.ended_at >= s.year_start)  AS year_stopped,
                        count(*) FILTER (WHERE j.created_at >= s.year_start)                            AS year_total
                   FROM jobs j CROSS JOIN period_start s
-                 WHERE j.tenant_id = ?%s
-                """.formatted(folderFilter), args.toArray()).orElseGet(LinkedHashMap::new);
+                 WHERE j.tenant_id = ?%1$s
+                """.formatted(folderFilter, RUNNING_STATES), args.toArray()).orElseGet(LinkedHashMap::new);
     }
 
     /**
@@ -156,11 +163,11 @@ public class DashboardRepository {
                 SELECT id, process_name, robot_name, machine_name, state, source, priority,
                        progress, info, created_at, started_at
                   FROM jobs
-                 WHERE tenant_id = ? AND state IN ('RUNNING', 'PENDING', 'STOPPING')%s
+                 WHERE tenant_id = ? AND state IN %s%s
                  ORDER BY CASE state WHEN 'RUNNING' THEN 0 WHEN 'STOPPING' THEN 1 ELSE 2 END,
                           created_at
                  LIMIT ?
-                """.formatted(folderFilter), args.toArray());
+                """.formatted(UNFINISHED_STATES, folderFilter), args.toArray());
     }
 
     /**

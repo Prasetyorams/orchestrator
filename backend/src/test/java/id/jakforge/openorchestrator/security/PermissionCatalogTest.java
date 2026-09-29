@@ -90,9 +90,9 @@ class PermissionCatalogTest {
     }
 
     @Test
-    @DisplayName("katalog berisi 57 izin, dalam urutan baris matriks layar Peran")
+    @DisplayName("katalog berisi 58 izin, dalam urutan baris matriks layar Peran")
     void catalogShape() {
-        assertEquals(57, PermissionCatalog.expand(List.of("*")).size());
+        assertEquals(58, PermissionCatalog.expand(List.of("*")).size());
         assertEquals("processes", PermissionCatalog.RESOURCES.getFirst().key());
         assertEquals("settings", PermissionCatalog.RESOURCES.getLast().key());
     }

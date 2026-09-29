@@ -29,7 +29,8 @@ import java.util.List;
 public class SecurityConfig {
 
     /** Satu-satunya jalur yang boleh dicapai tanpa token. Sama dengan PermissionInterceptor.PUBLIC. */
-    private static final String[] PUBLIC_PATHS = { "/", "/actuator/health", "/api/health", "/api/auth/login" };
+    private static final String[] PUBLIC_PATHS =
+            { "/", "/actuator/health", "/api/health", "/api/auth/login", "/api/agent/login" };
 
     private static final List<String> ALLOWED_METHODS = List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
     private static final List<String> ALLOWED_HEADERS = List.of(HttpHeaders.AUTHORIZATION, HttpHeaders.CONTENT_TYPE);

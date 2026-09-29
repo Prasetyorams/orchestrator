@@ -1,569 +1,414 @@
 # Kontrak API Robot ↔ Open Orchestrator
 
-Status: **DRAF untuk direview sisi robot.** Belum ada yang diimplementasikan
-dari bagian v2. Dasar keputusan: jawaban di `PERTANYAAN-UNATTENDED.md`
-(repo Studio, cabang `claude/charming-carson-joglwt`, 29 September 2026).
+Status: **v2 sudah diimplementasikan di Orchestrator** (migrasi `V8__agent_unattended.sql`),
+dengan semua perubahan wajib W1–W6 dan saran dari
+`docs/ROBOT-API-tanggapan-robot.md` di repo Studio. Sudah diuji ujung-ke-ujung dengan
+agent tiruan melawan PostgreSQL sungguhan (83 pemeriksaan). Belum diuji melawan
+Robot Agent sungguhan di VM.
 
 Dokumen ini punya dua bagian:
 
-- **v1** — API yang berlaku sekarang, dipakai JakRunner (attended), Studio,
-  dan activities `Custom.Orchestrator`. Tetap didukung selama JakRunner
-  attended masih dipakai.
-- **v2** — API baru untuk Robot Agent unattended (layanan Windows, satu per
-  mesin). Seluruhnya di bawah `/api/agent/`. Tidak mengubah perilaku v1.
+- **v1** — API untuk JakRunner (attended), Studio, activities `Custom.Orchestrator`, dan
+  Robot Agent yang masuk dengan akun pengguna. Tetap didukung.
+- **v2** — API untuk Robot Agent unattended (layanan Windows, satu per mesin), di bawah
+  `/api/agent/`, masuk dengan **machine key**. Tidak mengubah perilaku v1.
 
 Konvensi untuk semua endpoint:
 
-- JSON, UTF-8, nama medan camelCase.
-- Waktu dalam ISO-8601 UTC (`2026-09-29T08:15:00Z`), kecuali disebut lain.
-- Kesalahan selalu `{"error": "pesan"}` dengan status HTTP 4xx/5xx. Pesannya
-  berbahasa Indonesia dan boleh ditampilkan ke pengguna; agent sebaiknya
-  bercabang berdasarkan **status HTTP dan `errorCode`**, bukan teks pesan.
-- `401` = token tidak ada/kedaluwarsa → login ulang lalu ulangi sekali.
+- JSON, UTF-8, nama medan camelCase. Waktu dalam ISO-8601 UTC.
+- Kesalahan selalu `{"error": "pesan"}`; untuk yang perlu dibedakan mesin ada juga
+  `errorCode` (dan kadang `state` atau `minAgentVersion`). Agent bercabang berdasarkan
+  **status HTTP dan `errorCode`**, bukan teks pesan.
+- `401` = token tidak ada, kedaluwarsa, atau sudah dicabut → login ulang lalu ulangi sekali.
   `403` = token sah tetapi tidak berhak → jangan diulang.
+- Medan yang tidak dikenal di jawaban wajib diabaikan: Orchestrator boleh menambah medan
+  tanpa menaikkan versi.
 
 ---
 
-# Bagian 1 — v1 (berlaku sekarang)
+# Bagian 1 — v1
 
 Semua memakai `Authorization: Bearer <token>` dari login akun pengguna.
 
-### `POST /api/auth/login`
+### `GET /api/health` (tanpa token)
 
 ```json
-{ "username": "Robot_Pras", "password": "..." }
+{ "product": "OpenOrchestrator", "status": "OK", "time": "…",
+  "contract": 2,
+  "capabilities": ["jobs.next.package", "packages.sha256", "heartbeat.commands", "jobs.state.guard"],
+  "apiVersions": [1, 2] }
 ```
-→ `200 {"token": "...", "expiresInMinutes": 480, "userId": "...", ...}`.
-Token berlaku 8 jam (setelan `JWT_EXPIRATION_MINUTES`).
+
+`contract` + `capabilities` = kemampuan tambahan v1 (lihat di bawah); `apiVersions` berisi 2
+kalau `/api/agent` tersedia.
+
+### `POST /api/auth/login`
+
+`{ "username": "...", "password": "..." }` → `200 {"token": "...", "expiresInMinutes": 480, ...}`.
 
 ### `POST /api/robots/{robot}/heartbeat`
 
 ```json
 { "status": "AVAILABLE", "cpuPercent": 3.5, "memoryMb": 210, "machineName": "PC-01" }
 ```
-→ `200 {"ok": true, "serverTime": "..."}`.
+→ `200 {"ok": true, "serverTime": "…", "commands": [{"type": "StopJob", "jobId": "…"}]}`
 
-- `status`: `AVAILABLE` atau `BUSY`; lainnya dianggap `AVAILABLE`.
-- Robot yang belum ada **terdaftar otomatis**, begitu pula mesinnya.
-- Robot yang diam lebih dari 45 detik tampil `DISCONNECTED`, dan job
-  `RUNNING`-nya ditandai `FAULTED`.
+- **heartbeat.commands:** `StopJob` untuk job robot ini yang diminta berhenti dari dasbor.
+- Robot yang belum ada terdaftar otomatis. Robot yang diam lebih dari 45 detik tampil
+  `DISCONNECTED`; job `RUNNING`-nya ditandai `FAULTED` sesudah 90 detik — sebagai
+  **kesimpulan** server, yang masih bisa digantikan laporan akhir robot itu.
 
 ### `GET /api/jobs/next?robot={robot}`
 
 → `200 {"job": null}` atau
 ```json
-{ "job": { "id": "uuid", "processName": "Tagihan", "robotName": "Robot_Pras",
-           "state": "RUNNING", "priority": "Normal", "inputJson": "{\"a\":1}",
-           "createdAt": "...", "startedAt": "..." } }
+{ "job": { "id": "…", "processName": "Tagihan", "robotName": "Robot_Pras", "state": "RUNNING",
+           "priority": "Normal", "inputJson": "{\"a\":1}", "createdAt": "…", "startedAt": "…",
+           "folderId": "…", "packageName": "Tagihan", "packageVersion": "1.0.3",
+           "entryPoint": "Main.xaml", "packageSha256": "9f2c…" } }
 ```
-Atomik: dua robot yang bertanya bersamaan tidak mendapat job yang sama. Job
-langsung menjadi `RUNNING`. Robot hanya mendapat job yang menyebut namanya,
-atau job tanpa robot di folder tempat robot itu ditugaskan. Urutan: prioritas
-(`High`, `Normal`, `Low`), lalu yang paling lama menunggu.
+
+- **jobs.next.package:** paket, versi, titik masuk, dan folder langsung disebut — robot tidak
+  perlu membaca daftar proses dan paket.
+- Atomik (`FOR UPDATE SKIP LOCKED`). Job hanya diambil robot yang disebutnya, atau robot yang
+  ditugaskan ke folder job itu. Urutan: prioritas, lalu umur.
 
 ### `POST /api/jobs/{id}/state`
 
-```json
-{ "state": "SUCCESSFUL", "progress": 100, "info": "Selesai.", "outputJson": "{...}" }
-```
-- `state`: `PENDING`, `RUNNING`, `SUCCESSFUL`, `FAULTED`, `STOPPED`, `STOPPING`.
-- Medan yang tidak dikirim tidak menghapus nilai lama.
-- State akhir selalu progress 100.
-- **Keterbatasan v1:** tidak ada pemeriksaan pemilik job maupun urutan state.
+`{ "state": "SUCCESSFUL", "progress": 100, "info": "…", "outputJson": "{…}" }` → `200 {"ok": true}`
 
-### `POST /api/logs`
+- `state`: `PENDING`, `RUNNING`, `SUCCESSFUL`, `FAULTED`, `STOPPING`, `STOPPED`.
+- **jobs.state.guard:** `409 {"errorCode": "InvalidTransition", "state": "…"}` untuk RUNNING
+  sesudah STOPPING, dan untuk laporan apa pun atas job yang sudah selesai — KECUALI
+  kegagalannya kesimpulan server (robot sempat diam); itu boleh digantikan laporan robot.
+  Laporan akhir yang ditolak tetap dicatat di log job.
+- `409 {"errorCode": "AgentJob"}` untuk job yang dijalankan Robot Agent v2.
 
-```json
-{ "lines": [ { "level": "INFO", "message": "...", "robotName": "...", "machineName": "...",
-               "processName": "...", "jobId": "uuid", "loggedAt": "2026-09-29T15:15:00+07:00" } ] }
-```
+### `GET /api/packages`, `GET /api/packages/{nama}/{versi}/content`
 
-### Endpoint lain yang dipakai Studio dan activities
+**packages.sha256:** daftar paket menyebut `sha256` (heksa kecil) isi paketnya.
+
+### Endpoint lain
 
 | Endpoint | Dipakai oleh |
 |---|---|
-| `GET /api/packages`, `POST /api/packages`, `GET /api/processes`, `POST /api/jobs` | Studio (Terbitkan, Start Job) |
-| `GET /api/jobs/{id}` | Activity Start Job (menunggu hasil) |
-| `GET /api/assets/{nama}/value`, `GET /api/credentials/{nama}/value` | Activity Get Asset / Get Credential |
-| `POST /api/queues/{q}/items`, `POST /api/queues/{q}/next`, `POST /api/queues/items/{id}/result` | Activity antrean |
-| `GET /api/packages/{nama}/{versi}/content` | Unduh paket (belum dipakai robot) |
+| `POST /api/logs` | JakRunner, agent v1 |
+| `POST /api/packages`, `GET /api/processes`, `POST /api/jobs` | Studio (Terbitkan, Start Job) |
+| `GET /api/jobs/{id}`, `GET /api/jobs?state=` | Activity Start Job, rekonsiliasi agent v1 |
+| `GET /api/assets/{nama}/value`, `GET /api/credentials/{nama}/value` | Activity Get Asset / Credential |
+| `POST /api/queues/{q}/items`, `…/next`, `POST /api/queues/items/{id}/result` | Activity antrean |
+
+### Izin akun robot v1
+
+Peran bawaan **Robot**: `robots.update`, `jobs.read`, `jobs.create`, `jobs.update`,
+`logs.create`, `assets.read`, `queues.read`, `queues.update`, `buckets.read`,
+`buckets.update`, dan sejak V8 juga `processes.read` + `packages.read`.
 
 ---
 
-# Bagian 2 — v2 (usulan, untuk Robot Agent unattended)
+# Bagian 2 — v2 (Robot Agent unattended)
 
 ## 2.1 Gambaran
 
 ```
 Admin (dasbor)                          Robot Agent (layanan Windows, LocalSystem)
-  │ buat Mesin + machine key  ─────────►  dipasang sekali saat instalasi
-  │ buat Robot unattended                  (DPAPI LocalMachine, %ProgramData%\JakForge\)
-  │   + akun Windows (DOMAIN\user)
+  │ Tenant › Robots › Machines:
+  │   buat mesin + machine key ────────► dipasang sekali saat instalasi
+  │ Tenant › Robots: robot unattended      (DPAPI LocalMachine, %ProgramData%\JakForge\)
+  │   = mesin + akun Windows
   ▼                                        │
 Open Orchestrator ◄──── login (machine key) ┤
-                  ◄──── heartbeat 15 s / 5 s ┤  ──► jawaban: perintah Stop/Kill, setelan
-                  ◄──── klaim job per robot  ┤  ──► job + paket + lease + executorToken
-                  ◄──── akun Windows (per job)┤     (hanya untuk job yang sedang disiapkan)
-                  ◄──── laporan state (idempoten, dari outbox)
+                  ◄──── heartbeat 15 s / 5 s ┤ ──► StopJob / KillJob, settingsVersion
+                  ◄──── klaim job per robot  ┤ ──► job + paket + lease + executorToken
+                  ◄──── akun Windows (per job)┤    (hanya selama penyiapan)
+                  ◄──── laporan state (seq, idempoten, dari outbox)
                   ◄──── log (seq), screenshot
-                                           │
                                            ▼
-                                  Sesi Windows (RDP loopback)
-                                           │
-                                  Executor (1 per sesi/job) ──► activities memakai executorToken
+                                  Sesi Windows → Executor (1 per job) ──► activities pakai executorToken
 ```
 
-Pembagian tanggung jawab:
+Orchestrator memutuskan *apa* dan *kapan*; agent memutuskan *bagaimana*.
 
-- **Orchestrator** memutuskan *apa* dan *kapan*: job mana untuk robot mana,
-  batas waktu, retry, dan kapan job dianggap hilang atau gagal.
-- **Agent** memutuskan *bagaimana*: menyiapkan sesi, menjalankan dan
-  menghentikan Executor, menyimpan laporan sampai terkirim.
-
-## 2.2 Identitas dan autentikasi
+## 2.2 Identitas
 
 ### Mesin dan machine key
 
-1. Admin membuat **Mesin** di dasbor (Tenant → Robots → Machines), lalu
-   menekan **Buat kunci**. Kunci ditampilkan **sekali**:
-   `oo_mk_` + 43 karakter acak (256 bit, base64url).
-2. Orchestrator hanya menyimpan **hash SHA-256** kunci itu. Kunci yang hilang
-   tidak bisa ditampilkan lagi; buat kunci baru (kunci lama langsung mati).
-3. Kunci dimasukkan saat instalasi agent (UI installer atau parameter baris
-   perintah untuk pemasangan massal).
+- Dasbor: **Tenant › Robots › Machines** → *Tambah mesin*, lalu ikon kunci → *Buat machine key*.
+  Kunci ditampilkan **sekali**: `oo_mk_` + 43 karakter (256 bit acak, base64url).
+- Orchestrator hanya menyimpan **hash SHA-256**-nya. Kunci baru langsung membatalkan kunci lama
+  — termasuk token agent yang dibuat dengan kunci lama (`401 MachineKeyRevoked` pada permintaan
+  berikutnya, bukan menunggu tokennya kedaluwarsa). *Cabut machine key* ada di dialog *Ubah mesin*.
+- Setelan mesin: **slot** (job bersamaan, 1–50) dan **lease penyiapan** (30–3600 detik, bawaan
+  180). Slot yang berlaku = min(slot, `maxInteractiveSessions` yang dilaporkan agent).
+- Izin dasbor: `machines.update` (baru) untuk kunci, slot, dan lease.
 
 ### Robot unattended
 
-Admin membuat robot bertipe **Unattended**, terikat ke **satu mesin**, dengan:
+Dasbor: **Tenant › Robots** → *Tambah robot* / ikon ubah (izin `robots.create` — bukan
+`robots.update`, karena itu izin denyut yang dipegang akun robot).
 
 | Medan | Keterangan |
 |---|---|
-| `name` | Nama tampilan, unik per tenant |
-| `machine` | Mesin tempat robot berjalan |
-| `windowsUsername` | `DOMAIN\user` atau `.\user` (akun lokal) |
-| `windowsPassword` | **Hanya bisa ditulis.** Disandikan dengan SecretBox; tidak pernah ditampilkan di dasbor, log, audit, maupun API lain |
-| `sessionPolicy` | Setelah job: `Logoff` (bawaan) atau `KeepLoggedIn` |
-| folder | Seperti robot v1: robot hanya mengambil job tanpa robot dari folder tempat ia ditugaskan |
+| Mesin | Robot dilayani agent mesin itu. Robot `Attended` tidak pernah diikat ke mesin |
+| Akun Windows | `DOMAIN\user`, atau `.\user` untuk akun lokal |
+| Sandi Windows | **Hanya bisa ditulis**, disimpan tersandi (SecretBox). Kosong saat mengubah = tetap |
+| Sandi disimpan di mesin robot | W5: Orchestrator hanya menyimpan nama akun; agent memakai sandi lokalnya |
+| Sesudah job selesai | `Logoff` (bawaan) atau `KeepLoggedIn` |
 
-Satu akun Windows hanya boleh dipakai satu robot di satu mesin.
+Mengubah robot atau mesin menaikkan `settingsVersion` mesin lama dan mesin baru.
 
-### `POST /api/agent/login`
-
-Tanpa header Authorization.
+### `POST /api/agent/login` (tanpa token)
 
 ```json
 { "machineKey": "oo_mk_…", "machineName": "VM-ROBOT-01", "agentVersion": "1.0.0",
-  "os": "Windows Server 2022 21H2" }
+  "os": "Windows 11 Pro 25H2", "maxInteractiveSessions": 1 }
 ```
 
-→ `200`
+→ `200` (`Cache-Control: no-store`)
 ```json
 {
-  "token": "eyJ…",
-  "expiresAt": "2026-09-29T09:15:00Z",
-  "machine": { "id": "uuid", "name": "VM-ROBOT-01", "slots": 2 },
-  "robots": [
-    { "id": "uuid", "name": "Robot_A", "windowsUsername": "CORP\\robot.a",
-      "sessionPolicy": "Logoff" }
-  ],
-  "settings": {
-    "heartbeatSeconds": 15, "heartbeatBusySeconds": 5,
-    "leaseSeconds": 180, "minAgentVersion": "1.0.0"
-  }
+  "token": "eyJ…", "expiresAt": "…",
+  "machine": { "id": "…", "name": "VM-ROBOT-01", "slots": 1, "leaseSeconds": 180 },
+  "robots": [ { "id": "…", "name": "Robot_A", "windowsUsername": ".\\robot",
+                "sessionPolicy": "Logoff", "windowsPasswordLocal": false } ],
+  "settings": { "heartbeatSeconds": 15, "heartbeatBusySeconds": 5, "leaseSeconds": 180,
+                "minAgentVersion": "1.0.0", "settingsVersion": 3, "maxLogLinesPerRequest": 500,
+                "maxAttachmentBytes": 2097152, "maxAttachmentsPerJob": 5, "maxOutputBytes": 1048576 }
 }
 ```
 
-- Token berlaku **1 jam**. Agent login ulang saat menerima `401` atau
-  sebelum `expiresAt`.
-- `machineName` dicatat dan dibandingkan dengan nama mesin; kalau berbeda,
-  login tetap berhasil tetapi dasbor menampilkan peringatan (kunci mungkin
-  disalin ke mesin lain).
-- `401 {"error": "...", "errorCode": "InvalidMachineKey"}` untuk kunci salah
-  atau dicabut. Agent **tidak boleh** mencoba ulang dalam putaran cepat:
-  jeda 5 menit, lalu tampilkan di log layanan.
-- `426 {"errorCode": "AgentTooOld", "minAgentVersion": "1.2.0"}` kalau versi
-  agent di bawah minimum.
+| Jawaban | Arti |
+|---|---|
+| `401 InvalidMachineKey` | Kunci salah, dicabut, atau tidak pernah ada. Jangan diulang cepat — jeda 5 menit |
+| `426 AgentTooOld` + `minAgentVersion` | Versi agent di bawah minimum (`OPENORCHESTRATOR_AGENT_MIN_VERSION`) |
+| `400 AgentVersionMissing` | `agentVersion` tidak dikirim |
 
-Token agent **hanya berlaku di `/api/agent/**`** dan untuk mengunduh paket.
-Ia tidak bisa memanggil endpoint dasbor.
+Token berlaku **1 jam**, hanya di `/api/agent/**` dan untuk unduh paket job-nya. Kalau
+`machineName` berbeda dari nama mesin dan dari komputer terakhir, dasbor mendapat peringatan
+"Machine key dipakai dari komputer lain".
 
-## 2.3 Heartbeat
+## 2.3 Heartbeat — `POST /api/agent/heartbeat`
 
-### `POST /api/agent/heartbeat`
-
-Satu per agent, mencakup semua robot di mesin. Jeda `heartbeatSeconds` (15)
-saat idle, `heartbeatBusySeconds` (5) selama ada job yang berjalan. Heartbeat
-pertama dikirim segera setelah login.
+Satu per agent. Jeda `heartbeatSeconds` saat idle, `heartbeatBusySeconds` selama ada job.
 
 ```json
 {
   "agentVersion": "1.0.0",
   "machine": { "cpuPercent": 12.5, "memoryUsedMb": 5120, "memoryTotalMb": 16384 },
-  "robots": [
-    {
-      "robotId": "uuid",
-      "state": "Busy",
-      "session": { "id": 3, "state": "Active", "windowsUser": "CORP\\robot.a" },
-      "executor": { "state": "Running", "pid": 8124 },
-      "runningJobIds": ["uuid"]
-    },
-    {
-      "robotId": "uuid",
-      "state": "Idle",
-      "session": { "id": null, "state": "None" },
-      "executor": { "state": "Stopped", "pid": null },
-      "runningJobIds": []
-    }
-  ]
+  "maxInteractiveSessions": 1,
+  "robots": [ {
+    "robotId": "…",
+    "state": "Busy",
+    "session": { "id": 3, "state": "Active", "windowsUser": "VM\\robot", "ready": true },
+    "reason": { "code": "SessionLocked", "text": "Sesi terkunci" },
+    "executor": { "state": "Running", "pid": 8124 },
+    "activeJobIds": ["…"]
+  } ]
 }
 ```
 
-| Medan | Nilai |
+| Medan | Arti |
 |---|---|
-| `robots[].state` | `Idle`, `Busy`, `Error` (agent tidak bisa melayani robot ini, misalnya akun Windows ditolak) |
-| `session.state` | `Active`, `Locked`, `Disconnected`, `None` (dari WTS API) |
-| `executor.state` | `Starting`, `Running`, `Stopping`, `Stopped` |
-| `runningJobIds` | Job yang **benar-benar** masih dijalankan agent untuk robot itu, dari catatan lokal agent |
+| `state` | `Idle`, `Busy`, `Error` (agent tidak bisa melayani robot ini) |
+| `session.ready` | **W6.** Menurut agent: bisakah job dijalankan sekarang. Sesi terkunci tetap `Active` bagi WTS, jadi siap-tidaknya ditentukan agent. `false` = klaim tidak diberi job |
+| `reason` | Kode + teks singkat, tampil di dasbor (mis. `SessionLocked`, `NoSession`, `LogonFailed`, `RemoteDesktopDisabled`) |
+| `activeJobIds` | **W1.** Job yang belum selesai DILAPORKAN: masih berjalan **atau** laporan akhirnya masih di outbox. `runningJobIds` diterima dengan arti sama. Tanpa medan ini, rekonsiliasi tidak dijalankan |
 
 → `200`
 ```json
-{
-  "serverTime": "2026-09-29T08:15:05Z",
-  "commands": [
-    { "type": "StopJob", "jobId": "uuid", "graceSeconds": 30 },
-    { "type": "KillJob", "jobId": "uuid" }
-  ],
-  "settingsVersion": 7
-}
+{ "serverTime": "…",
+  "commands": [ { "type": "StopJob", "jobId": "…", "graceSeconds": 30 },
+                { "type": "KillJob", "jobId": "…" } ],
+  "settingsVersion": 3, "heartbeatSeconds": 15, "heartbeatBusySeconds": 5 }
 ```
 
 Aturan:
 
-- **Perintah diturunkan dari keadaan job, bukan antrean pesan.** Selama job
-  masih `STOPPING`, `StopJob` dikirim di setiap heartbeat; sesudah
-  `graceSeconds` lewat, yang dikirim `KillJob`. Karena itu perintah tidak
-  perlu dikonfirmasi (ack), dan perintah yang hilang di jalan terkirim lagi
-  di heartbeat berikutnya. Agent harus memperlakukan perintah yang sama
-  berulang sebagai satu perintah.
-- `settingsVersion` naik setiap admin mengubah mesin atau robotnya. Agent
-  yang melihat angka berbeda memanggil `POST /api/agent/login` lagi untuk
-  mengambil setelan baru.
-- Robot yang tidak ada di laporan, atau bukan milik mesin ini, diabaikan.
-- **Rekonsiliasi:** job yang di Orchestrator tercatat `RUNNING`,
-  `PREPARING_SESSION`, atau `UNRESPONSIVE` untuk robot di mesin ini tetapi
-  **tidak** ada di `runningJobIds` ditandai `FAULTED` dengan kode
-  `AgentRestarted`. Ini berlaku sejak heartbeat pertama setelah login, jadi
-  agent yang baru menyala wajib mengisi `runningJobIds` dengan benar
-  (kosong kalau memang tidak ada).
+- Denyut juga dihitung sebagai denyut setiap robot yang dilaporkan (status Online/Offline).
+  Robot yang bukan milik mesin ini dilewati tanpa galat.
+- **Perpanjangan lease (W4):** job yang disebut di `activeJobIds` dan belum RUNNING
+  lease-nya diperpanjang, sejak ASSIGNED.
+- **Rekonsiliasi (W1):** job robot itu yang dipegang menurut Orchestrator tapi tidak disebut →
+  `FAULTED AgentRestarted` (atau `STOPPED` kalau sudah diminta berhenti), sebagai kesimpulan.
+  Job yang diambil kurang dari **30 detik** lalu dilewati — denyut yang berangkat sebelum
+  klaimnya selesai memang belum menyebutnya.
+- Job yang disebut padahal sudah selesai di Orchestrator (mis. sudah diulang di robot lain) →
+  `StopJob`: dua eksekusi dari pekerjaan yang sama tidak boleh berlanjut.
+- **Perintah diturunkan dari keadaan job:** selama job `STOPPING`, `StopJob` dikirim di setiap
+  denyut; sesudah `graceSeconds` lewat, `KillJob` (agent mematikan seluruh pohon proses job itu).
+  Tidak perlu ack; perintah yang sama berulang = satu perintah.
+- `settingsVersion` berubah → agent login ulang untuk mengambil setelan (robot, slot, lease).
 
-Status yang tampil di dasbor:
-
-| Dasbor | Syarat |
-|---|---|
-| Online / Offline | Heartbeat terakhir ≤ 60 detik / lebih |
-| Idle / Busy | `robots[].state` |
-| Session Ready | `session.state` = `Active`, atau `None` (sesi akan dibuat saat job datang) |
-| Executor Running | `executor.state` = `Running` |
-
-## 2.4 Siklus hidup job
+## 2.4 Job
 
 ### State
 
 ```
-PENDING ──klaim──► ASSIGNED ──► PREPARING_SESSION ──► RUNNING ──► SUCCESSFUL
-   │                  │                │                 │   └──► FAULTED
-   │                  │                │                 └──────► STOPPED
-   │                  └────────────────┴───── gagal ───────────► FAULTED
-   └── stop sebelum diambil ──► STOPPED
-
-RUNNING / ASSIGNED / PREPARING_SESSION ──stop──► STOPPING ──► STOPPED (atau SUCCESSFUL/FAULTED
-                                                                        kalau selesai duluan)
-RUNNING ──heartbeat hilang 60 s──► UNRESPONSIVE ──agent kembali, job disebut──► RUNNING
-                                        │──agent kembali, job tak disebut──► FAULTED (AgentRestarted)
-                                        └──5 menit──────────────────────────► FAULTED (AgentLost)
+PENDING ──klaim──► ASSIGNED ──► PREPARING_SESSION ──► RUNNING ──► SUCCESSFUL / FAULTED / STOPPED
+RUNNING/ASSIGNED/PREPARING_SESSION/UNRESPONSIVE ──Stop──► STOPPING ──► STOPPED (atau selesai lebih dulu)
+RUNNING/STOPPING ──diam 60 s──► UNRESPONSIVE ──disebut lagi──► RUNNING (STOPPING kalau sempat distop)
+                                     └──5 menit──► FAULTED AgentLost (STOPPED kalau sempat distop)
+ASSIGNED/PREPARING_SESSION ──lease habis──► FAULTED LeaseExpired
 ```
 
-| State | Artinya | Siapa yang mengubah |
-|---|---|---|
-| `PENDING` | Menunggu robot | Orchestrator |
-| `ASSIGNED` | Diambil agent, lease berjalan | Orchestrator (saat klaim) |
-| `PREPARING_SESSION` | Agent sedang login Windows / menyalakan Executor | Agent |
-| `RUNNING` | Workflow berjalan | Agent |
-| `STOPPING` | Diminta berhenti, menunggu agent | Orchestrator (tombol Stop) |
-| `UNRESPONSIVE` | Hilang kontak; belum dianggap gagal | Orchestrator |
-| `SUCCESSFUL`, `FAULTED`, `STOPPED` | **Akhir.** Tidak bisa diubah lagi | Agent, atau Orchestrator untuk kegagalan yang ia simpulkan |
+`SUCCESSFUL`, `FAULTED`, `STOPPED` = akhir. Kegagalan yang **disimpulkan** Orchestrator
+(`AgentRestarted`, `AgentLost`, `LeaseExpired`) ditandai `failureInferred` dan bisa digantikan
+laporan asli agent (W2), selama belum ada percobaan ulang. Klien v1 tidak pernah melihat state
+baru.
 
-State v1 (`PENDING`, `RUNNING`, `SUCCESSFUL`, `FAULTED`, `STOPPED`,
-`STOPPING`) tidak berubah artinya; JakRunner v1 tidak akan pernah melihat
-state baru.
-
-### `POST /api/agent/jobs/claim`
-
-```json
-{ "robotId": "uuid" }
-```
+### `POST /api/agent/jobs/claim` — `{ "robotId": "…" }`
 
 → `204` kalau tidak ada job, atau `200`:
 ```json
-{
-  "job": {
-    "id": "uuid",
-    "attempt": 1,
-    "processName": "Tagihan",
-    "package": { "name": "Tagihan", "version": "1.0.3",
-                 "sha256": "9f2c…", "sizeBytes": 48213,
+{ "job": {
+    "id": "…", "attempt": 1, "processName": "Tagihan", "folderId": "…", "priority": "Normal",
+    "package": { "name": "Tagihan", "version": "1.0.3", "sha256": "9f2c…", "sizeBytes": 48213,
                  "url": "/api/packages/Tagihan/1.0.3/content" },
-    "entryPoint": "Main.xaml",
-    "inputJson": "{\"bulan\":\"09\"}",
-    "leaseExpiresAt": "2026-09-29T08:18:05Z",
-    "timeoutSeconds": 3600,
-    "stopGraceSeconds": 30,
-    "sessionPolicy": "Logoff",
-    "executorToken": "eyJ…"
-  }
-}
+    "entryPoint": "Main.xaml", "inputJson": "{\"bulan\":\"09\"}",
+    "leaseExpiresAt": "…", "timeoutSeconds": 3600, "stopGraceSeconds": 30,
+    "sessionPolicy": "Logoff", "windowsPasswordLocal": false, "executorToken": "eyJ…" } }
 ```
 
-- Atomik seperti v1. Aturan pemilihan job sama dengan v1 (nama robot atau
-  folder, prioritas, umur), ditambah: robot harus milik mesin agent, mesin
-  tidak sedang memakai semua `slots`-nya, dan robot sedang `Idle`.
-- `timeoutSeconds` dan `stopGraceSeconds` diambil dari setelan proses;
-  `null` = tanpa batas waktu.
-- **`executorToken`** diberikan ke Executor (lewat pipa bernama atau berkas
-  sementara ber-ACL, **bukan** argumen baris perintah atau variabel
-  lingkungan). Activities memakainya untuk endpoint v1 (aset, kredensial,
-  antrean, Start Job) atas nama robot itu. Token ini berlaku sampai job
-  mencapai state akhir, maksimal `timeoutSeconds` + 1 jam.
-- Paket diunduh dengan token agent. Agent **wajib** memeriksa `sha256`
-  sebelum memakainya dan menyimpannya di cache `packages\{nama}\{versi}\`.
-- Selama `ASSIGNED` dan `PREPARING_SESSION`, lease diperpanjang setiap kali
-  agent mengirim laporan state (atau heartbeat yang menyebut job itu).
-  Lease yang habis → `FAULTED` dengan kode `LeaseExpired`.
+`204` juga kalau: robot sedang memegang job lain (satu robot = satu akun Windows = satu job),
+`session.ready` terakhir `false`, `state` `Error`, robot ditandai **Perlu perhatian**
+(`LogonFailed`, sampai sandinya diganti), atau slot mesin penuh. Alasannya terlihat di dasbor.
+`403 NotYourRobot` kalau robot bukan milik mesin ini.
+
+Percobaan ulang yang baru dibuat tidak diambil robot yang baru gagal selama **60 detik** —
+robot lain didahulukan; sesudah itu siapa pun boleh.
 
 ### `POST /api/agent/jobs/{id}/state`
 
 ```json
-{
-  "seq": 3,
-  "state": "RUNNING",
-  "at": "2026-09-29T08:16:10Z",
-  "progress": 10,
-  "info": "Workflow dimulai.",
-  "context": { "sessionId": 3, "windowsUser": "CORP\\robot.a", "executorPid": 8124 }
-}
+{ "seq": 3, "state": "RUNNING", "progress": 10, "info": "Workflow dimulai.",
+  "context": { "sessionId": 3, "windowsUser": "VM\\robot", "executorPid": 8124 } }
 ```
+Laporan akhir: `{ "seq": 9, "state": "FAULTED", "errorCode": "WorkflowFailed", "info": "…",
+"outputJson": {…} }` → `200 {"state": "FAULTED", "stopRequested": false}`.
 
-Laporan akhir:
-```json
-{
-  "seq": 9,
-  "state": "FAULTED",
-  "at": "2026-09-29T08:40:02Z",
-  "errorCode": "WorkflowFailed",
-  "info": "Elemen 'Simpan' tidak ditemukan dalam 30 detik.",
-  "outputJson": null
-}
-```
+- `state`: `PREPARING_SESSION`, `RUNNING`, `SUCCESSFUL`, `FAULTED`, `STOPPED`.
+- **Idempoten:** `seq` naik per job mulai 1. `seq` yang **sama atau lebih kecil** dari yang sudah
+  diterima → `200` tanpa efek.
+- Laporan akhir diterima dari keadaan mana pun yang belum selesai (laporan RUNNING bisa hilang).
+  Laporan antara hanya boleh maju; selama `STOPPING`, laporan antara diterima tapi keadaan
+  tetap `STOPPING` dan jawabannya `stopRequested: true`.
+- `409 InvalidTransition` + `state` untuk yang tidak sah — agent membuangnya dari outbox.
+  Laporan akhir yang terlambat (job sudah selesai dan sudah diulang) tetap **dicatat di log job**.
+- `errorCode` disimpan untuk `FAULTED` dan `STOPPED` (mis. `AgentShutdown`).
+- `outputJson` (untai atau objek) hanya bersama laporan akhir, maks **1 MB**; yang lebih besar
+  dibuang dengan catatan di log, laporannya tetap diterima.
+- Sesudah laporan akhir robot langsung **Idle** di server, tanpa menunggu denyut.
+- `403 NotYourJob` kalau job bukan milik robot di mesin ini.
 
-→ `200 {"state": "RUNNING", "stopRequested": false}`, berisi keadaan job
-**setelah** laporan diterapkan.
+### Kode kegagalan
 
-Aturan:
-
-- **Idempoten.** `seq` naik per job, mulai 1. Laporan dengan `seq` yang sudah
-  diterima dijawab `200` tanpa efek. Ini yang membuat outbox agent aman
-  mengirim ulang.
-- **Urutan dijaga.** Transisi yang tidak ada di diagram dijawab
-  `409 {"errorCode": "InvalidTransition", "state": "<state sekarang>"}`.
-  Agent membuang laporan itu dari outbox (jangan diulang) dan menyesuaikan
-  diri dengan `state` di jawaban.
-- **State akhir menang pertama.** Setelah `SUCCESSFUL`, `FAULTED`, atau
-  `STOPPED`, laporan apa pun dijawab `409`.
-- Kalau job sedang `STOPPING`, agent tetap boleh melaporkan `RUNNING`
-  (misalnya laporan lama dari outbox) tanpa membatalkan permintaan stop;
-  jawabannya `stopRequested: true`.
-- `outputJson`: objek nama argumen Out/InOut → nilai, maksimal **1 MB**,
-  hanya bersama state akhir.
-- `403` kalau job bukan milik robot di mesin ini.
-
-### Kode kegagalan (`errorCode`)
-
-| Kode | Arti | Retry otomatis |
+| Kode | Arti | Diulang otomatis |
 |---|---|---|
-| `SessionPreparationFailed` | Sesi Windows tidak bisa disiapkan | Ya |
-| `LogonFailed` | Login Windows ditolak (sandi salah, akun terkunci/kedaluwarsa) | **Tidak** — mengulang hanya mengunci akun |
-| `ExecutorStartFailed` | Executor tidak mau menyala | Ya |
-| `ExecutorCrashed` | Executor mati di tengah jalan | Ya |
+| `SessionPreparationFailed` | Sesi Windows tidak bisa disiapkan | Ya* |
+| `LogonFailed` | Login Windows ditolak — robot ditandai **Perlu perhatian** | Tidak |
+| `ExecutorStartFailed` | Executor tidak mau menyala | Ya* |
+| `ExecutorCrashed` | Executor mati | Ya* |
 | `PackageNotFound` | Paket/versi tidak ada | Tidak |
-| `PackageDownloadFailed` | Unduhan gagal atau hash tidak cocok | Ya |
-| `WorkflowLoadFailed` | XAML rusak / tipe activity tidak dikenal | Tidak |
+| `PackageDownloadFailed` | Unduhan gagal | Ya* |
+| `PackageIntegrityFailed` | Hash tidak cocok | Ya* |
+| `WorkflowLoadFailed` | XAML rusak / tipe tidak dikenal | Tidak |
 | `WorkflowFailed` | Workflow melempar kesalahan | Tidak |
 | `Timeout` | Melewati `timeoutSeconds` | Tidak |
-| `AgentRestarted` | *(Orchestrator)* Agent kembali tanpa menyebut job ini | Ya |
-| `AgentLost` | *(Orchestrator)* Tidak ada kabar 5 menit | Ya |
-| `LeaseExpired` | *(Orchestrator)* Tidak ada kabar selama penyiapan | Ya |
+| `AgentShutdown` | Layanan dihentikan saat job berjalan (dengan `STOPPED`) | Tidak |
+| `AgentRestarted` | *(Orchestrator)* Agent tidak lagi menyebut job ini | Ya* |
+| `AgentLost` | *(Orchestrator)* Tidak ada kabar 5 menit | Ya* |
+| `LeaseExpired` | *(Orchestrator)* Tidak ada kabar selama penyiapan | Ya* |
 
-Job yang dihentikan dengan Stop berakhir `STOPPED` tanpa `errorCode`.
+\* **W3:** hanya kalau job **belum pernah RUNNING** — workflow yang sudah berjalan bisa saja
+sudah mengirim email atau mengisi data. Jumlah per proses (`maxRetries`, bawaan 1, maks 2, 0 =
+mati). Percobaan ulang = job baru dengan `attempt + 1` dan `retryOf`; job lama tetap `FAULTED`.
+Robot sasarannya sama dengan permintaan ASLI.
 
-### Retry otomatis
+### Stop, kill, batas waktu
 
-- Hanya untuk kode bertanda "Ya", dan hanya kalau proses mengizinkannya
-  (`maxRetries`, bawaan **1**, maksimal 2; 0 = mati).
-- Retry = **job baru** dengan `attempt` + 1 dan `retryOf` menunjuk job lama.
-  Job lama tetap `FAULTED`, supaya riwayatnya jujur.
-- Kalau job asli tidak menyebut robot, retry menghindari robot yang baru
-  gagal selama masih ada robot lain di folder itu.
-- Orchestrator yang membuat retry; agent **tidak pernah** membuat job.
+1. Dasbor → Stop: job `STOPPING`; denyut membawa `StopJob` (Cancel → Terminate di agent).
+2. Sesudah `stopGraceSeconds` (setelan proses, bawaan 30): `KillJob`.
+3. Batas waktu (`timeoutSeconds`, setelan proses) dijalankan **agent** → lapor `FAULTED Timeout`.
+   Jaring pengaman: job RUNNING melewati batas + jeda + 5 menit diminta berhenti Orchestrator.
 
-### Stop, kill, dan timeout
+## 2.5 Akun Windows — `POST /api/agent/jobs/{id}/windows-credential`
 
-1. Tombol Stop di dasbor: job → `STOPPING`, mulai hitung `stopGraceSeconds`.
-2. Heartbeat berikutnya membawa `StopJob`: agent memanggil Cancel, lalu
-   Terminate.
-3. Setelah jeda lewat dan job belum berakhir: `KillJob` → agent mematikan
-   proses Executor dan melaporkan `STOPPED`.
-4. Timeout dijalankan **oleh agent** (ia yang tahu kapan workflow mulai):
-   urutan yang sama, lalu lapor `FAULTED` + `Timeout`. Orchestrator hanya
-   menjadi jaring pengaman: job `RUNNING` yang melewati
-   `timeoutSeconds + stopGraceSeconds + 5 menit` diberi `StopJob`.
+→ `200 {"username": "…", "password": "…"}` (`Cache-Control: no-store`), hanya selama job
+`ASSIGNED` atau `PREPARING_SESSION`. Setiap pengambilan dicatat di jejak audit (tanpa sandinya).
 
-## 2.5 Akun Windows
+| Galat | Arti |
+|---|---|
+| `403 CredentialNotAvailable` | Job sudah lewat penyiapan |
+| `409 PasswordStoredLocally` | W5: sandi robot ini disimpan di mesin robot |
+| `409 NoWindowsAccount` / `NoWindowsPassword` | Belum diisi, atau `signing.key` Orchestrator berbeda |
 
-### `POST /api/agent/jobs/{id}/windows-credential`
+HTTPS adalah tanggung jawab penyebaran (`DEPLOY.md`); agent menolak mengambil sandi lewat
+`http://` ke mesin lain kecuali setelan lab dinyalakan.
 
-Tanpa badan. `POST`, bukan `GET`, supaya tidak tersimpan di cache atau log
-proxy.
+## 2.6 Token executor
 
-→ `200`
-```json
-{ "username": "CORP\\robot.a", "password": "…" }
-```
+Diberikan di jawaban klaim; diteruskan agent ke Executor (berkas ber-ACL atau pipa, **bukan**
+argumen atau variabel lingkungan). Dipakai activities untuk endpoint v1 atas nama robotnya:
 
-- Hanya dijawab kalau job milik robot di mesin ini **dan** sedang `ASSIGNED`
-  atau `PREPARING_SESSION`. Selain itu `403`.
-- Setiap pemanggilan dicatat di audit (mesin, robot, job, waktu) — **tanpa**
-  sandinya.
-- Jawaban memakai `Cache-Control: no-store`.
-- Agent membuang sandi dari memori segera setelah login Windows selesai.
-- Kalau login Windows gagal karena sandi, agent melaporkan `LogonFailed`;
-  dasbor menandai robot itu **Perlu perhatian** sampai admin mengganti
-  sandinya.
+- izin: `assets.read`, `queues.read`, `queues.update`, `buckets.read`, `buckets.update`,
+  `jobs.read`, `jobs.create`, `processes.read`, `logs.create` — tidak lebih;
+- folder: folder tempat robotnya ditugaskan, ditambah folder job-nya;
+- **berhenti berlaku begitu job selesai** (`401 ExecutorTokenExpired`, paling lambat 5 detik).
 
-## 2.6 Log dan lampiran
+## 2.7 Log dan lampiran
 
 ### `POST /api/agent/logs`
 
 ```json
-{
-  "lines": [
-    { "jobId": "uuid", "robotId": "uuid", "seq": 41, "level": "INFO",
-      "source": "Executor/Click", "sessionId": 3,
-      "message": "Klik 'Simpan'.", "loggedAt": "2026-09-29T15:16:11+07:00" }
-  ]
-}
+{ "lines": [ { "jobId": "…", "robotId": "…", "seq": 41, "level": "INFO",
+               "source": "Executor/Click", "sessionId": 3, "message": "Klik 'Simpan'.",
+               "loggedAt": "2026-09-29T15:16:11+07:00" } ] }
 ```
+→ `200 {"ok": true, "written": 40, "skipped": 1}`
 
-- `level`: `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE`.
-- `source`: `Agent` atau `Executor/<nama activity>`.
-- `seq` naik per job; baris dengan `(jobId, seq)` yang sudah ada diabaikan,
-  jadi pengiriman ulang dari outbox aman. Baris agent yang tidak terkait
-  job memakai `jobId: null` dan tidak dicek duplikatnya.
-- Maksimal 500 baris per permintaan, 8 KB per pesan (lebih panjang
-  dipotong).
-- **Tidak boleh ada sandi atau token di pesan.** Orchestrator juga menyensor
-  nilai yang tampak seperti token (`eyJ…`, `oo_mk_…`), tetapi itu jaring
-  pengaman, bukan izin.
+- `(jobId, seq)` yang sudah ada dilewati (kiriman ulang). Baris robot/job mesin lain, `DEBUG`,
+  dan `TRACE` dilewati. Maks **500 baris** (`413` kalau lebih), 8 KB per pesan.
+- JWT dan machine key di pesan **disensor** Orchestrator — jaring pengaman, bukan izin.
 
 ### `POST /api/agent/jobs/{id}/attachments`
 
-`multipart/form-data`, medan `file`, dengan `kind=Screenshot`.
-Maksimal **2 MB** per berkas dan **5** berkas per job; kelebihannya `413`.
-Hanya PNG/JPEG. Tampil di rincian job di dasbor.
+`multipart/form-data`: `file` (PNG/JPEG, dikenali dari isinya), `kind` (bawaan `Screenshot`).
+Maks **2 MB** per berkas, **5** per job (`413`). Tampil di rincian job di dasbor.
 
-## 2.7 Waktu dan batas
+## 2.8 Waktu dan batas
 
-| Nilai | Bawaan | Disetel di |
+| Nilai | Bawaan | Setelan |
 |---|---|---|
-| Heartbeat idle / sibuk | 15 s / 5 s | Global |
-| Robot dianggap Offline | 60 s tanpa heartbeat | Global |
-| Job → `UNRESPONSIVE` | 60 s tanpa heartbeat | Global |
-| `UNRESPONSIVE` → `FAULTED AgentLost` | 5 menit | Global |
-| Lease penyiapan | 180 s | Per mesin |
-| `stopGraceSeconds` | 30 s | Per proses |
-| `timeoutSeconds` | kosong (tanpa batas) | Per proses |
-| `maxRetries` | 1 | Per proses |
-| Token agent | 1 jam | — |
-| Output / screenshot / log | 1 MB / 2 MB × 5 / 500 baris × 8 KB | — |
-
-## 2.8 Versi
-
-- Setiap permintaan agent membawa `X-Agent-Version: 1.0.0`.
-- `GET /api/health` menambah `"apiVersions": [1, 2]`, supaya agent bisa
-  memeriksa kecocokan sebelum login.
-- Perubahan yang **menambah** medan tidak menaikkan versi; agent wajib
-  mengabaikan medan yang tidak ia kenal. Perubahan yang mematahkan kontrak
-  pindah ke `/api/agent/v3/…`.
-
-## 2.9 Keamanan — ringkasan
-
-| Rahasia | Di Orchestrator | Di mesin robot |
-|---|---|---|
-| Machine key | Hash SHA-256 saja | DPAPI LocalMachine, `%ProgramData%\JakForge\`, ACL SYSTEM + Administrators |
-| Token agent / executorToken | Tidak disimpan (JWT) | Memori saja; executorToken ke Executor lewat pipa ber-ACL |
-| Sandi Windows robot | SecretBox (kunci `signing.key`), hanya-tulis di dasbor | Memori, hanya selama login Windows |
-
-Orchestrator harus dijalankan di belakang **HTTPS** (lihat `DEPLOY.md`);
-tanpa itu machine key dan sandi Windows melintas sebagai teks biasa.
-
-## 2.10 Contoh uji dengan curl
-
-```bash
-# login
-curl -s -X POST https://api.contoh/api/agent/login -H "Content-Type: application/json" \
-  -d '{"machineKey":"oo_mk_…","machineName":"VM-ROBOT-01","agentVersion":"1.0.0"}'
-
-# heartbeat tanpa job
-curl -s -X POST https://api.contoh/api/agent/heartbeat -H "Authorization: Bearer $T" \
-  -H "Content-Type: application/json" -H "X-Agent-Version: 1.0.0" \
-  -d '{"agentVersion":"1.0.0","robots":[{"robotId":"'$R'","state":"Idle","session":{"state":"None"},"executor":{"state":"Stopped"},"runningJobIds":[]}]}'
-
-# klaim, lalu lapor
-curl -s -X POST https://api.contoh/api/agent/jobs/claim -H "Authorization: Bearer $T" \
-  -H "Content-Type: application/json" -d '{"robotId":"'$R'"}'
-curl -s -X POST https://api.contoh/api/agent/jobs/$J/state -H "Authorization: Bearer $T" \
-  -H "Content-Type: application/json" -d '{"seq":1,"state":"PREPARING_SESSION","at":"2026-09-29T08:16:00Z"}'
-```
+| Denyut idle / sibuk | 15 s / 5 s | `openorchestrator.agent.heartbeat-seconds`, `heartbeat-busy-seconds` |
+| Offline, job → UNRESPONSIVE | 60 s | `agent.offline-after` |
+| UNRESPONSIVE → AgentLost | 5 menit | `agent.lost-after` |
+| Tenggang rekonsiliasi | 30 s | `agent.reconcile-grace` |
+| Lease penyiapan | 180 s | per mesin (dasbor) |
+| Jeda stop / batas waktu / percobaan ulang | 30 s / – / 1 | per proses (dasbor) |
+| Jendela hindar percobaan ulang | 60 s | `agent.retry-avoid-window` |
+| Token agent | 1 jam | `agent.token-ttl` |
+| Versi agent minimal | 1.0.0 | `OPENORCHESTRATOR_AGENT_MIN_VERSION` |
 
 ---
 
-# Bagian 3 — Yang dikerjakan di Orchestrator
+# Bagian 3 — Status
 
-Urutan implementasi (masing-masing diuji sebelum lanjut):
+Sudah ada di Orchestrator:
 
-1. **Mesin, machine key, robot unattended**: kolom baru, dasbor Machines dan
-   Robots (buat kunci, akun Windows hanya-tulis, sessionPolicy),
-   `POST /api/agent/login`, token agent terbatas.
-2. **Heartbeat v2**: status per robot/sesi/executor, Online/Offline,
-   rekonsiliasi `runningJobIds`, perintah Stop/Kill.
-3. **Job v2**: state baru, klaim + lease, laporan idempoten dengan `seq`,
-   aturan transisi, konteks eksekusi, kode gagal, `UNRESPONSIVE`.
-4. **Setelan proses**: timeout, stopGrace, maxRetries; retry otomatis.
-5. **Akun Windows per job** + audit.
-6. **Log v2** (seq, source, sessionId, sensor rahasia) dan lampiran.
-7. **executorToken** untuk activities.
-8. **Dasbor**: status mesin/sesi/executor, rincian job (konteks, kode gagal,
-   percobaan, screenshot), tombol Stop yang benar-benar menghentikan.
+- v1: `contract`/`capabilities`, `jobs.next.package`, `packages.sha256`, `heartbeat.commands`,
+  `jobs.state.guard`, izin peran Robot.
+- v2: semua endpoint `/api/agent/*`, machine key, rekonsiliasi, lease, UNRESPONSIVE/AgentLost,
+  percobaan ulang, stop/kill, akun Windows per job, token executor, log, lampiran.
+- Dasbor: Machines (kunci, slot, lease, status agent), Robots (mesin, akun Windows, kebijakan
+  sesi, status sesi dan alasan, job yang sedang dipegang), Jobs (state baru, kode galat,
+  percobaan, konteks eksekusi, screenshot), setelan proses (batas waktu, jeda stop, ulang).
 
-Yang **tidak** berubah: semua endpoint v1 dan perilakunya untuk JakRunner.
+Diuji: 178 uji unit; uji ujung-ke-ujung 83 pemeriksaan (agent tiruan + PostgreSQL); regresi v1
+253 panggilan (hanya tambahan medan dan perubahan yang disengaja).
 
-# Bagian 4 — Masih terbuka
+Belum:
 
-1. Nama state `UNRESPONSIVE` — atau cukup ditampilkan sebagai `RUNNING`
-   dengan tanda "hilang kontak"? (Usulan: state sendiri, supaya bisa
-   difilter.)
-2. `slots` per mesin: diisi admin, atau dilaporkan agent dari kemampuan
-   Windows (RDS)? (Usulan: diisi admin, dibatasi oleh jumlah robot di mesin
-   itu.)
-3. Apakah JakRunner attended nanti ikut pindah ke v2 dengan jenis kunci lain
-   (misalnya "kunci pengguna"), atau tetap v1 selamanya?
-4. Jadwal dan alamat jaringan untuk uji VMware.
+1. Uji dengan Robot Agent sungguhan di VM (menunggu klien v2 di sisi robot).
+2. Beberapa robot per mesin baru bisa diuji di Windows Server + RDS.
+3. Tidak ada pembatasan laju untuk `/api/agent/login` (kunci 256 bit tidak bisa ditebak, tapi
+   percobaan berulang tetap memakai sumber daya).

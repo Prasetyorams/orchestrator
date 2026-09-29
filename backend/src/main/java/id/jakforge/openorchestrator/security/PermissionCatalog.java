@@ -60,8 +60,9 @@ public final class PermissionCatalog {
     /**
      * Semua izin yang dikenal, dalam urutan baris matriks di layar Peran.
      *
-     * <p>Tindakan yang tidak punya endpoint tidak ditawarkan: mesin dan
-     * lingkungan hanya bisa dibuat dan dihapus, jejak audit hanya dibaca.
+     * <p>Tindakan yang tidak punya endpoint tidak ditawarkan: lingkungan hanya
+     * bisa dibuat dan dihapus, jejak audit hanya dibaca. machines.update
+     * mengatur slot, lease, dan machine key Robot Agent.
      * Kotak centang yang tidak mengubah apa pun hanya menyesatkan orang yang
      * menyusun perannya.
      *
@@ -80,7 +81,7 @@ public final class PermissionCatalog {
             new Resource(ROBOTS, CRUD),
             new Resource(LOGS, List.of(READ, CREATE, DELETE)),
             new Resource(FOLDERS, CRUD),
-            new Resource(MACHINES, List.of(READ, CREATE, DELETE)),
+            new Resource(MACHINES, CRUD),
             new Resource(ENVIRONMENTS, List.of(READ, CREATE, DELETE)),
             new Resource(USERS, CRUD),
             new Resource(ROLES, CRUD),

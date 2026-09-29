@@ -8,6 +8,7 @@ import id.jakforge.openorchestrator.dto.response.OkResponse;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
 import id.jakforge.openorchestrator.service.JobService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -87,6 +88,19 @@ public class JobController {
         jobService.requestStop(principal, id);
 
         return OkResponse.success();
+    }
+
+    /** Lampiran job dari Robot Agent — screenshot saat gagal. */
+    @GetMapping("/{id}/attachments")
+    public List<Map<String, Object>> findAttachments(@AuthenticationPrincipal OpenOrchestratorPrincipal principal,
+                                                     @PathVariable String id) {
+        return jobService.findAttachments(principal, id);
+    }
+
+    @GetMapping("/{id}/attachments/{attachmentId}/content")
+    public ResponseEntity<byte[]> downloadAttachment(@AuthenticationPrincipal OpenOrchestratorPrincipal principal,
+                                                     @PathVariable String id, @PathVariable String attachmentId) {
+        return DownloadResponses.inline(jobService.getAttachment(principal, id, attachmentId));
     }
 
     @DeleteMapping("/{id}")

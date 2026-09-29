@@ -37,7 +37,8 @@ public record OpenOrchestratorProperties(
         @Valid @NotNull PermissionCache permissionCache,
         @Valid @NotNull Scheduler scheduler,
         @Valid @NotNull Limits limits,
-        @Valid @NotNull Bootstrap bootstrap) {
+        @Valid @NotNull Bootstrap bootstrap,
+        @Valid @NotNull Agent agent) {
 
     /**
      * Zona tampilan untuk batas "hari ini" di dasbor; UTC kalau namanya tidak
@@ -110,5 +111,37 @@ public record OpenOrchestratorProperties(
             @NotBlank String adminPassword,
             @NotBlank String adminDisplayName,
             String machineName) {
+    }
+
+    /**
+     * Robot Agent unattended (kontrak v2, /api/agent).
+     *
+     * @param tokenTtl             umur token agent
+     * @param heartbeatSeconds     jeda denyut agent saat tidak ada job
+     * @param heartbeatBusySeconds jeda denyut agent selama ada job berjalan
+     * @param offlineAfter         tanpa denyut selama ini: robot Offline, job RUNNING menjadi UNRESPONSIVE
+     * @param lostAfter            UNRESPONSIVE selama ini: job FAULTED dengan AgentLost
+     * @param reconcileGrace       job yang baru diambil tidak direkonsiliasi selama ini — denyut yang
+     *                             berangkat sebelum klaim selesai belum menyebutnya
+     * @param timeoutMargin        jaring pengaman: job melewati batas waktu proses + jeda stop + ini
+     *                             diminta berhenti oleh Orchestrator
+     * @param monitorInterval      selang pemeriksaan lease, UNRESPONSIVE, dan batas waktu
+     * @param minVersion           versi agent terendah yang diberi token
+     * @param retryAvoidWindow     selama ini percobaan ulang tidak diambil robot yang baru gagal
+     */
+    public record Agent(
+            @NotNull Duration tokenTtl,
+            @Positive int heartbeatSeconds,
+            @Positive int heartbeatBusySeconds,
+            @NotNull Duration offlineAfter,
+            @NotNull Duration lostAfter,
+            @NotNull Duration reconcileGrace,
+            @NotNull Duration timeoutMargin,
+            @NotNull Duration monitorInterval,
+            @NotBlank String minVersion,
+            @NotNull Duration retryAvoidWindow,
+            @NotNull DataSize maxAttachmentSize,
+            @Positive int maxAttachmentsPerJob,
+            @NotNull DataSize maxOutputSize) {
     }
 }
