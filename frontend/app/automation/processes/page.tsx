@@ -298,6 +298,11 @@ function DialogSimpanProses({
   const [namaDiubah, setNamaDiubah] = useState(!!awal);
   const [env, setEnv] = useState(awal?.environment ?? "Production");
   const [ket, setKet] = useState(awal?.description ?? "");
+  // Setelan robot unattended. Batas waktu dalam MENIT di layar, detik di server;
+  // kosong berarti tanpa batas.
+  const [batasMenit, setBatasMenit] = useState(awal?.timeoutSeconds ? String(Math.round(awal.timeoutSeconds / 60)) : "");
+  const [jeda, setJeda] = useState(String(awal?.stopGraceSeconds ?? 30));
+  const [ulang, setUlang] = useState(String(awal?.maxRetries ?? 1));
   const [galat, setGalat] = useState("");
 
   const dipilih = ringkasan.find((r) => r.name === namaPaket);
@@ -311,6 +316,9 @@ function DialogSimpanProses({
         environment: env || undefined,
         description: ket,
         folderId: folder.id,
+        timeoutSeconds: batasMenit.trim() ? Math.round(Number(batasMenit) * 60) : 0,
+        stopGraceSeconds: Number(jeda) || 30,
+        maxRetries: Number(ulang),
       }),
     onSuccess: () => {
       onSelesai();
@@ -410,6 +418,25 @@ function DialogSimpanProses({
       <Isian label={t("Keterangan")}>
         <input value={ket} onChange={(e) => setKet(e.target.value)} className={kelasIsian} />
       </Isian>
+
+      <h3 className="mb-2 mt-1 text-xs font-semibold uppercase tracking-wide text-muted">{t("Robot unattended")}</h3>
+      <div className="grid gap-x-4 sm:grid-cols-3">
+        <Isian label={t("Batas waktu (menit)")} petunjuk={t("Kosong = tanpa batas.")}>
+          <input type="number" min={1} max={10080} value={batasMenit} onChange={(e) => setBatasMenit(e.target.value)} className={kelasIsian} />
+        </Isian>
+        <Isian label={t("Jeda berhenti (detik)")} petunjuk={t("Sebelum Executor dimatikan paksa.")}>
+          <input type="number" min={5} max={600} value={jeda} onChange={(e) => setJeda(e.target.value)} className={kelasIsian} />
+        </Isian>
+        <Isian label={t("Percobaan ulang otomatis")} petunjuk={t("Hanya kalau gagal sebelum workflow berjalan.")}>
+          <select value={ulang} onChange={(e) => setUlang(e.target.value)} className={kelasIsian}>
+            {["0", "1", "2"].map((n) => (
+              <option key={n} value={n}>
+                {n === "0" ? t("Tidak") : n}
+              </option>
+            ))}
+          </select>
+        </Isian>
+      </div>
 
       {paket.isSuccess && ringkasan.length === 0 ? (
         <p className="mb-2 text-sm text-muted">

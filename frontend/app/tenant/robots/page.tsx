@@ -2,43 +2,60 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Trash2 } from "lucide-react";
-import { OpenOrchestratorApi, errorText } from "@/lib/api";
+import { AlertTriangle, Pencil, Plus, Trash2 } from "lucide-react";
+import { OpenOrchestratorApi, errorText, type Robot, type RobotSetelan } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
 import { dateTimeOf } from "@/lib/utils";
-import { Badge, Card, Galat, IconButton } from "@/components/ui/primitives";
+import { Badge, Button, Card, Galat, IconButton } from "@/components/ui/primitives";
 import { DataTable } from "@/components/DataTable";
 import { BilahAlat } from "@/components/HalamanFolder";
+import { Dialog, Isian, kelasIsian } from "@/components/Dialog";
 
 /**
  * Semua robot penyewa, dengan folder tempat masing-masing ditugaskan.
  *
  * Robot tidak tinggal di satu folder: satu mesin bisa melayani beberapa
  * folder. Menugaskannya ada di Setelan setiap folder; di sini robotnya
- * dilihat dan, kalau sudah tidak dipakai, dihapus.
+ * dilihat, disetel, dan, kalau sudah tidak dipakai, dihapus.
+ *
+ * Robot UNATTENDED didaftarkan di sini: diikat ke mesin yang Robot Agent-nya
+ * akan melayaninya, beserta akun Windows yang dipakai agent untuk login.
+ * Sandi Windows hanya bisa ditulis — dasbor tidak pernah menerimanya kembali.
  */
 export default function RobotPenyewa() {
   const { t } = useT();
   const { boleh } = useIzin();
   const klien = useQueryClient();
   const [galat, setGalat] = useState("");
+  const [dialog, setDialog] = useState<{ robot: Robot | null } | null>(null);
 
   const robots = useQuery({ queryKey: ["robots", "semua"], queryFn: () => OpenOrchestratorApi.robots(), refetchInterval: 10_000 });
+  const segarkan = () => klien.invalidateQueries({ queryKey: ["robots"] });
 
   const hapus = useMutation({
     mutationFn: OpenOrchestratorApi.deleteRobot,
-    onSuccess: () => klien.invalidateQueries({ queryKey: ["robots"] }),
+    onSuccess: segarkan,
     onError: (e) => setGalat(errorText(e)),
   });
 
   return (
     <div>
-      <BilahAlat>
+      <BilahAlat
+        aksi={
+          boleh("robots.create") ? (
+            <Button variant="primary" onClick={() => setDialog({ robot: null })}>
+              <Plus size={16} />
+              {t("Tambah robot")}
+            </Button>
+          ) : null
+        }
+      >
         <p className="text-sm text-muted">
           {t(
             "Robot mendaftarkan dirinya sendiri saat JakRunner berdenyut pertama kali, dan langsung ditugaskan ke folder Shared.",
-          )}
+          )}{" "}
+          {t("Robot unattended ditambahkan di sini dan diikat ke mesin Robot Agent-nya.")}
         </p>
       </BilahAlat>
 
@@ -50,9 +67,38 @@ export default function RobotPenyewa() {
           kunci={(r) => r.name}
           kosong={robots.isLoading ? "Memuat..." : "Belum ada robot yang mendaftar."}
           kolom={[
-            { judul: "Nama", sel: (r) => <span className="font-medium">{r.name}</span>, urut: (r) => r.name },
+            {
+              judul: "Nama",
+              sel: (r) => (
+                <span className="flex items-center gap-1.5 font-medium">
+                  {r.name}
+                  {r.needsAttention ? (
+                    <span title={t("Perlu perhatian: {0}", r.needsAttention)} className="text-danger">
+                      <AlertTriangle size={14} />
+                    </span>
+                  ) : null}
+                </span>
+              ),
+              urut: (r) => r.name,
+            },
             { judul: "Mesin|satu", sel: (r) => <span className="text-muted">{r.machineName ?? "-"}</span>, urut: (r) => r.machineName },
             { judul: "Tipe", sel: (r) => r.type, urut: (r) => r.type },
+            {
+              judul: "Sesi Windows",
+              sel: (r) => <SelSesi robot={r} />,
+            },
+            {
+              judul: "Pekerjaan|satu",
+              sel: (r) =>
+                r.currentJobProcess ? (
+                  <span className="flex items-center gap-2">
+                    <span className="max-w-40 truncate">{r.currentJobProcess}</span>
+                    {r.currentJobState ? <Badge value={r.currentJobState} /> : null}
+                  </span>
+                ) : (
+                  <span className="text-muted">-</span>
+                ),
+            },
             {
               judul: "Folder",
               sel: (r) =>
@@ -65,15 +111,6 @@ export default function RobotPenyewa() {
                 ),
             },
             {
-              judul: "CPU / Memori",
-              sel: (r) => (
-                <span className="tabular-nums text-muted">
-                  {r.cpuPercent.toFixed(1)}% / {r.memoryMb.toFixed(0)} MB
-                </span>
-              ),
-              urut: (r) => r.cpuPercent,
-            },
-            {
               judul: "Denyut",
               sel: (r) => <span className="text-muted">{dateTimeOf(r.lastHeartbeatAt)}</span>,
               urut: (r) => r.lastHeartbeatAt,
@@ -81,9 +118,14 @@ export default function RobotPenyewa() {
             { judul: "Status", sel: (r) => <Badge value={r.status} />, urut: (r) => r.status },
             {
               judul: "",
-              sel: (r) =>
-                boleh("robots.delete") ? (
-                  <div className="flex justify-end">
+              sel: (r) => (
+                <div className="flex justify-end gap-1">
+                  {boleh("robots.create") ? (
+                    <IconButton label={t("Ubah")} onClick={() => setDialog({ robot: r })}>
+                      <Pencil size={16} />
+                    </IconButton>
+                  ) : null}
+                  {boleh("robots.delete") ? (
                     <IconButton
                       label={t("Hapus")}
                       tone="danger"
@@ -93,12 +135,188 @@ export default function RobotPenyewa() {
                     >
                       <Trash2 size={16} />
                     </IconButton>
-                  </div>
-                ) : null,
+                  ) : null}
+                </div>
+              ),
             },
           ]}
         />
       </Card>
+
+      {dialog ? <DialogRobot robot={dialog.robot} onTutup={() => setDialog(null)} onSelesai={segarkan} /> : null}
     </div>
+  );
+}
+
+/** Sesi Windows menurut Robot Agent: nomor, keadaan, dan alasan kalau belum siap. */
+function SelSesi({ robot }: { robot: Robot }) {
+  const { t, tp } = useT();
+
+  if (!robot.machineId) return <span className="text-muted">-</span>;
+  if (!robot.agentState) return <span className="text-muted">{t("Belum ada kabar dari agent")}</span>;
+
+  const siap = robot.sessionReady !== false && robot.agentState !== "Error";
+  const keterangan = robot.reasonText ? tp(robot.reasonText) : robot.reasonCode;
+
+  return (
+    <span className="flex flex-col">
+      <span className="flex items-center gap-2">
+        <Badge value={siap ? "AVAILABLE" : "STOPPING"} label={t(siap ? "Siap" : "Belum siap")} />
+        <span className="text-xs text-muted">
+          {robot.sessionState ?? "-"}
+          {robot.sessionId != null ? ` #${robot.sessionId}` : ""}
+          {robot.executorState === "Running" && robot.executorPid ? ` · PID ${robot.executorPid}` : ""}
+        </span>
+      </span>
+      {!siap && keterangan ? <span className="mt-0.5 text-xs text-warn">{keterangan}</span> : null}
+    </span>
+  );
+}
+
+const TIPE_ROBOT = ["Unattended", "Attended", "NonProduction"];
+
+function DialogRobot({ robot, onTutup, onSelesai }: { robot: Robot | null; onTutup: () => void; onSelesai: () => void }) {
+  const { t } = useT();
+  const mesin = useQuery({ queryKey: ["machines"], queryFn: OpenOrchestratorApi.machines });
+
+  const [nama, setNama] = useState(robot?.name ?? "");
+  const [tipe, setTipe] = useState(robot?.type ?? "Unattended");
+  const [namaMesin, setNamaMesin] = useState(robot?.machineName ?? "");
+  const [akun, setAkun] = useState(robot?.windowsUsername ?? "");
+  const [sandi, setSandi] = useState("");
+  const [sandiLokal, setSandiLokal] = useState(robot?.windowsPasswordLocal ?? false);
+  const [kebijakan, setKebijakan] = useState<"Logoff" | "KeepLoggedIn">(robot?.sessionPolicy ?? "Logoff");
+  const [ket, setKet] = useState(robot?.description ?? "");
+  const [galat, setGalat] = useState("");
+
+  const unattended = tipe !== "Attended";
+
+  const simpan = useMutation({
+    mutationFn: () => {
+      const setelan: RobotSetelan = {
+        type: tipe,
+        machineName: namaMesin,
+        description: ket,
+        ...(unattended
+          ? {
+              windowsUsername: akun,
+              windowsPassword: sandiLokal ? undefined : sandi || undefined,
+              windowsPasswordLocal: sandiLokal,
+              sessionPolicy: kebijakan,
+            }
+          : {}),
+      };
+
+      return robot ? OpenOrchestratorApi.updateRobot(robot.name, setelan) : OpenOrchestratorApi.saveRobot({ name: nama.trim(), ...setelan });
+    },
+    onSuccess: () => {
+      onSelesai();
+      onTutup();
+    },
+    onError: (e) => setGalat(errorText(e)),
+  });
+
+  function kirim() {
+    setGalat("");
+    if (!robot && !nama.trim()) return setGalat(t("Nama robot wajib diisi."));
+    if (unattended && namaMesin && akun && !/[\\@]/.test(akun)) {
+      return setGalat(t("Tulis akun Windows sebagai DOMAIN\\nama, atau .\\nama untuk akun lokal."));
+    }
+    simpan.mutate();
+  }
+
+  return (
+    <Dialog
+      judul={robot ? `${t("Ubah robot")} — ${robot.name}` : t("Tambah robot")}
+      terbuka
+      onTutup={onTutup}
+      lebar="max-w-xl"
+      aksi={
+        <>
+          <Button onClick={onTutup}>{t("Batal")}</Button>
+          <Button variant="primary" onClick={kirim} disabled={simpan.isPending}>
+            {simpan.isPending ? t("Menyimpan...") : t("Simpan")}
+          </Button>
+        </>
+      }
+    >
+      <div className="grid gap-x-4 sm:grid-cols-2">
+        <Isian label={t("Nama")}>
+          <input value={nama} onChange={(e) => setNama(e.target.value)} disabled={!!robot} className={kelasIsian} />
+        </Isian>
+        <Isian label={t("Tipe")}>
+          <select value={tipe} onChange={(e) => setTipe(e.target.value)} className={kelasIsian}>
+            {TIPE_ROBOT.map((x) => (
+              <option key={x} value={x}>
+                {x}
+              </option>
+            ))}
+          </select>
+        </Isian>
+      </div>
+
+      <Isian
+        label={t("Mesin|satu")}
+        petunjuk={unattended ? t("Robot Agent di mesin ini yang menjalankan job robot ini.") : undefined}
+      >
+        <select value={namaMesin} onChange={(e) => setNamaMesin(e.target.value)} className={kelasIsian}>
+          <option value="">—</option>
+          {(mesin.data ?? []).map((m) => (
+            <option key={m.name} value={m.name}>
+              {m.name}
+              {m.hasKey ? "" : ` (${t("belum ada machine key")})`}
+            </option>
+          ))}
+        </select>
+      </Isian>
+
+      {unattended ? (
+        <>
+          <div className="grid gap-x-4 sm:grid-cols-2">
+            <Isian label={t("Akun Windows")} petunjuk={t("DOMAIN\\nama, atau .\\nama untuk akun lokal.")}>
+              <input value={akun} onChange={(e) => setAkun(e.target.value)} autoComplete="off" className={kelasIsian} />
+            </Isian>
+            <Isian
+              label={t("Sandi Windows")}
+              petunjuk={
+                robot?.hasWindowsPassword ? t("Sudah tersimpan. Biarkan kosong untuk tetap memakai yang lama.") : undefined
+              }
+            >
+              <input
+                type="password"
+                value={sandi}
+                onChange={(e) => setSandi(e.target.value)}
+                disabled={sandiLokal}
+                autoComplete="new-password"
+                className={kelasIsian}
+              />
+            </Isian>
+          </div>
+
+          <label className="mb-3 flex items-start gap-2 text-sm">
+            <input type="checkbox" checked={sandiLokal} onChange={(e) => setSandiLokal(e.target.checked)} className="mt-0.5" />
+            <span>
+              {t("Sandi disimpan di mesin robot, bukan di Orchestrator")}
+              <span className="block text-xs text-muted">
+                {t("Orchestrator hanya menyimpan nama akunnya; sandinya diisi saat memasang Robot Agent.")}
+              </span>
+            </span>
+          </label>
+
+          <Isian label={t("Sesudah job selesai")}>
+            <select value={kebijakan} onChange={(e) => setKebijakan(e.target.value as "Logoff" | "KeepLoggedIn")} className={kelasIsian}>
+              <option value="Logoff">{t("Logoff — tidak ada jendela sisa untuk job berikutnya")}</option>
+              <option value="KeepLoggedIn">{t("Tetap login — untuk aplikasi yang harus terus terbuka")}</option>
+            </select>
+          </Isian>
+        </>
+      ) : null}
+
+      <Isian label={t("Keterangan")}>
+        <input value={ket} onChange={(e) => setKet(e.target.value)} className={kelasIsian} />
+      </Isian>
+
+      <Galat pesan={galat} />
+    </Dialog>
   );
 }

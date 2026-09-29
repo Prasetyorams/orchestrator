@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { OpenOrchestratorApi, errorText, type FolderNode, type Job } from "@/lib/api";
+import { KEADAAN_BERJALAN, OpenOrchestratorApi, errorText, type FolderNode, type Job, type JobAttachment } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
 import { cn, dateTimeOf } from "@/lib/utils";
@@ -11,7 +11,18 @@ import { DataTable } from "@/components/DataTable";
 import { Dialog, Isian, kelasIsian } from "@/components/Dialog";
 import { BilahAlat, PerluFolder } from "@/components/HalamanFolder";
 
-const KEADAAN = ["", "PENDING", "RUNNING", "STOPPING", "SUCCESSFUL", "FAULTED", "STOPPED"];
+const KEADAAN = [
+  "",
+  "PENDING",
+  "ASSIGNED",
+  "PREPARING_SESSION",
+  "RUNNING",
+  "UNRESPONSIVE",
+  "STOPPING",
+  "SUCCESSFUL",
+  "FAULTED",
+  "STOPPED",
+];
 
 export default function Pekerjaan() {
   return <PerluFolder>{(folder) => <IsiPekerjaan folder={folder} />}</PerluFolder>;
@@ -98,7 +109,7 @@ function IsiPekerjaan({ folder }: { folder: FolderNode }) {
                   <Button
                     onClick={() =>
                       dipilih
-                        .filter((j) => j.state === "PENDING" || j.state === "RUNNING")
+                        .filter((j) => KEADAAN_BERJALAN.includes(j.state))
                         .forEach((j) => hentikan.mutate(j.id))
                     }
                   >
@@ -124,11 +135,27 @@ function IsiPekerjaan({ folder }: { folder: FolderNode }) {
           kolom={[
             {
               judul: "Proses|satu",
-              sel: (j) => <span className="font-medium">{j.processName}</span>,
+              sel: (j) => (
+                <span className="font-medium">
+                  {j.processName}
+                  {j.attempt && j.attempt > 1 ? (
+                    <span className="ml-2 text-xs font-normal text-muted">{t("percobaan {0}", j.attempt)}</span>
+                  ) : null}
+                </span>
+              ),
               urut: (j) => j.processName,
             },
             { judul: "Robot|satu", sel: (j) => j.robotName ?? "-", urut: (j) => j.robotName },
-            { judul: "Keadaan", sel: (j) => <Badge value={j.state} />, urut: (j) => j.state },
+            {
+              judul: "Keadaan",
+              sel: (j) => (
+                <span className="flex flex-col items-start gap-0.5">
+                  <Badge value={j.state} />
+                  {j.errorCode ? <span className="text-[11px] text-muted">{j.errorCode}</span> : null}
+                </span>
+              ),
+              urut: (j) => j.state,
+            },
             { judul: "Sumber", sel: (j) => <span className="text-muted">{j.source}</span>, urut: (j) => j.source },
             { judul: "Prioritas", sel: (j) => j.priority, urut: (j) => j.priority },
             {
@@ -152,18 +179,35 @@ function IsiPekerjaan({ folder }: { folder: FolderNode }) {
   );
 }
 
-function DialogDetail({ job, onTutup }: { job: Job | null; onTutup: () => void }) {
+function DialogDetail({ job: ringkas, onTutup }: { job: Job | null; onTutup: () => void }) {
   const { t, tp } = useT();
+
+  // Rincian lengkap — konteks eksekusi, paket, lampiran — hanya ada di
+  // jawaban satu job; daftar membawa ringkasannya saja.
+  const rincian = useQuery({
+    queryKey: ["job", ringkas?.id],
+    queryFn: () => OpenOrchestratorApi.job(ringkas!.id),
+    enabled: !!ringkas,
+    refetchInterval: 5_000,
+  });
 
   // Log pekerjaan ini diambil hanya saat dialognya terbuka: log berada DI
   // DALAM prosesnya, bukan di halaman terpisah yang harus disaring sendiri.
   const log = useQuery({
-    queryKey: ["logs", "job", job?.id],
-    queryFn: () => OpenOrchestratorApi.logs({ jobId: job!.id, limit: 500 }),
-    enabled: !!job,
+    queryKey: ["logs", "job", ringkas?.id],
+    queryFn: () => OpenOrchestratorApi.logs({ jobId: ringkas!.id, limit: 500 }),
+    enabled: !!ringkas,
   });
 
-  if (!job) return null;
+  const lampiran = useQuery({
+    queryKey: ["job", ringkas?.id, "lampiran"],
+    queryFn: () => OpenOrchestratorApi.jobAttachments(ringkas!.id),
+    enabled: !!ringkas && (rincian.data?.attachmentCount ?? 0) > 0,
+  });
+
+  if (!ringkas) return null;
+
+  const job = rincian.data ?? ringkas;
 
   return (
     <Dialog judul={`${job.processName} — ${t(labelKeadaan(job.state))}`} terbuka onTutup={onTutup} lebar="max-w-3xl">
@@ -174,12 +218,44 @@ function DialogDetail({ job, onTutup }: { job: Job | null; onTutup: () => void }
         <Medan label={t("Prioritas")} nilai={job.priority} />
         <Medan label={t("Dimulai")} nilai={dateTimeOf(job.startedAt)} />
         <Medan label={t("Selesai")} nilai={dateTimeOf(job.endedAt)} />
+        {job.contractVersion === 2 ? (
+          <>
+            <Medan label={t("Percobaan")} nilai={String(job.attempt ?? 1)} />
+            <Medan label={t("Sesi Windows")} nilai={job.sessionId != null ? `#${job.sessionId} · ${job.windowsUser ?? "-"}` : null} />
+            <Medan label={t("PID Executor")} nilai={job.executorPid != null ? String(job.executorPid) : null} />
+            <Medan label={t("Paket|satu")} nilai={job.packageName ? `${job.packageName} ${job.packageVersion ?? ""}` : null} />
+            <Medan
+              label={t("Batas waktu")}
+              nilai={job.timeoutSeconds ? t("{0} menit", Math.round(job.timeoutSeconds / 60)) : t("Tanpa batas")}
+            />
+            <Medan label={t("Kode galat")} nilai={job.errorCode} />
+          </>
+        ) : null}
       </dl>
+
+      {job.failureInferred ? (
+        <p className="mb-3 text-xs text-warn">
+          {t("Kegagalan ini disimpulkan Orchestrator karena robotnya tidak memberi kabar; laporan asli robot yang datang belakangan bisa menggantikannya.")}
+        </p>
+      ) : null}
+
+      {job.retryOf ? <p className="mb-3 text-xs text-muted">{t("Percobaan ulang otomatis dari pekerjaan {0}.", job.retryOf)}</p> : null}
 
       {job.info ? <p className="mb-4 rounded-lg bg-slate-50 px-3 py-2 text-sm">{tp(job.info)}</p> : null}
 
       {job.inputJson ? <Kode judul="Input" isi={job.inputJson} /> : null}
       {job.outputJson ? <Kode judul="Output" isi={job.outputJson} /> : null}
+
+      {lampiran.data?.length ? (
+        <>
+          <h3 className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-muted">{t("Screenshot")}</h3>
+          <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {lampiran.data.map((a) => (
+              <Gambar key={a.id} jobId={job.id} lampiran={a} />
+            ))}
+          </div>
+        </>
+      ) : null}
 
       <h3 className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-muted">{t("Catatan")}</h3>
 
@@ -199,6 +275,49 @@ function DialogDetail({ job, onTutup }: { job: Job | null; onTutup: () => void }
         )}
       </div>
     </Dialog>
+  );
+}
+
+/**
+ * Screenshot lewat axios, bukan <img src> langsung: gambar harus membawa token,
+ * dan peramban tidak menyertakan header Authorization untuk <img>.
+ */
+function Gambar({ jobId, lampiran }: { jobId: string; lampiran: JobAttachment }) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let dibuat: string | null = null;
+    let batal = false;
+
+    OpenOrchestratorApi.jobAttachmentBlob(jobId, lampiran.id)
+      .then((blob) => {
+        if (batal) return;
+        dibuat = URL.createObjectURL(blob);
+        setUrl(dibuat);
+      })
+      .catch(() => setUrl(null));
+
+    return () => {
+      batal = true;
+      if (dibuat) URL.revokeObjectURL(dibuat);
+    };
+  }, [jobId, lampiran.id]);
+
+  return (
+    <a
+      href={url ?? undefined}
+      target="_blank"
+      rel="noreferrer"
+      className="block overflow-hidden rounded-lg border border-line bg-slate-50"
+      title={`${lampiran.fileName ?? lampiran.kind} · ${dateTimeOf(lampiran.createdAt)}`}
+    >
+      {url ? (
+        // eslint-disable-next-line @next/next/no-img-element -- blob: URL, bukan gambar yang bisa dioptimalkan Next
+        <img src={url} alt={lampiran.fileName ?? lampiran.kind} className="h-32 w-full object-cover object-top" />
+      ) : (
+        <span className="block h-32" />
+      )}
+    </a>
   );
 }
 

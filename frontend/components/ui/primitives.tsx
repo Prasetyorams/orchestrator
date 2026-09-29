@@ -112,6 +112,9 @@ export function Galat({ pesan, className }: { pesan?: string | null; className?:
 const badgeTone: Record<string, string> = {
   RUNNING: "bg-blue-50 text-info ring-blue-200",
   PENDING: "bg-amber-50 text-warn ring-amber-200",
+  ASSIGNED: "bg-blue-50 text-info ring-blue-200",
+  PREPARING_SESSION: "bg-blue-50 text-info ring-blue-200",
+  UNRESPONSIVE: "bg-amber-50 text-warn ring-amber-200",
   SUCCESSFUL: "bg-emerald-50 text-ok ring-emerald-200",
   FAULTED: "bg-red-50 text-danger ring-red-200",
   STOPPING: "bg-amber-50 text-warn ring-amber-200",
@@ -138,7 +141,10 @@ const badgeTone: Record<string, string> = {
  */
 const LABEL_KEADAAN: Record<string, string> = {
   PENDING: "Menunggu",
+  ASSIGNED: "Diambil robot",
+  PREPARING_SESSION: "Menyiapkan sesi",
   RUNNING: "Berjalan",
+  UNRESPONSIVE: "Hilang kontak",
   SUCCESSFUL: "Berhasil",
   FAULTED: "Gagal",
   STOPPING: "Menghentikan",

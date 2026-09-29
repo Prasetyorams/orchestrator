@@ -81,7 +81,24 @@ export function statusGalat(e: unknown): number | undefined {
 // Bentuk data
 // ---------------------------------------------------------------------
 
-export type JobState = "PENDING" | "RUNNING" | "SUCCESSFUL" | "FAULTED" | "STOPPING" | "STOPPED";
+/**
+ * ASSIGNED, PREPARING_SESSION, dan UNRESPONSIVE hanya dipakai job Robot Agent
+ * unattended (kontrak v2): diambil agent, sesi Windows sedang disiapkan, dan
+ * agent hilang kontak.
+ */
+export type JobState =
+  | "PENDING"
+  | "ASSIGNED"
+  | "PREPARING_SESSION"
+  | "RUNNING"
+  | "UNRESPONSIVE"
+  | "SUCCESSFUL"
+  | "FAULTED"
+  | "STOPPING"
+  | "STOPPED";
+
+/** Keadaan job yang belum selesai dan bisa dihentikan. */
+export const KEADAAN_BERJALAN: JobState[] = ["PENDING", "ASSIGNED", "PREPARING_SESSION", "RUNNING", "UNRESPONSIVE"];
 
 export type Job = {
   id: string;
@@ -99,6 +116,38 @@ export type Job = {
   startedAt: string | null;
   endedAt: string | null;
   folderId?: string | null;
+  /** 2 = dijalankan Robot Agent unattended. */
+  contractVersion?: number;
+  /** Percobaan ke berapa; percobaan ulang otomatis menunjuk job lama lewat retryOf. */
+  attempt?: number;
+  retryOf?: string | null;
+  retried?: boolean;
+  /** Kode kegagalan untuk mesin, mis. SessionPreparationFailed, WorkflowFailed, AgentLost. */
+  errorCode?: string | null;
+  /** Kegagalannya disimpulkan Orchestrator (robot hilang), bukan dilaporkan robot. */
+  failureInferred?: boolean;
+  leaseExpiresAt?: string | null;
+  runningAt?: string | null;
+  unresponsiveSince?: string | null;
+  stopRequestedAt?: string | null;
+  sessionId?: number | null;
+  windowsUser?: string | null;
+  executorPid?: number | null;
+  timeoutSeconds?: number | null;
+  stopGraceSeconds?: number | null;
+  packageName?: string | null;
+  packageVersion?: string | null;
+  packageSha256?: string | null;
+  attachmentCount?: number;
+};
+
+export type JobAttachment = {
+  id: string;
+  kind: string;
+  fileName: string | null;
+  contentType: string;
+  sizeBytes: number;
+  createdAt: string;
 };
 
 export type Robot = {
@@ -116,6 +165,27 @@ export type Robot = {
   createdAt: string;
   /** Nama folder bersama tempat robot ini ditugaskan. */
   folders?: string[] | null;
+  /** Mesin tempat Robot Agent melayani robot ini (robot unattended). */
+  machineId?: string | null;
+  windowsUsername?: string | null;
+  /** Sandinya sendiri tidak pernah dikirim ke dasbor. */
+  hasWindowsPassword?: boolean;
+  windowsPasswordLocal?: boolean;
+  sessionPolicy?: "Logoff" | "KeepLoggedIn";
+  /** Dari denyut Robot Agent. */
+  agentState?: "Idle" | "Busy" | "Error" | null;
+  sessionId?: number | null;
+  sessionState?: string | null;
+  sessionReady?: boolean | null;
+  reasonCode?: string | null;
+  reasonText?: string | null;
+  executorState?: string | null;
+  executorPid?: number | null;
+  /** Mis. LogonFailed — robot tidak diberi job sampai sandinya diganti. */
+  needsAttention?: string | null;
+  currentJobId?: string | null;
+  currentJobProcess?: string | null;
+  currentJobState?: JobState | null;
 };
 
 export type Machine = {
@@ -126,6 +196,36 @@ export type Machine = {
   description: string | null;
   robotCount: number;
   createdAt: string;
+  /** Berapa job Robot Agent boleh berjalan bersamaan. */
+  slots?: number;
+  leaseSeconds?: number;
+  hasKey?: boolean;
+  keyPrefix?: string | null;
+  keyCreatedAt?: string | null;
+  agentVersion?: string | null;
+  agentOs?: string | null;
+  agentHostName?: string | null;
+  maxInteractiveSessions?: number | null;
+  agentCpuPercent?: number | null;
+  agentMemoryUsedMb?: number | null;
+  agentMemoryTotalMb?: number | null;
+  lastAgentLoginAt?: string | null;
+  lastAgentHeartbeatAt?: string | null;
+  agentOnline?: boolean;
+  unattendedRobotCount?: number;
+  activeJobs?: number;
+};
+
+/** Setelan robot yang bisa diubah dari dasbor (POST/PUT /api/robots). */
+export type RobotSetelan = {
+  type?: string;
+  machineName?: string;
+  description?: string;
+  windowsUsername?: string;
+  /** Hanya bisa ditulis. */
+  windowsPassword?: string;
+  windowsPasswordLocal?: boolean;
+  sessionPolicy?: "Logoff" | "KeepLoggedIn";
 };
 
 export type Environment = {
@@ -151,6 +251,10 @@ export type Process = {
   activeJobs: number;
   /** Keadaan terjauh di antara pekerjaan itu; null kalau tidak ada. */
   activeState: JobState | null;
+  /** Robot unattended: batas waktu job (null = tanpa batas), jeda berhenti, percobaan ulang otomatis. */
+  timeoutSeconds?: number | null;
+  stopGraceSeconds?: number;
+  maxRetries?: number;
 };
 
 export type Package = {
@@ -162,6 +266,7 @@ export type Package = {
   publishedBy: string | null;
   publishedAt: string;
   sizeBytes: number;
+  sha256?: string | null;
 };
 
 export type Trigger = {
@@ -560,18 +665,32 @@ export const OpenOrchestratorApi = {
     source?: string;
   }) => post<{ ok: boolean; id: string }>("/api/jobs", body),
   stopJob: (id: string) => post<{ ok: boolean }>(`/api/jobs/${seg(id)}/stop`),
+  jobAttachments: (id: string) => get<JobAttachment[]>(`/api/jobs/${seg(id)}/attachments`),
+  /** Isi lampiran sebagai Blob — lewat axios supaya tokennya ikut; <img src> biasa tidak membawa header. */
+  jobAttachmentBlob: (id: string, attachmentId: string) =>
+    api
+      .get<Blob>(`/api/jobs/${seg(id)}/attachments/${seg(attachmentId)}/content`, { responseType: "blob" })
+      .then((r) => r.data),
   deleteJob: (id: string) => del<{ ok: boolean }>(`/api/jobs/${seg(id)}`),
 
   // --- robot dan mesin ---
   /** Dengan folder: hanya robot yang ditugaskan ke folder itu. */
   robots: (folderId?: string | null) => get<Robot[]>("/api/robots", dalam(folderId)),
-  saveRobot: (body: Partial<Robot> & { name: string }) => post<{ ok: boolean }>("/api/robots", body),
+  saveRobot: (body: RobotSetelan & { name: string }) => post<{ ok: boolean }>("/api/robots", body),
+  /** Sandi Windows kosong = tetap yang lama; machineName kosong = lepas dari mesin. */
+  updateRobot: (name: string, body: RobotSetelan) => put<{ ok: boolean }>(`/api/robots/${seg(name)}`, body),
   deleteRobot: (name: string) => del<{ ok: boolean }>(`/api/robots/${seg(name)}`),
 
   machines: () => get<Machine[]>("/api/machines"),
   saveMachine: (body: { name: string; type?: string; description?: string }) =>
     post<{ ok: boolean }>("/api/machines", body),
   deleteMachine: (name: string) => del<{ ok: boolean }>(`/api/machines/${seg(name)}`),
+  updateMachine: (name: string, body: { description?: string; slots?: number; leaseSeconds?: number }) =>
+    put<{ ok: boolean }>(`/api/machines/${seg(name)}`, body),
+  /** Kuncinya hanya terlihat SEKALI di jawaban ini. */
+  createMachineKey: (name: string) =>
+    post<{ machineKey: string; keyPrefix: string }>(`/api/machines/${seg(name)}/key`),
+  revokeMachineKey: (name: string) => del<{ ok: boolean }>(`/api/machines/${seg(name)}/key`),
 
   environments: () => get<Environment[]>("/api/environments"),
   saveEnvironment: (body: { name: string; description?: string }) =>
@@ -587,6 +706,10 @@ export const OpenOrchestratorApi = {
     description?: string;
     environment?: string;
     folderId?: string;
+    /** 0 = tanpa batas waktu. */
+    timeoutSeconds?: number;
+    stopGraceSeconds?: number;
+    maxRetries?: number;
   }) => post<{ ok: boolean }>("/api/processes", body),
   /** Nama proses unik per folder: dari folder mana, ke folder mana. */
   moveProcess: (name: string, dari: string, ke: string) =>
