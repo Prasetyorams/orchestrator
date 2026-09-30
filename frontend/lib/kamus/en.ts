@@ -1026,4 +1026,7 @@ export const PESAN_EN: Record<string, string> = {
   "Robot melanjutkan pekerjaan.": "The robot resumed the job.",
   "Robot berhenti berdenyut saat pekerjaan sedang dihentikan; pekerjaan dianggap berhenti.": "The robot stopped sending heartbeats while the job was stopping; the job is considered stopped.",
   "Robot {0} berhenti berdenyut saat pekerjaan sedang dihentikan.": "Robot {0} stopped sending heartbeats while the job was stopping.",
+
+  // --- penerus /api dasbor ---
+  "Dasbor tidak bisa menghubungi backend OpenOrchestrator.": "The dashboard can't reach the OpenOrchestrator backend.",
 };

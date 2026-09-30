@@ -10,10 +10,12 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# URL API dibaca saat BANGUN karena NEXT_PUBLIC_ ditanam ke berkas
-# JavaScript-nya. Mengubahnya berarti membangun ulang image — itu memang
-# sifat variabel NEXT_PUBLIC_, bukan kelalaian.
-ARG NEXT_PUBLIC_API_URL=http://localhost:8080
+# Kosong = dasbor memanggil API lewat alamatnya sendiri (/api), yang
+# diteruskan server dasbor ke API_INTERNAL_URL saat berjalan — image yang sama
+# berlaku di alamat mana pun. Diisi hanya kalau peramban harus memanggil API
+# di domain lain; nilai NEXT_PUBLIC_ ditanam saat BANGUN, jadi mengubahnya
+# berarti membangun ulang image.
+ARG NEXT_PUBLIC_API_URL=
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 RUN npm run build

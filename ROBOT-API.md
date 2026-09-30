@@ -562,3 +562,30 @@ jawaban klaim hanya informasi; kapasitas per tipe runtime diurus server.
 
 Setiap perubahan jeda juga tercatat di log job ("Robot menjeda pekerjaan…", "Robot melanjutkan
 pekerjaan.").
+
+## Dasbor bisa dibuka dari VM atau mesin lain (30 Sep 2026)
+
+**Sebelumnya:** alamat API ditanam ke dasbor saat build (`NEXT_PUBLIC_API_URL`, bawaannya
+`http://localhost:8080`). Dasbor yang dibuka dari mesin lain — mis. VM uji di
+`http://<IP-host>:3000` — gagal login, karena peramban di VM memanggil `localhost:8080` milik
+VM itu sendiri.
+
+**Sekarang:** peramban memanggil `/api/*` di alamat dasbor itu sendiri, dan server dasbor
+meneruskannya ke backend lewat jaringan Docker (`API_INTERNAL_URL`, di Docker Compose
+`http://backend:8080`). Dasbor bisa dibuka dari alamat mana pun — localhost, IP LAN, VM,
+domain — tanpa build ulang dan tanpa setelan CORS.
+
+Untuk sisi robot:
+
+- **Tidak ada yang berubah.** Studio, JakRunner, dan Robot Agent tetap memanggil backend
+  langsung: `http://<IP-host>:8080` saat uji, `https://api.<domain>` di server. Jangan
+  arahkan mereka ke port 3000 (dasbor).
+- Menjalankan Docker Orchestrator sendiri untuk uji: `NEXT_PUBLIC_API_URL` di `.env` boleh
+  kosong — nilai `localhost` diabaikan. `CORS_ORIGINS` hanya berpengaruh kalau
+  `NEXT_PUBLIC_API_URL` diisi.
+- Uji di VM kini bisa sekalian memantau dari dasbor di dalam VM: buka `http://<IP-host>:3000`
+  (Ctrl+F5 kalau halaman lama masih tersimpan di cache).
+
+Kodenya: `frontend/app/api/[...jalur]/route.ts` (penerus), `frontend/lib/api.ts`
+(`alamatApi`), dan `API_INTERNAL_URL` di `docker-compose.yml`. Penyebaran di server:
+`DEPLOY.md` langkah `.env`.

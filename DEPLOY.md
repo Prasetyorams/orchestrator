@@ -147,7 +147,6 @@ JWT_SECRET=<hasil acak pertama>
 DB_PASSWORD=<hasil acak kedua>
 OPENORCHESTRATOR_TZ=Asia/Jakarta
 CORS_ORIGINS=https://orchestrator.domainmu.com
-NEXT_PUBLIC_API_URL=https://api.orchestrator.domainmu.com
 ```
 
 Simpan: Ctrl+O, Enter, Ctrl+X.
@@ -156,15 +155,18 @@ Simpan: Ctrl+O, Enter, Ctrl+X.
   repo, dan siapa pun yang tahu nilai itu bisa memalsukan login.
 - **`DB_PASSWORD` hanya dipakai saat volume DB dibuat pertama kali.**
   Mengubahnya belakangan tidak mengubah kata sandi yang sudah tersimpan.
-- **`NEXT_PUBLIC_API_URL` "dibakar" ke dasbor saat build.** Kalau diubah,
-  dasbor harus di-build ulang.
+- **`NEXT_PUBLIC_API_URL` tidak perlu diisi.** Dasbor memanggil API lewat
+  alamatnya sendiri (`https://orchestrator.domainmu.com/api/...`), dan server
+  dasbor meneruskannya ke backend di dalam jaringan Docker. Isi hanya kalau
+  peramban harus memanggil `https://api.orchestrator.domainmu.com` langsung —
+  nilainya "dibakar" saat build, jadi mengubahnya berarti build ulang dasbor.
 
 ```bash
 chmod 600 .env
 ```
 
 - [ ] `JWT_SECRET` dan `DB_PASSWORD` acak, bukan `GANTI-SAYA`
-- [ ] `CORS_ORIGINS` dan `NEXT_PUBLIC_API_URL` memakai `https://` dan domain yang benar
+- [ ] `CORS_ORIGINS` memakai `https://` dan domain yang benar
 
 ---
 
@@ -361,8 +363,8 @@ Migrasi basis data (Flyway) berjalan otomatis saat backend naik.
 | Gejala | Penyebab paling umum |
 |---|---|
 | Backend terus *restarting* | `signing.key` tidak ada (Docker membuat folder), atau `DB_PASSWORD` tidak cocok dengan volume lama — cek `docker compose logs backend` |
-| Login di dasbor gagal / error CORS | `CORS_ORIGINS` tidak sama persis dengan alamat dasbor, termasuk `https://` |
-| Dasbor memanggil alamat API yang salah | `NEXT_PUBLIC_API_URL` salah — perbaiki di `.env`, lalu `docker compose up -d --build frontend` |
+| Login di dasbor gagal, galat "Dasbor tidak bisa menghubungi backend" | Backend mati atau belum sehat — cek `docker compose ps` dan `docker compose logs backend` |
+| Login di dasbor gagal / error CORS | Hanya terjadi kalau `NEXT_PUBLIC_API_URL` diisi: `CORS_ORIGINS` harus sama persis dengan alamat dasbor, termasuk `https://`. Atau kosongkan `NEXT_PUBLIC_API_URL`, lalu `docker compose up -d --build frontend` |
 | HTTPS tidak jalan | DNS belum mengarah ke IP server, atau port 80/443 belum dibuka |
 | Kredensial terbaca kosong | `signing.key` di server berbeda dari yang dipakai saat kredensial dibuat |
 | Build berhenti di tengah | RAM kurang — pakai server 4 GB atau tambahkan swap |

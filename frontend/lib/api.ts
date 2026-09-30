@@ -22,8 +22,33 @@ import { bahasaAktif, terjemahkan, terjemahkanPesan } from "@/lib/bahasa";
  */
 const TOKEN_KEY = "openorchestrator.token";
 
+/**
+ * Alamat API untuk peramban.
+ *
+ * Bawaannya KOSONG: dasbor memanggil `/api/...` di alamatnya sendiri, dan
+ * server dasbor meneruskannya ke backend (app/api/[...jalur]/route.ts). Dasbor
+ * jadi bisa dibuka dari alamat mana pun — localhost, IP LAN, VM, domain —
+ * tanpa build ulang dan tanpa setelan CORS.
+ *
+ * NEXT_PUBLIC_API_URL hanya dipakai kalau menunjuk ke mesin lain. Alamat
+ * localhost DIABAIKAN: di peramban, "localhost" berarti komputer yang membuka
+ * dasbor, bukan server-nya — itu sebabnya dasbor yang dibuka dari VM dulu
+ * gagal masuk. Jalur lewat alamat sendiri mencakup kasus localhost juga.
+ */
+function alamatApi(): string {
+  const dariBuild = (process.env.NEXT_PUBLIC_API_URL ?? "").trim().replace(/\/+$/, "");
+  if (!dariBuild) return "";
+
+  try {
+    const host = new URL(dariBuild).hostname;
+    return host === "localhost" || host === "127.0.0.1" || host === "[::1]" ? "" : dariBuild;
+  } catch {
+    return "";
+  }
+}
+
 export const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080",
+  baseURL: alamatApi(),
   headers: { "Content-Type": "application/json" },
 });
 
