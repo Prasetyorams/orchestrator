@@ -26,20 +26,29 @@ public class ProcessRepository {
     private final Database database;
 
     /**
-     * Setelan robot unattended untuk proses ini.
+     * Setelan jalan proses ini: batas waktu, jeda berhenti, dan percobaan
+     * ulang robot unattended, serta prioritas bawaan job-nya.
      *
      * @param timeoutSeconds null = tidak diubah; 0 = tanpa batas waktu
+     * @param priority       null = tidak diubah
      */
     public void updateRunSettings(UUID tenantId, UUID folderId, String name, Integer timeoutSeconds,
-                                  Integer stopGraceSeconds, Integer maxRetries) {
+                                  Integer stopGraceSeconds, Integer maxRetries, String priority) {
         database.update("""
                 UPDATE processes
                    SET timeout_seconds = CASE WHEN ? THEN NULLIF(?, 0) ELSE timeout_seconds END,
                        stop_grace_seconds = COALESCE(?, stop_grace_seconds),
-                       max_retries = COALESCE(?, max_retries)
+                       max_retries = COALESCE(?, max_retries),
+                       priority = COALESCE(?, priority)
                  WHERE tenant_id = ? AND folder_id = ? AND name = ?
                 """, timeoutSeconds != null, timeoutSeconds == null ? 0 : timeoutSeconds, stopGraceSeconds,
-                maxRetries, tenantId, folderId, name);
+                maxRetries, priority, tenantId, folderId, name);
+    }
+
+    /** Prioritas bawaan job proses ini. */
+    public Optional<String> findPriority(UUID tenantId, UUID folderId, String name) {
+        return database.queryScalar("SELECT priority FROM processes WHERE tenant_id = ? AND folder_id = ? AND name = ?",
+                tenantId, folderId, name).map(String::valueOf);
     }
 
     /**
@@ -67,7 +76,7 @@ public class ProcessRepository {
         return database.queryRows("""
                 SELECT p.id, p.name, p.package_name, p.package_version, p.environment,
                        p.description, p.created_at, p.folder_id,
-                       p.timeout_seconds, p.stop_grace_seconds, p.max_retries,
+                       p.timeout_seconds, p.stop_grace_seconds, p.max_retries, p.priority,
                        (SELECT count(*) FROM jobs j
                          WHERE j.tenant_id = p.tenant_id AND j.folder_id = p.folder_id
                            AND j.process_name = p.name) AS job_count,

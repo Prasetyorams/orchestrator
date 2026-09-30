@@ -4,13 +4,20 @@ import id.jakforge.openorchestrator.common.Strings;
 import id.jakforge.openorchestrator.model.MachineTypes;
 import jakarta.validation.constraints.NotNull;
 
-/** Mesin baru (POST /api/machines). */
+import java.util.Map;
+
+/**
+ * Mesin baru (POST /api/machines).
+ *
+ * @param runtimes tipe runtime → jumlah; tanpa medan ini mesin mendapat satu runtime Production
+ */
 public record CreateMachineRequest(
         @NotNull(message = "Nama mesin wajib diisi.")
         String name,
         String type,
         String licenseKey,
-        String description) {
+        String description,
+        Map<String, Integer> runtimes) {
 
     public CreateMachineRequest {
         name = Strings.trimToNull(name);

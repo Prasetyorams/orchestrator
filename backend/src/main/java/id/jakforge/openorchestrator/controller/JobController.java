@@ -2,11 +2,12 @@ package id.jakforge.openorchestrator.controller;
 
 import id.jakforge.openorchestrator.dto.request.CreateJobRequest;
 import id.jakforge.openorchestrator.dto.request.UpdateJobStateRequest;
-import id.jakforge.openorchestrator.dto.response.CreatedResponse;
+import id.jakforge.openorchestrator.dto.response.JobsCreatedResponse;
 import id.jakforge.openorchestrator.dto.response.NextJobResponse;
 import id.jakforge.openorchestrator.dto.response.OkResponse;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
 import id.jakforge.openorchestrator.service.JobService;
+import id.jakforge.openorchestrator.service.StartJobOptionsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -63,6 +64,13 @@ public class JobController {
         return jobService.claimNext(principal, robot);
     }
 
+    /** Pilihan Execution settings Start Job untuk satu folder. Dipetakan sebelum {@code /{id}}, sama seperti /next. */
+    @GetMapping("/start-options")
+    public StartJobOptionsService.StartOptions startOptions(@AuthenticationPrincipal OpenOrchestratorPrincipal principal,
+                                                            @RequestParam(required = false) String folderId) {
+        return jobService.startOptions(principal, folderId);
+    }
+
     @GetMapping("/{id}")
     public Map<String, Object> findById(@AuthenticationPrincipal OpenOrchestratorPrincipal principal,
                                         @PathVariable String id) {
@@ -70,7 +78,7 @@ public class JobController {
     }
 
     @PostMapping
-    public CreatedResponse create(@AuthenticationPrincipal OpenOrchestratorPrincipal principal,
+    public JobsCreatedResponse create(@AuthenticationPrincipal OpenOrchestratorPrincipal principal,
                                   @RequestBody(required = false) Map<String, Object> body) {
         return jobService.create(principal, CreateJobRequest.fromBody(body));
     }
@@ -88,6 +96,34 @@ public class JobController {
         jobService.requestStop(principal, id);
 
         return OkResponse.success();
+    }
+
+    @PostMapping("/{id}/kill")
+    public OkResponse requestKill(@AuthenticationPrincipal OpenOrchestratorPrincipal principal, @PathVariable String id) {
+        jobService.requestKill(principal, id);
+
+        return OkResponse.success();
+    }
+
+    @PostMapping("/{id}/pause")
+    public OkResponse requestPause(@AuthenticationPrincipal OpenOrchestratorPrincipal principal, @PathVariable String id) {
+        jobService.requestPause(principal, id);
+
+        return OkResponse.success();
+    }
+
+    @PostMapping("/{id}/resume")
+    public OkResponse requestResume(@AuthenticationPrincipal OpenOrchestratorPrincipal principal, @PathVariable String id) {
+        jobService.requestResume(principal, id);
+
+        return OkResponse.success();
+    }
+
+    /** Job BARU dengan konfigurasi job ini; job ini sendiri tidak diubah. */
+    @PostMapping("/{id}/restart")
+    public JobsCreatedResponse restart(@AuthenticationPrincipal OpenOrchestratorPrincipal principal,
+                                       @PathVariable String id) {
+        return jobService.restart(principal, id);
     }
 
     /** Lampiran job dari Robot Agent — screenshot saat gagal. */

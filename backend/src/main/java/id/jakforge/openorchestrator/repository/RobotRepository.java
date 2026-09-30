@@ -154,30 +154,61 @@ public class RobotRepository {
         return database.exists("SELECT count(*) FROM robots WHERE tenant_id = ? AND name = ?", tenantId, name);
     }
 
-    public void registerFromHeartbeat(UUID tenantId, String name, String machineName,
+    /**
+     * @param username akun OpenOrchestrator yang dipakai robotnya masuk — akun
+     *                 pemilik robot itu, yang dipakai Start Job untuk "jalankan
+     *                 sebagai diri sendiri"
+     */
+    public void registerFromHeartbeat(UUID tenantId, String name, String machineName, String username,
                                       String status, double cpuPercent, double memoryMb) {
         database.update("""
                 INSERT INTO robots
-                    (id, tenant_id, name, machine_name, type, environment, description,
+                    (id, tenant_id, name, machine_name, username, type, environment, description,
                      status, cpu_percent, memory_mb, last_heartbeat_at, created_at)
-                VALUES (?, ?, ?, ?, 'Attended', 'Production',
+                VALUES (?, ?, ?, ?, ?, 'Attended', 'Production',
                         'Terdaftar sendiri saat denyut pertama.', ?, ?, ?, now(), now())
-                """, UUID.randomUUID(), tenantId, name, machineName, status, cpuPercent, memoryMb);
+                """, UUID.randomUUID(), tenantId, name, machineName, username, status, cpuPercent, memoryMb);
     }
 
     /**
      * COALESCE pada machine_name: denyut yang tidak menyebut nama mesin tidak
-     * boleh MENGHAPUS nama yang sudah diketahui.
+     * boleh MENGHAPUS nama yang sudah diketahui. Akun pemiliknya hanya diisi
+     * kalau belum ada — yang sudah diatur tidak ditimpa denyut.
      */
-    public void recordHeartbeat(UUID tenantId, String name, String machineName,
+    public void recordHeartbeat(UUID tenantId, String name, String machineName, String username,
                                 String status, double cpuPercent, double memoryMb) {
         database.update("""
                 UPDATE robots
                    SET status = ?, cpu_percent = ?, memory_mb = ?,
                        last_heartbeat_at = now(),
-                       machine_name = COALESCE(?, machine_name)
+                       machine_name = COALESCE(?, machine_name),
+                       username = COALESCE(username, ?)
                  WHERE tenant_id = ? AND name = ?
-                """, status, cpuPercent, memoryMb, machineName, tenantId, name);
+                """, status, cpuPercent, memoryMb, machineName, username, tenantId, name);
+    }
+
+    /**
+     * Robot yang ditugaskan ke folder itu, untuk Start Job: mesinnya (mesin
+     * Robot Agent kalau terikat, selain itu nama mesin dari denyut), dan akun
+     * pemiliknya beserta peran dan izinnya — yang menentukan apakah robot itu
+     * boleh mengambil job.
+     */
+    public List<Map<String, Object>> findForStartJob(UUID tenantId, UUID folderId) {
+        return database.queryRows("""
+                SELECT r.id, r.name, r.type, r.status, r.username,
+                       COALESCE(bound.name, r.machine_name) AS machine_name,
+                       r.machine_id IS NOT NULL AS agent_robot,
+                       u.id IS NOT NULL AS user_found, u.display_name AS user_display_name,
+                       u.is_active AS user_active, u.role AS user_role, ro.permissions AS role_permissions
+                  FROM (SELECT id, tenant_id, name, type, username, machine_id, machine_name, last_heartbeat_at,
+                               %s
+                          FROM robots WHERE tenant_id = ?) r
+                  JOIN folder_robots fr ON fr.robot_id = r.id AND fr.folder_id = ?
+                  LEFT JOIN machines bound ON bound.id = r.machine_id
+                  LEFT JOIN users u ON u.tenant_id = r.tenant_id AND u.username = r.username
+                  LEFT JOIN roles ro ON ro.tenant_id = r.tenant_id AND ro.name = u.role
+                 ORDER BY r.name
+                """.formatted(statusColumn), tenantId, folderId);
     }
 
     /**

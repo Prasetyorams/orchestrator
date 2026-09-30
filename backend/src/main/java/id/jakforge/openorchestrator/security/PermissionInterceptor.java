@@ -123,10 +123,17 @@ public class PermissionInterceptor implements HandlerInterceptor {
             // --- pekerjaan: mengambil dan melaporkan pekerjaan adalah tugas robot ---
             requires(GET, "/api/jobs", "jobs.read"),
             requires(GET, "/api/jobs/next", "jobs.update"),
+            // Pilihan Start Job: siapa pun yang boleh menjalankan job boleh tahu ke mana ia bisa pergi.
+            requires(GET, "/api/jobs/start-options", "jobs.create"),
             requires(GET, "/api/jobs/{id}", "jobs.read"),
             requires(POST, "/api/jobs", "jobs.create"),
             requires(POST, "/api/jobs/{id}/state", "jobs.update"),
             requires(POST, "/api/jobs/{id}/stop", "jobs.update"),
+            requires(POST, "/api/jobs/{id}/kill", "jobs.update"),
+            requires(POST, "/api/jobs/{id}/pause", "jobs.update"),
+            requires(POST, "/api/jobs/{id}/resume", "jobs.update"),
+            // Jalankan ulang membuat job baru, jadi izinnya sama dengan membuat job.
+            requires(POST, "/api/jobs/{id}/restart", "jobs.create"),
             requires(DELETE, "/api/jobs/{id}", "jobs.delete"),
             requires(GET, "/api/jobs/{id}/attachments", "jobs.read"),
             requires(GET, "/api/jobs/{id}/attachments/{attachmentId}/content", "jobs.read"),

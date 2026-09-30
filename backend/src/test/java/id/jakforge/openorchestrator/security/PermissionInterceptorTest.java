@@ -216,6 +216,24 @@ class PermissionInterceptorTest {
     }
 
     @Test
+    @DisplayName("aksi job dari dasbor: matikan/jeda/lanjutkan seperti Hentikan, jalankan ulang seperti membuat job")
+    void jobActionsFollowStopAndCreate() {
+        for (String endpoint : List.of("POST /api/jobs/{id}/kill", "POST /api/jobs/{id}/pause",
+                "POST /api/jobs/{id}/resume")) {
+            assertEquals(ruleFor("POST /api/jobs/{id}/stop").anyOfPermissions(), ruleFor(endpoint).anyOfPermissions(),
+                    endpoint);
+
+            // Workflow tidak boleh mematikan atau menjeda job — termasuk job-nya sendiri.
+            assertTrue(ruleFor(endpoint).anyOfPermissions().stream()
+                    .noneMatch(permission -> PermissionCatalog.matches(PermissionService.EXECUTOR_PATTERNS, permission)),
+                    endpoint);
+        }
+
+        assertEquals(ruleFor("POST /api/jobs").anyOfPermissions(), ruleFor("POST /api/jobs/{id}/restart").anyOfPermissions());
+        assertEquals(ruleFor("POST /api/jobs").anyOfPermissions(), ruleFor("GET /api/jobs/start-options").anyOfPermissions());
+    }
+
+    @Test
     @DisplayName("semua endpoint /api/agent kecuali login hanya untuk token agent")
     void agentEndpointsAreAgentOnly() {
         for (PermissionRule rule : PermissionInterceptor.RULES) {

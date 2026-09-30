@@ -2,8 +2,10 @@ package id.jakforge.openorchestrator.dto.request;
 
 import id.jakforge.openorchestrator.common.RequestBodies;
 import id.jakforge.openorchestrator.common.Uuids;
+import id.jakforge.openorchestrator.model.JobCommands;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -29,10 +31,23 @@ public record AgentHeartbeatRequest(String agentVersion, Double cpuPercent, Doub
      *                      arti yang sama.
      * @param jobIdsSent    apakah agent mengirim daftar itu sama sekali; tanpa daftar, rekonsiliasi
      *                      tidak dijalankan — ketiadaan medan bukan berarti "tidak ada job"
+     * @param pausedJobs    job yang sedang ditahan agent → sumber jedanya ("dashboard" atau "local")
+     * @param pausedSent    apakah agent mengirim {@code pausedJobs} sama sekali. Agent yang belum
+     *                      mengenal jeda tidak mengirimnya, dan ketiadaannya tidak boleh dibaca
+     *                      sebagai "semua job sudah dilanjutkan".
      */
     public record RobotReport(UUID robotId, String state, Integer sessionId, String sessionState, String windowsUser,
                               Boolean sessionReady, String reasonCode, String reasonText, String executorState,
-                              Integer executorPid, Set<UUID> activeJobIds, boolean jobIdsSent) {
+                              Integer executorPid, Set<UUID> activeJobIds, boolean jobIdsSent,
+                              Map<UUID, String> pausedJobs, boolean pausedSent) {
+
+        /** Bentuk sebelum jeda ada. */
+        public RobotReport(UUID robotId, String state, Integer sessionId, String sessionState, String windowsUser,
+                           Boolean sessionReady, String reasonCode, String reasonText, String executorState,
+                           Integer executorPid, Set<UUID> activeJobIds, boolean jobIdsSent) {
+            this(robotId, state, sessionId, sessionState, windowsUser, sessionReady, reasonCode, reasonText,
+                    executorState, executorPid, activeJobIds, jobIdsSent, Map.of(), false);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -62,6 +77,21 @@ public record AgentHeartbeatRequest(String agentVersion, Double cpuPercent, Doub
                 }
             }
 
+            // "pausedJobs": [{"jobId": "…", "source": "dashboard"}] — job yang sedang ditahan.
+            Object pausedItems = RequestBodies.valueOf(robot, "pausedJobs");
+            Map<UUID, String> pausedJobs = new LinkedHashMap<>();
+            if (pausedItems instanceof List<?> list) {
+                for (Object paused : list) {
+                    if (!(paused instanceof Map<?, ?> entry)) continue;
+
+                    Map<String, Object> fields = (Map<String, Object>) entry;
+                    UUID jobId = Uuids.parseOrNull(RequestBodies.trimmedText(fields, "jobId"));
+                    if (jobId != null) {
+                        pausedJobs.put(jobId, JobCommands.normalizeSource(RequestBodies.text(fields, "source")));
+                    }
+                }
+            }
+
             robots.add(new RobotReport(
                     robotId,
                     RequestBodies.trimmedText(robot, "state"),
@@ -74,7 +104,9 @@ public record AgentHeartbeatRequest(String agentVersion, Double cpuPercent, Doub
                     RequestBodies.trimmedText(executor, "state"),
                     RequestBodies.optionalInteger(executor, "pid"),
                     jobIds,
-                    ids instanceof List<?>));
+                    ids instanceof List<?>,
+                    pausedJobs,
+                    pausedItems instanceof List<?>));
         }
 
         return new AgentHeartbeatRequest(

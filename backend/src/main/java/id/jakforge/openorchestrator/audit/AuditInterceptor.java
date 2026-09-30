@@ -132,6 +132,10 @@ public class AuditInterceptor implements HandlerInterceptor {
 
             rule(POST, "/api/jobs", "Pekerjaan", "Jalankan", body("processName"), FOLDER_FROM_BODY),
             rule(POST, "/api/jobs/{id}/stop", "Pekerjaan", "Hentikan", JOB_BY_ID),
+            rule(POST, "/api/jobs/{id}/kill", "Pekerjaan", "Matikan", JOB_BY_ID),
+            rule(POST, "/api/jobs/{id}/pause", "Pekerjaan", "Jeda", JOB_BY_ID),
+            rule(POST, "/api/jobs/{id}/resume", "Pekerjaan", "Lanjutkan", JOB_BY_ID),
+            rule(POST, "/api/jobs/{id}/restart", "Pekerjaan", "Jalankan ulang", JOB_BY_ID),
             rule(DELETE, "/api/jobs/{id}", "Pekerjaan", "Hapus", JOB_BY_ID),
 
             rule(POST, "/api/triggers", "Pemicu", "Simpan", body("name"), FOLDER_FROM_BODY),

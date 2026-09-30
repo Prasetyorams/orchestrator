@@ -8,11 +8,15 @@ import id.jakforge.openorchestrator.dto.request.CreateRobotRequest;
 import id.jakforge.openorchestrator.dto.request.HeartbeatRequest;
 import id.jakforge.openorchestrator.dto.request.UpdateRobotRequest;
 import id.jakforge.openorchestrator.dto.response.HeartbeatResponse;
+import id.jakforge.openorchestrator.model.JobCommands;
+import id.jakforge.openorchestrator.model.JobState;
+import id.jakforge.openorchestrator.model.LogLevel;
 import id.jakforge.openorchestrator.model.MachineTypes;
 import id.jakforge.openorchestrator.model.RobotStatus;
 import id.jakforge.openorchestrator.model.Severity;
 import id.jakforge.openorchestrator.repository.AlertRepository;
 import id.jakforge.openorchestrator.repository.JobRepository;
+import id.jakforge.openorchestrator.repository.LogRepository;
 import id.jakforge.openorchestrator.repository.MachineRepository;
 import id.jakforge.openorchestrator.repository.RobotRepository;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
@@ -40,6 +44,7 @@ public class RobotService {
     private final MachineRepository machineRepository;
     private final JobRepository jobRepository;
     private final AlertRepository alertRepository;
+    private final LogRepository logRepository;
     private final FolderAccessService folderAccessService;
     private final SecretBox secretBox;
 
@@ -62,9 +67,14 @@ public class RobotService {
      * gejalanya — robot menyala tapi tidak muncul di mana pun — tidak
      * mengarahkan siapa pun ke langkah yang terlupa itu.
      *
-     * <p>Jawabannya membawa perintah StopJob untuk job robot ini yang diminta
-     * berhenti ({@code heartbeat.commands}): tanpa itu, tombol Stop di dasbor
-     * tidak pernah sampai ke robot.
+     * <p>Jawabannya membawa perintah untuk job robot ini ({@code heartbeat.commands}):
+     * StopJob untuk yang diminta berhenti — ditambah KillJob kalau diminta
+     * dimatikan paksa — dan PauseJob/ResumeJob untuk yang diminta dijeda atau
+     * dilanjutkan dari dasbor. Tanpa itu, tombol-tombol itu di dasbor tidak
+     * pernah sampai ke robot.
+     *
+     * <p>Denyut juga menyebut job yang sedang ditahan robot ({@code pausedJobId});
+     * itu yang membuat dasbor menampilkan "Dijeda", dari mana pun jedanya.
      */
     @Transactional
     public HeartbeatResponse recordHeartbeat(OpenOrchestratorPrincipal principal, String name, HeartbeatRequest heartbeat) {
@@ -72,10 +82,10 @@ public class RobotService {
         String status = RobotStatus.fromHeartbeat(heartbeat.status()).name();
 
         if (robotRepository.existsByName(tenantId, name)) {
-            robotRepository.recordHeartbeat(tenantId, name, heartbeat.machineName(),
+            robotRepository.recordHeartbeat(tenantId, name, heartbeat.machineName(), principal.username(),
                     status, heartbeat.cpuPercent(), heartbeat.memoryMb());
         } else {
-            robotRepository.registerFromHeartbeat(tenantId, name, heartbeat.machineName(),
+            robotRepository.registerFromHeartbeat(tenantId, name, heartbeat.machineName(), principal.username(),
                     status, heartbeat.cpuPercent(), heartbeat.memoryMb());
 
             ensureMachineRegistered(tenantId, heartbeat.machineName());
@@ -84,16 +94,37 @@ public class RobotService {
                     "Robot '" + name + "' menyambung untuk pertama kali.", ALERT_SOURCE);
         }
 
-        List<Map<String, Object>> commands = jobRepository.findStopRequestsForV1Robot(tenantId, name).stream()
-                .map(job -> {
-                    Map<String, Object> command = new LinkedHashMap<>();
-                    command.put("type", "StopJob");
-                    command.put("jobId", job.get("id"));
-                    return command;
-                })
+        recordPause(tenantId, name, heartbeat);
+
+        List<JobCommands.V1Job> jobs = jobRepository.findCommandStateForV1Robot(tenantId, name).stream()
+                .map(job -> new JobCommands.V1Job(
+                        Uuids.parseOrNull((String) job.get("id")),
+                        JobState.valueOf((String) job.get("state")),
+                        Boolean.TRUE.equals(job.get("pauseRequested")),
+                        Boolean.TRUE.equals(job.get("kill"))))
                 .toList();
 
-        return new HeartbeatResponse(true, Timestamps.nowText(), commands);
+        return new HeartbeatResponse(true, Timestamps.nowText(),
+                JobCommands.forV1(jobs, heartbeat.pausedJobId(), heartbeat.pauseSource()));
+    }
+
+    /** Jeda menurut robot dicatat, dan setiap perubahannya masuk ke log job-nya. */
+    private void recordPause(UUID tenantId, String robotName, HeartbeatRequest heartbeat) {
+        JobRepository.PauseChanges changes = jobRepository.recordV1Pause(tenantId, robotName,
+                heartbeat.pausedJobId(), heartbeat.pauseSource());
+
+        for (Map<String, Object> job : changes.paused()) {
+            logRepository.insertJobEntry(tenantId, LogLevel.INFO,
+                    JobCommands.SOURCE_DASHBOARD.equals(job.get("pauseSource"))
+                            ? "Robot menjeda pekerjaan atas permintaan dasbor."
+                            : "Pekerjaan dijeda langsung di PC robot.",
+                    robotName, (String) job.get("processName"), Uuids.parseOrNull((String) job.get("id")));
+        }
+
+        for (Map<String, Object> job : changes.resumed()) {
+            logRepository.insertJobEntry(tenantId, LogLevel.INFO, "Robot melanjutkan pekerjaan.",
+                    robotName, (String) job.get("processName"), Uuids.parseOrNull((String) job.get("id")));
+        }
     }
 
     @Transactional

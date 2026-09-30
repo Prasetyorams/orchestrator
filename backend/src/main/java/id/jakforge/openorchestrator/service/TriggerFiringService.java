@@ -1,6 +1,7 @@
 package id.jakforge.openorchestrator.service;
 
 import id.jakforge.openorchestrator.common.Cron;
+import id.jakforge.openorchestrator.model.JobPriorities;
 import id.jakforge.openorchestrator.model.Severity;
 import id.jakforge.openorchestrator.repository.AlertRepository;
 import id.jakforge.openorchestrator.repository.JobRepository;
@@ -89,10 +90,12 @@ public class TriggerFiringService {
 
         UUID jobId = UUID.randomUUID();
 
-        jobRepository.insert(jobId, trigger.tenantId(), trigger.folderId(), trigger.processName(),
-                trigger.robotName(), null, TRIGGER_JOB_SOURCE,
-                trigger.priority() == null ? DEFAULT_PRIORITY : trigger.priority(),
-                "Dijadwalkan oleh pemicu '" + trigger.name() + "'.", null);
+        // Prioritas dibakukan ("high" menjadi "High"): pengurutan klaim
+        // membandingkan bentuk baku, dan pemicu tidak boleh gagal karena ejaan.
+        jobRepository.insert(new JobRepository.NewJob(jobId, trigger.tenantId(), trigger.folderId(),
+                trigger.processName(), trigger.robotName(), null, null, TRIGGER_JOB_SOURCE,
+                trigger.priority() == null ? DEFAULT_PRIORITY : JobPriorities.storedOrNormal(trigger.priority()),
+                "Dijadwalkan oleh pemicu '" + trigger.name() + "'.", null, null));
 
         triggerRepository.recordRun(trigger.id(), nextRunAt);
 

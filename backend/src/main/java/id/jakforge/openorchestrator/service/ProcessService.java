@@ -3,6 +3,7 @@ package id.jakforge.openorchestrator.service;
 import id.jakforge.openorchestrator.common.ApiException;
 import id.jakforge.openorchestrator.dto.request.MoveToFolderRequest;
 import id.jakforge.openorchestrator.dto.request.SaveProcessRequest;
+import id.jakforge.openorchestrator.model.JobPriorities;
 import id.jakforge.openorchestrator.repository.PackageRepository;
 import id.jakforge.openorchestrator.repository.ProcessRepository;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
@@ -62,6 +63,13 @@ public class ProcessService {
         UUID tenantId = principal.tenantId();
         UUID folderId = folderAccessService.resolveFolderFilter(principal, request.folderId());
 
+        // Prioritas bawaan hanya boleh nilai yang bisa disimpan di job: proses
+        // yang "mewarisi" dari dirinya sendiri tidak punya arti.
+        String priority = request.priority() == null ? null : JobPriorities.parse(request.priority())
+                .filter(JobPriorities.STORED::contains)
+                .orElseThrow(() -> ApiException.badRequest(
+                        "Prioritas tidak dikenal: '" + request.priority() + "'. Pilih Low, Normal, atau High."));
+
         // Dari dasbor, paket dan versinya dipilih dari daftar — yang tidak ada
         // berarti daftarnya sudah basi, dan proses yang menunjuk paket hilang
         // baru ketahuan saat robot gagal menjalankannya.
@@ -91,8 +99,13 @@ public class ProcessService {
                     : resolveProcessFolder(tenantId, request.name(), folderId);
 
             processRepository.updateRunSettings(tenantId, processFolder, request.name(), request.timeoutSeconds(),
-                    request.stopGraceSeconds(), request.maxRetries());
+                    request.stopGraceSeconds(), request.maxRetries(), priority);
         }
+    }
+
+    /** Prioritas bawaan proses — pengganti "Inherited" saat job dibuat. Normal kalau prosesnya tidak ada. */
+    public String findPriority(UUID tenantId, UUID folderId, String processName) {
+        return processRepository.findPriority(tenantId, folderId, processName).orElse(JobPriorities.NORMAL);
     }
 
     /**

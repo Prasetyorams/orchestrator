@@ -199,7 +199,7 @@ class RequestValidationTest {
         assertEquals(List.of("Nama ember wajib diisi."), violationsOf(new CreateBucketRequest(null, null, null)));
         assertEquals(List.of("Nama robot wajib diisi."),
                 violationsOf(new CreateRobotRequest(null, null, null, null, null, null)));
-        assertEquals(List.of("Nama mesin wajib diisi."), violationsOf(new CreateMachineRequest(null, null, null, null)));
+        assertEquals(List.of("Nama mesin wajib diisi."), violationsOf(new CreateMachineRequest(null, null, null, null, null)));
         assertEquals(List.of("Nama lingkungan wajib diisi."), violationsOf(new CreateEnvironmentRequest(null, null)));
         assertEquals(List.of("folderId wajib diisi."), violationsOf(new MoveToFolderRequest("  ")));
         assertEquals(List.of("username wajib diisi."), violationsOf(new AssignUserRequest(null)));

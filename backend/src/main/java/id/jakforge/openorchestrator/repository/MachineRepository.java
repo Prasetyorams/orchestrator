@@ -1,8 +1,12 @@
 package id.jakforge.openorchestrator.repository;
 
+import id.jakforge.openorchestrator.model.RuntimeTypes;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -50,11 +54,24 @@ public class MachineRepository {
                 tenantId, name);
     }
 
-    public void insert(UUID tenantId, String name, String type, String licenseKey, String description) {
+    /**
+     * Mesin baru selalu lahir dengan satu runtime Production: mesin yang
+     * didaftarkan denyut robot atau saat OpenOrchestrator naik harus langsung
+     * bisa menjalankan job, seperti sebelum tipe runtime ada.
+     *
+     * @return id mesin barunya
+     */
+    public UUID insert(UUID tenantId, String name, String type, String licenseKey, String description) {
+        UUID id = UUID.randomUUID();
+
         database.update("""
-                INSERT INTO machines (id, tenant_id, name, type, license_key, description, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, now())
-                """, UUID.randomUUID(), tenantId, name, type, licenseKey, description);
+                INSERT INTO machines (id, tenant_id, name, type, license_key, description, created_at, slots)
+                VALUES (?, ?, ?, ?, ?, ?, now(), 1)
+                """, id, tenantId, name, type, licenseKey, description);
+        database.update("INSERT INTO machine_runtimes (machine_id, runtime_type, slots) VALUES (?, ?, 1)",
+                id, RuntimeTypes.PRODUCTION);
+
+        return id;
     }
 
     public int deleteByName(UUID tenantId, String name) {
@@ -63,19 +80,103 @@ public class MachineRepository {
 
     /**
      * Ubah setelan mesin; yang null tidak diubah. Versi setelannya naik supaya
-     * agent mengambil yang baru.
+     * agent mengambil yang baru. Jumlah slot tidak diubah di sini — slot
+     * adalah jumlah runtime, lihat {@link #replaceRuntimes}.
      */
-    public int updateSettings(UUID tenantId, String name, String type, String description, Integer slots,
-                              Integer leaseSeconds) {
+    public int updateSettings(UUID tenantId, String name, String type, String description, Integer leaseSeconds) {
         return database.update("""
                 UPDATE machines
                    SET type = COALESCE(?, type),
                        description = COALESCE(?, description),
-                       slots = COALESCE(?, slots),
                        lease_seconds = COALESCE(?, lease_seconds),
                        settings_version = settings_version + 1
                  WHERE tenant_id = ? AND name = ?
-                """, type, description, slots, leaseSeconds, tenantId, name);
+                """, type, description, leaseSeconds, tenantId, name);
+    }
+
+    // -----------------------------------------------------------------
+    // Runtime
+    // -----------------------------------------------------------------
+
+    /** Runtime satu mesin: tipe → jumlah, urutan katalog. Tipe tanpa runtime tidak disebut. */
+    public Map<String, Integer> findRuntimes(UUID machineId) {
+        Map<String, Integer> runtimes = new LinkedHashMap<>();
+
+        for (Map<String, Object> row : database.queryRows("""
+                SELECT runtime_type, slots FROM machine_runtimes WHERE machine_id = ? ORDER BY %s
+                """.formatted(RuntimeTypes.sqlOrder("runtime_type")), machineId)) {
+            runtimes.put((String) row.get("runtimeType"), ((Number) row.get("slots")).intValue());
+        }
+
+        return runtimes;
+    }
+
+    /** Runtime semua mesin penyewa: id mesin → (tipe → jumlah). */
+    public Map<String, Map<String, Integer>> findRuntimesForTenant(UUID tenantId) {
+        Map<String, Map<String, Integer>> byMachine = new LinkedHashMap<>();
+
+        for (Map<String, Object> row : database.queryRows("""
+                SELECT r.machine_id, r.runtime_type, r.slots
+                  FROM machine_runtimes r
+                  JOIN machines m ON m.id = r.machine_id
+                 WHERE m.tenant_id = ?
+                 ORDER BY %s
+                """.formatted(RuntimeTypes.sqlOrder("r.runtime_type")), tenantId)) {
+            byMachine.computeIfAbsent((String) row.get("machineId"), id -> new LinkedHashMap<>())
+                    .put((String) row.get("runtimeType"), ((Number) row.get("slots")).intValue());
+        }
+
+        return byMachine;
+    }
+
+    /**
+     * Ganti seluruh runtime mesin. {@code slots} mesin menjadi jumlah
+     * runtimenya — itu batas job bersamaan yang dibaca Robot Agent — dan versi
+     * setelannya naik supaya agent mengambil yang baru.
+     *
+     * @param runtimes tipe baku → jumlah; yang nol tidak disimpan
+     */
+    public void replaceRuntimes(UUID machineId, Map<String, Integer> runtimes) {
+        database.update("DELETE FROM machine_runtimes WHERE machine_id = ?", machineId);
+
+        int total = 0;
+
+        for (Map.Entry<String, Integer> runtime : runtimes.entrySet()) {
+            if (runtime.getValue() == null || runtime.getValue() <= 0) continue;
+
+            database.update("INSERT INTO machine_runtimes (machine_id, runtime_type, slots) VALUES (?, ?, ?)",
+                    machineId, runtime.getKey(), runtime.getValue());
+            total += runtime.getValue();
+        }
+
+        database.update("UPDATE machines SET slots = ?, settings_version = settings_version + 1 WHERE id = ?",
+                total, machineId);
+    }
+
+    /**
+     * Mesin-mesin bernama itu, beserta apakah ada yang menyambung dari sana:
+     * Robot Agent-nya, atau robot v1 yang berdenyut dengan nama mesin itu.
+     */
+    public List<Map<String, Object>> findConnectionByNames(UUID tenantId, Collection<String> names,
+                                                           long agentOfflineSeconds, long robotTimeoutSeconds) {
+        if (names.isEmpty()) return List.of();
+
+        List<Object> args = new ArrayList<>(List.of(agentOfflineSeconds, robotTimeoutSeconds, tenantId));
+        args.addAll(names);
+
+        return database.queryRows("""
+                SELECT m.id, m.name, m.type,
+                       (m.last_agent_heartbeat_at IS NOT NULL
+                            AND now() - m.last_agent_heartbeat_at <= make_interval(secs => ?))
+                       OR EXISTS (SELECT 1 FROM robots r
+                                   WHERE r.tenant_id = m.tenant_id
+                                     AND r.machine_id IS NULL AND r.machine_name = m.name
+                                     AND r.last_heartbeat_at IS NOT NULL
+                                     AND now() - r.last_heartbeat_at <= make_interval(secs => ?)) AS online
+                  FROM machines m
+                 WHERE m.tenant_id = ? AND m.name IN (%s)
+                 ORDER BY m.name
+                """.formatted(Database.placeholders(names.size())), args.toArray());
     }
 
     /** Pasang kunci baru; kunci lama langsung tidak berlaku. */

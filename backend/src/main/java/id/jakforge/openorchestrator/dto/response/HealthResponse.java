@@ -23,7 +23,9 @@ public record HealthResponse(String product, String status, String time, int con
             "jobs.next.package",   // jobs/next menyebut paket, versi, titik masuk, SHA-256, folder
             "packages.sha256",     // SHA-256 isi paket di daftar paket dan di jobs/next
             "heartbeat.commands",  // jawaban denyut membawa StopJob
-            "jobs.state.guard");   // POST state menolak (409) RUNNING sesudah STOPPING dan menghidupkan job selesai
+            "jobs.state.guard",    // POST state menolak (409) RUNNING sesudah STOPPING dan menghidupkan job selesai
+            "jobs.pause",          // denyut membaca pausedJobId/pauseSource; jawabannya membawa PauseJob dan ResumeJob
+            "jobs.kill");          // jawaban denyut membawa KillJob (BERSAMA StopJob) untuk job yang diminta dimatikan paksa
 
     static final List<Integer> API_VERSIONS = List.of(1, 2);
 

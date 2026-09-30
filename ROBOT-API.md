@@ -6,6 +6,12 @@ dengan semua perubahan wajib W1–W6 dan saran dari
 agent tiruan melawan PostgreSQL sungguhan (83 pemeriksaan). Belum diuji melawan
 Robot Agent sungguhan di VM.
 
+**Tambahan V9** (`V9__runtime_dan_aksi_job.sql`): jeda/lanjut dari dasbor — usulan sisi
+robot `docs/usulan-pause-job.md` di repo Studio, dipakai apa adanya untuk v1 — KillJob untuk
+job yang diminta **dimatikan paksa**, dan **tipe runtime** mesin yang menentukan robot mana
+yang boleh mengambil sebuah job. Semuanya menambah, tidak mengubah yang sudah ada; diuji
+ujung-ke-ujung (103 pemeriksaan) dan dengan regresi v1.
+
 Dokumen ini punya dua bagian:
 
 - **v1** — API untuk JakRunner (attended), Studio, activities `Custom.Orchestrator`, dan
@@ -23,6 +29,9 @@ Konvensi untuk semua endpoint:
   `403` = token sah tetapi tidak berhak → jangan diulang.
 - Medan yang tidak dikenal di jawaban wajib diabaikan: Orchestrator boleh menambah medan
   tanpa menaikkan versi.
+- **Jenis perintah yang tidak dikenal wajib diabaikan** (`commands` di jawaban denyut v1 dan
+  v2). Orchestrator boleh mengirim jenis baru; robot yang belum mengenalnya tidak boleh gagal
+  karenanya.
 
 ---
 
@@ -35,7 +44,8 @@ Semua memakai `Authorization: Bearer <token>` dari login akun pengguna.
 ```json
 { "product": "OpenOrchestrator", "status": "OK", "time": "…",
   "contract": 2,
-  "capabilities": ["jobs.next.package", "packages.sha256", "heartbeat.commands", "jobs.state.guard"],
+  "capabilities": ["jobs.next.package", "packages.sha256", "heartbeat.commands", "jobs.state.guard",
+                   "jobs.pause", "jobs.kill"],
   "apiVersions": [1, 2] }
 ```
 
@@ -49,14 +59,35 @@ kalau `/api/agent` tersedia.
 ### `POST /api/robots/{robot}/heartbeat`
 
 ```json
-{ "status": "AVAILABLE", "cpuPercent": 3.5, "memoryMb": 210, "machineName": "PC-01" }
+{ "status": "BUSY", "cpuPercent": 3.5, "memoryMb": 210, "machineName": "PC-01",
+  "pausedJobId": "…", "pauseSource": "dashboard" }
 ```
 → `200 {"ok": true, "serverTime": "…", "commands": [{"type": "StopJob", "jobId": "…"}]}`
 
-- **heartbeat.commands:** `StopJob` untuk job robot ini yang diminta berhenti dari dasbor.
-- Robot yang belum ada terdaftar otomatis. Robot yang diam lebih dari 45 detik tampil
-  `DISCONNECTED`; job `RUNNING`-nya ditandai `FAULTED` sesudah 90 detik — sebagai
-  **kesimpulan** server, yang masih bisa digantikan laporan akhir robot itu.
+- **heartbeat.commands:** perintah untuk job robot ini, DITURUNKAN dari keadaan job di
+  setiap denyut — diulang selama syaratnya berlaku, tanpa tanda terima; robot aman
+  menerimanya berkali-kali.
+
+  | Keadaan job di server | Dilaporkan robot | Perintah |
+  |---|---|---|
+  | `STOPPING` | | `StopJob` |
+  | `STOPPING`, diminta dimatikan paksa | | `StopJob` **dan** `KillJob` |
+  | `RUNNING`, dasbor meminta jeda | `pausedJobId` bukan job ini | `PauseJob` |
+  | `RUNNING`, jeda dari dasbor dibatalkan | `pausedJobId` = job ini, `pauseSource` = `dashboard` | `ResumeJob` |
+
+  - **jobs.kill:** `KillJob` = hentikan SEKARANG, tanpa jeda berhenti rapi. Dikirim BERSAMA
+    `StopJob`, jadi robot yang belum mengenal `KillJob` tetap berhenti rapi.
+  - **jobs.pause:** `pausedJobId` = job yang sedang BENAR-BENAR ditahan robot (tidak ada
+    medannya = tidak ada yang dijeda); `pauseSource` = `dashboard` (karena `PauseJob`) atau
+    `local` (tombol Jeda di PC robot; nilai lain dianggap `local`). Dasbor menampilkan job itu
+    **Dijeda**; job tetap `RUNNING` dan robot tetap `BUSY`. Jeda **lokal** tidak pernah
+    dilanjutkan server — yang di depan PC itu yang memutuskan. Stop mengalahkan jeda: job
+    `STOPPING` hanya mendapat `StopJob`. Lama jeda dicatat per job.
+- Robot yang belum ada terdaftar otomatis, dengan akun yang dipakainya masuk sebagai
+  pemiliknya (dipakai Start Job untuk "jalankan sebagai diri sendiri"). Robot yang diam lebih
+  dari 45 detik tampil `DISCONNECTED`; job `RUNNING`-nya ditandai `FAULTED` sesudah 90 detik,
+  dan job `STOPPING`-nya `STOPPED` — keduanya **kesimpulan** server, yang masih bisa
+  digantikan laporan akhir robot itu.
 
 ### `GET /api/jobs/next?robot={robot}`
 
@@ -72,6 +103,10 @@ kalau `/api/agent` tersedia.
   perlu membaca daftar proses dan paket.
 - Atomik (`FOR UPDATE SKIP LOCKED`). Job hanya diambil robot yang disebutnya, atau robot yang
   ditugaskan ke folder job itu. Urutan: prioritas, lalu umur.
+- Sejak V9, job yang dibuat dari Start Job bisa meminta **mesin** dan **tipe runtime**
+  (lihat 2.9). Robot hanya mengambil job untuk mesinnya sendiri (mesin dari denyutnya), dan
+  job bertipe runtime hanya kalau mesinnya punya runtime tipe itu. Job tanpa keduanya —
+  dari Studio, pemicu, API lama — diambil seperti sebelumnya.
 
 ### `POST /api/jobs/{id}/state`
 
@@ -202,7 +237,8 @@ Satu per agent. Jeda `heartbeatSeconds` saat idle, `heartbeatBusySeconds` selama
     "session": { "id": 3, "state": "Active", "windowsUser": "VM\\robot", "ready": true },
     "reason": { "code": "SessionLocked", "text": "Sesi terkunci" },
     "executor": { "state": "Running", "pid": 8124 },
-    "activeJobIds": ["…"]
+    "activeJobIds": ["…"],
+    "pausedJobs": [ { "jobId": "…", "source": "dashboard" } ]
   } ]
 }
 ```
@@ -213,6 +249,7 @@ Satu per agent. Jeda `heartbeatSeconds` saat idle, `heartbeatBusySeconds` selama
 | `session.ready` | **W6.** Menurut agent: bisakah job dijalankan sekarang. Sesi terkunci tetap `Active` bagi WTS, jadi siap-tidaknya ditentukan agent. `false` = klaim tidak diberi job |
 | `reason` | Kode + teks singkat, tampil di dasbor (mis. `SessionLocked`, `NoSession`, `LogonFailed`, `RemoteDesktopDisabled`) |
 | `activeJobIds` | **W1.** Job yang belum selesai DILAPORKAN: masih berjalan **atau** laporan akhirnya masih di outbox. `runningJobIds` diterima dengan arti sama. Tanpa medan ini, rekonsiliasi tidak dijalankan |
+| `pausedJobs` | *(V9, opsional)* Job robot ini yang sedang BENAR-BENAR ditahan, dengan `source` `dashboard` (karena `PauseJob`) atau `local` (dijeda di PC robot). Daftar kosong = tidak ada yang ditahan. Agent yang belum mendukung jeda tidak mengirim medan ini — ketiadaannya tidak dibaca sebagai "semua sudah dilanjutkan" |
 
 → `200`
 ```json
@@ -236,7 +273,14 @@ Aturan:
   `StopJob`: dua eksekusi dari pekerjaan yang sama tidak boleh berlanjut.
 - **Perintah diturunkan dari keadaan job:** selama job `STOPPING`, `StopJob` dikirim di setiap
   denyut; sesudah `graceSeconds` lewat, `KillJob` (agent mematikan seluruh pohon proses job itu).
-  Tidak perlu ack; perintah yang sama berulang = satu perintah.
+  Job yang diminta **Matikan** dari dasbor langsung mendapat `KillJob`, tanpa menunggu
+  `graceSeconds`. Tidak perlu ack; perintah yang sama berulang = satu perintah.
+- **Jeda (V9):** job `RUNNING` yang diminta dijeda mendapat `PauseJob` sampai agent
+  menyebutnya di `pausedJobs`; jeda dari dasbor yang dibatalkan mendapat `ResumeJob` selama
+  agent masih menyebutnya dengan `source: "dashboard"`. Jeda `local` tidak pernah dilanjutkan
+  server. Job tetap `RUNNING`, robot tetap `Busy`, dan waktu dijeda **tidak** dihitung jaring
+  pengaman batas waktu. Agent yang belum mendukung jeda mengabaikan `PauseJob`/`ResumeJob`
+  (jenis perintah tak dikenal), dan dasbor menampilkan "menunggu robot menjeda".
 - `settingsVersion` berubah → agent login ulang untuk mengambil setelan (robot, slot, lease).
 
 ## 2.4 Job
@@ -262,6 +306,7 @@ baru.
 ```json
 { "job": {
     "id": "…", "attempt": 1, "processName": "Tagihan", "folderId": "…", "priority": "Normal",
+    "runtimeType": "Production",
     "package": { "name": "Tagihan", "version": "1.0.3", "sha256": "9f2c…", "sizeBytes": 48213,
                  "url": "/api/packages/Tagihan/1.0.3/content" },
     "entryPoint": "Main.xaml", "inputJson": "{\"bulan\":\"09\"}",
@@ -271,8 +316,11 @@ baru.
 
 `204` juga kalau: robot sedang memegang job lain (satu robot = satu akun Windows = satu job),
 `session.ready` terakhir `false`, `state` `Error`, robot ditandai **Perlu perhatian**
-(`LogonFailed`, sampai sandinya diganti), atau slot mesin penuh. Alasannya terlihat di dasbor.
-`403 NotYourRobot` kalau robot bukan milik mesin ini.
+(`LogonFailed`, sampai sandinya diganti), atau slot mesin penuh — per tipe runtime, lihat
+2.9. Alasannya terlihat di dasbor. `403 NotYourRobot` kalau robot bukan milik mesin ini.
+
+`runtimeType` (V9) = tipe runtime yang dipakai job ini di mesin ini; informasi saja, agent
+tidak perlu berbuat apa-apa dengannya.
 
 Percobaan ulang yang baru dibuat tidak diambil robot yang baru gagal selama **60 detik** —
 robot lain didahulukan; sesudah itu siapa pun boleh.
@@ -326,10 +374,13 @@ Robot sasarannya sama dengan permintaan ASLI.
 
 ### Stop, kill, batas waktu
 
-1. Dasbor → Stop: job `STOPPING`; denyut membawa `StopJob` (Cancel → Terminate di agent).
+1. Dasbor → Hentikan: job `STOPPING`; denyut membawa `StopJob` (Cancel → Terminate di agent).
 2. Sesudah `stopGraceSeconds` (setelan proses, bawaan 30): `KillJob`.
-3. Batas waktu (`timeoutSeconds`, setelan proses) dijalankan **agent** → lapor `FAULTED Timeout`.
-   Jaring pengaman: job RUNNING melewati batas + jeda + 5 menit diminta berhenti Orchestrator.
+3. Dasbor → Matikan (V9): job `STOPPING` dengan permintaan mati paksa; denyut langsung membawa
+   `KillJob`.
+4. Batas waktu (`timeoutSeconds`, setelan proses) dijalankan **agent** → lapor `FAULTED Timeout`.
+   Jaring pengaman: job RUNNING melewati batas + jeda berhenti + 5 menit — tidak termasuk
+   waktu dijeda — diminta berhenti Orchestrator.
 
 ## 2.5 Akun Windows — `POST /api/agent/jobs/{id}/windows-credential`
 
@@ -389,6 +440,23 @@ Maks **2 MB** per berkas, **5** per job (`413`). Tampil di rincian job di dasbor
 | Token agent | 1 jam | `agent.token-ttl` |
 | Versi agent minimal | 1.0.0 | `OPENORCHESTRATOR_AGENT_MIN_VERSION` |
 
+## 2.9 Tipe runtime dan sasaran job (V9)
+
+Berlaku untuk v1 dan v2; agent tidak perlu mengirim apa pun yang baru.
+
+- **Tipe runtime** — katalog tetap: `Production`, `Testing`, `Development`. Setiap mesin punya
+  jumlah runtime per tipe (dasbor: Tenant › Robot › Mesin). Jumlah semuanya = `slots` mesin di
+  jawaban login agent, maknanya tidak berubah. Mesin yang sudah ada sebelum V9, dan mesin baru
+  tanpa setelan, punya runtime `Production` sebanyak slotnya.
+- **Start Job** di dasbor meminta satu tipe runtime, dan boleh juga meminta satu **robot**
+  (Akun) dan satu **mesin**. Server menolak kombinasi yang tidak dimiliki folder itu.
+- **Klaim:** robot hanya mengambil job yang (a) tidak meminta mesin atau meminta mesinnya
+  sendiri, dan (b) tidak meminta tipe runtime atau meminta tipe yang dimiliki mesinnya — v2:
+  yang masih punya tempat kosong untuk tipe itu. Job tanpa tipe mendapat tipe pertama mesinnya
+  yang masih kosong (urutan katalog), dan tipe itu yang dicatat di job.
+- Job dari Studio, pemicu, dan API lama tidak meminta tipe maupun mesin: perilakunya sama
+  dengan sebelum V9.
+
 ---
 
 # Bagian 3 — Status
@@ -396,19 +464,27 @@ Maks **2 MB** per berkas, **5** per job (`413`). Tampil di rincian job di dasbor
 Sudah ada di Orchestrator:
 
 - v1: `contract`/`capabilities`, `jobs.next.package`, `packages.sha256`, `heartbeat.commands`,
-  `jobs.state.guard`, izin peran Robot.
+  `jobs.state.guard`, `jobs.pause`, `jobs.kill`, izin peran Robot.
 - v2: semua endpoint `/api/agent/*`, machine key, rekonsiliasi, lease, UNRESPONSIVE/AgentLost,
-  percobaan ulang, stop/kill, akun Windows per job, token executor, log, lampiran.
-- Dasbor: Machines (kunci, slot, lease, status agent), Robots (mesin, akun Windows, kebijakan
-  sesi, status sesi dan alasan, job yang sedang dipegang), Jobs (state baru, kode galat,
-  percobaan, konteks eksekusi, screenshot), setelan proses (batas waktu, jeda stop, ulang).
+  percobaan ulang, stop/kill, jeda (`pausedJobs`, PauseJob/ResumeJob), akun Windows per job,
+  token executor, log, lampiran.
+- Tipe runtime mesin dan sasaran job (2.9).
+- Dasbor: Machines (kunci, runtime per tipe, lease, status agent), Robots (mesin, akun Windows,
+  kebijakan sesi, status sesi dan alasan, job yang sedang dipegang), Jobs (state baru, kode
+  galat, percobaan, konteks eksekusi, rekaman; menu Hentikan/Matikan/Jeda/Lanjutkan/Jalankan
+  Ulang/log), Start Job (tipe runtime, akun, mesin, jumlah jalan, prioritas), setelan proses
+  (batas waktu, jeda stop, ulang, prioritas bawaan).
 
-Diuji: 178 uji unit; uji ujung-ke-ujung 83 pemeriksaan (agent tiruan + PostgreSQL); regresi v1
-253 panggilan (hanya tambahan medan dan perubahan yang disengaja).
+Diuji: 206 uji unit; uji ujung-ke-ujung 83 (agent) + 103 (Start Job, aksi job, jeda, runtime)
+pemeriksaan melawan PostgreSQL; regresi v1 253 panggilan (hanya tambahan medan dan perubahan
+yang disengaja).
 
 Belum:
 
 1. Uji dengan Robot Agent sungguhan di VM (menunggu klien v2 di sisi robot).
-2. Beberapa robot per mesin baru bisa diuji di Windows Server + RDS.
-3. Tidak ada pembatasan laju untuk `/api/agent/login` (kunci 256 bit tidak bisa ditebak, tapi
+2. Jeda di sisi robot: JakRunner (v1) sudah menulisnya di cabang
+   `claude/interesting-sanderson-e62fa8-zvdgmb` tapi belum dikompilasi/diuji; Robot Agent (v2)
+   belum.
+3. Beberapa robot per mesin baru bisa diuji di Windows Server + RDS.
+4. Tidak ada pembatasan laju untuk `/api/agent/login` (kunci 256 bit tidak bisa ditebak, tapi
    percobaan berulang tetap memakai sumber daya).

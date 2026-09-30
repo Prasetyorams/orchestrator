@@ -16,6 +16,8 @@ import jakarta.validation.constraints.NotNull;
  * @param timeoutSeconds   batas waktu job robot unattended; 0 = tanpa batas
  * @param stopGraceSeconds jeda berhenti rapi sebelum Executor dimatikan paksa
  * @param maxRetries       percobaan ulang otomatis untuk kegagalan sebelum workflow berjalan
+ * @param priority         prioritas bawaan job proses ini (Low, Normal, High) — dipakai job yang
+ *                         dijalankan dengan prioritas "Inherited"
  */
 public record SaveProcessRequest(
         @NotNull(message = "Nama proses wajib diisi.")
@@ -33,7 +35,8 @@ public record SaveProcessRequest(
         Integer stopGraceSeconds,
         @Min(value = 0, message = "Percobaan ulang tidak boleh negatif.")
         @Max(value = RetryPolicy.MAX_RETRIES_LIMIT, message = "Percobaan ulang paling banyak 2 kali.")
-        Integer maxRetries) {
+        Integer maxRetries,
+        String priority) {
 
     public SaveProcessRequest {
         name = Strings.trimToNull(name);
@@ -42,15 +45,16 @@ public record SaveProcessRequest(
         environment = Strings.emptyToNull(environment);
         description = Strings.emptyToNull(description);
         folderId = Strings.emptyToNull(folderId);
+        priority = Strings.emptyToNull(priority);
     }
 
     /** Bentuk lama tanpa setelan robot unattended. */
     public SaveProcessRequest(String name, String packageName, String packageVersion, String environment,
                               String description, String folderId) {
-        this(name, packageName, packageVersion, environment, description, folderId, null, null, null);
+        this(name, packageName, packageVersion, environment, description, folderId, null, null, null, null);
     }
 
     public boolean hasRunSettings() {
-        return timeoutSeconds != null || stopGraceSeconds != null || maxRetries != null;
+        return timeoutSeconds != null || stopGraceSeconds != null || maxRetries != null || priority != null;
     }
 }

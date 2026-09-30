@@ -1,10 +1,12 @@
 package id.jakforge.openorchestrator.service;
 
 import id.jakforge.openorchestrator.common.ApiException;
+import id.jakforge.openorchestrator.common.Uuids;
 import id.jakforge.openorchestrator.config.OpenOrchestratorProperties;
 import id.jakforge.openorchestrator.dto.request.CreateMachineRequest;
 import id.jakforge.openorchestrator.dto.request.UpdateMachineRequest;
 import id.jakforge.openorchestrator.dto.response.MachineKeyResponse;
+import id.jakforge.openorchestrator.model.RuntimeTypes;
 import id.jakforge.openorchestrator.repository.MachineRepository;
 import id.jakforge.openorchestrator.security.MachineKeys;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
@@ -12,8 +14,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /** Aturan tentang mesin tempat robot berjalan, dan machine key Robot Agent-nya. */
 @Service
@@ -23,8 +28,17 @@ public class MachineService {
     private final MachineRepository machineRepository;
     private final OpenOrchestratorProperties properties;
 
+    /** Setiap mesin beserta runtime-nya ({@code runtimes}: tipe → jumlah). */
     public List<Map<String, Object>> findAll(OpenOrchestratorPrincipal principal) {
-        return machineRepository.findAll(principal.tenantId(), properties.agent().offlineAfter().toSeconds());
+        List<Map<String, Object>> machines = machineRepository.findAll(principal.tenantId(),
+                properties.agent().offlineAfter().toSeconds());
+        Map<String, Map<String, Integer>> runtimes = machineRepository.findRuntimesForTenant(principal.tenantId());
+
+        for (Map<String, Object> machine : machines) {
+            machine.put("runtimes", runtimes.getOrDefault((String) machine.get("id"), Map.of()));
+        }
+
+        return machines;
     }
 
     @Transactional
@@ -33,16 +47,65 @@ public class MachineService {
             throw ApiException.conflict("Mesin '" + request.name() + "' sudah ada.");
         }
 
-        machineRepository.insert(principal.tenantId(), request.name(), request.type(), request.licenseKey(),
-                request.description());
+        Map<String, Integer> runtimes = request.runtimes() == null ? null : normalizeRuntimes(request.runtimes());
+
+        UUID machineId = machineRepository.insert(principal.tenantId(), request.name(), request.type(),
+                request.licenseKey(), request.description());
+
+        if (runtimes != null) machineRepository.replaceRuntimes(machineId, runtimes);
     }
 
+    /**
+     * Ubah setelan mesin. {@code runtimes} menggantikan seluruh runtime-nya;
+     * {@code slots} lama tanpa {@code runtimes} berarti sekian runtime
+     * Production — bentuk yang dikirim dasbor sebelum tipe runtime ada.
+     */
     @Transactional
     public void update(OpenOrchestratorPrincipal principal, String name, UpdateMachineRequest request) {
-        if (machineRepository.updateSettings(principal.tenantId(), name, request.type(), request.description(),
-                request.slots(), request.leaseSeconds()) == 0) {
+        UUID tenantId = principal.tenantId();
+
+        Map<String, Integer> runtimes = request.runtimes() != null ? normalizeRuntimes(request.runtimes())
+                : request.slots() != null ? Map.of(RuntimeTypes.PRODUCTION, request.slots())
+                : null;
+
+        if (machineRepository.updateSettings(tenantId, name, request.type(), request.description(),
+                request.leaseSeconds()) == 0) {
             throw machineNotFound(name);
         }
+
+        if (runtimes != null) {
+            UUID machineId = Uuids.parseOrNull(String.valueOf(machineRepository.findByName(tenantId, name)
+                    .orElseThrow(() -> machineNotFound(name)).get("id")));
+            machineRepository.replaceRuntimes(machineId, runtimes);
+        }
+    }
+
+    /**
+     * Tipe dibakukan dan diperiksa; urutan katalog. Tipe yang tidak dikenal
+     * DITOLAK, bukan diabaikan: "Produksi" yang diam-diam hilang berarti mesin
+     * yang tidak menjalankan apa pun tanpa ada yang tahu sebabnya.
+     */
+    static Map<String, Integer> normalizeRuntimes(Map<String, Integer> requested) {
+        Map<String, Integer> byType = new HashMap<>();
+
+        for (Map.Entry<String, Integer> entry : requested.entrySet()) {
+            String type = RuntimeTypes.parse(entry.getKey()).orElseThrow(() -> ApiException.badRequest(
+                    "Tipe runtime tidak dikenal: '" + entry.getKey() + "'. Pilih Production, Testing, atau Development."));
+            int count = entry.getValue() == null ? 0 : entry.getValue();
+
+            if (count < 0 || count > RuntimeTypes.MAX_SLOTS) {
+                throw ApiException.badRequest("Jumlah runtime " + type + " harus 0 sampai " + RuntimeTypes.MAX_SLOTS + ".");
+            }
+
+            byType.put(type, count);
+        }
+
+        Map<String, Integer> ordered = new LinkedHashMap<>();
+        for (String type : RuntimeTypes.ALL) {
+            if (byType.getOrDefault(type, 0) > 0) ordered.put(type, byType.get(type));
+        }
+
+        return ordered;
     }
 
     /**

@@ -14,6 +14,7 @@ import id.jakforge.openorchestrator.dto.response.AgentStateResponse;
 import id.jakforge.openorchestrator.dto.response.LogWriteResponse;
 import id.jakforge.openorchestrator.dto.response.WindowsCredentialResponse;
 import id.jakforge.openorchestrator.model.AgentErrorCodes;
+import id.jakforge.openorchestrator.model.JobCommands;
 import id.jakforge.openorchestrator.model.JobState;
 import id.jakforge.openorchestrator.model.JobTransitions;
 import id.jakforge.openorchestrator.model.LogLevel;
@@ -37,6 +38,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -143,8 +145,10 @@ public class AgentService {
             // eksekusi dari pekerjaan yang sama tidak boleh berlanjut.
             for (Map<String, Object> finished : jobRepository.findFinishedAmong(machineId, report.activeJobIds())) {
                 UUID jobId = Uuids.parseOrNull((String) finished.get("id"));
-                commands.put(jobId, command("StopJob", jobId, graceOf(finished.get("stopGraceSeconds"))));
+                commands.put(jobId, command(JobCommands.STOP, jobId, graceOf(finished.get("stopGraceSeconds"))));
             }
+
+            if (report.pausedSent()) recordPause(agent.tenantId(), report);
         }
 
         for (Map<String, Object> stop : jobRepository.findStopRequestsForMachine(machineId, DEFAULT_STOP_GRACE_SECONDS)) {
@@ -152,14 +156,61 @@ public class AgentService {
             boolean kill = Boolean.TRUE.equals(stop.get("kill"));
 
             commands.put(jobId, kill
-                    ? command("KillJob", jobId, null)
-                    : command("StopJob", jobId, graceOf(stop.get("graceSeconds"))));
+                    ? command(JobCommands.KILL, jobId, null)
+                    : command(JobCommands.STOP, jobId, graceOf(stop.get("graceSeconds"))));
+        }
+
+        // Jeda: dari keadaan SESUDAH laporan jeda agent dicatat. Agent yang
+        // belum mengenal jeda tidak pernah melaporkan job yang ditahan, jadi ia
+        // terus menerima PauseJob — dan mengabaikannya, seperti semua jenis
+        // perintah yang tidak ia kenal.
+        for (Map<String, Object> job : jobRepository.findPauseStateForMachine(machineId)) {
+            UUID jobId = Uuids.parseOrNull((String) job.get("id"));
+
+            JobCommands.pauseCommand(Boolean.TRUE.equals(job.get("pauseRequested")),
+                            Boolean.TRUE.equals(job.get("paused")), (String) job.get("pauseSource"))
+                    .ifPresent(type -> commands.putIfAbsent(jobId, command(type, jobId, null)));
         }
 
         int settingsVersion = machineRepository.findSettingsVersion(machineId).orElse(1);
 
         return new AgentHeartbeatResponse(Timestamps.nowText(), new ArrayList<>(commands.values()), settingsVersion,
                 settings.heartbeatSeconds(), settings.heartbeatBusySeconds());
+    }
+
+    /**
+     * Tipe runtime mesin ini yang masih punya tempat, urutan katalog. Setiap
+     * tipe punya batasnya sendiri: dua runtime Production dan satu Testing
+     * berarti job Testing kedua menunggu walaupun satu Production kosong.
+     */
+    private List<String> freeRuntimeTypes(UUID machineId) {
+        Map<String, Integer> runtimes = machineRepository.findRuntimes(machineId);
+        Map<String, Long> held = jobRepository.countHeldOnMachineByRuntime(machineId);
+
+        return runtimes.entrySet().stream()
+                .filter(runtime -> held.getOrDefault(runtime.getKey(), 0L) < runtime.getValue())
+                .map(Map.Entry::getKey)
+                .toList();
+    }
+
+    /** Jeda menurut agent dicatat, dan setiap perubahannya masuk ke log job-nya. */
+    private void recordPause(UUID tenantId, AgentHeartbeatRequest.RobotReport report) {
+        JobRepository.PauseChanges changes = jobRepository.recordAgentPause(report.robotId(), report.pausedJobs());
+
+        for (Map<String, Object> job : changes.paused()) {
+            logRepository.insertJobEntry(tenantId, LogLevel.INFO,
+                    JobCommands.SOURCE_DASHBOARD.equals(job.get("pauseSource"))
+                            ? "Robot menjeda pekerjaan atas permintaan dasbor."
+                            : "Pekerjaan dijeda langsung di PC robot.",
+                    (String) job.get("robotName"), (String) job.get("processName"),
+                    Uuids.parseOrNull((String) job.get("id")));
+        }
+
+        for (Map<String, Object> job : changes.resumed()) {
+            logRepository.insertJobEntry(tenantId, LogLevel.INFO, "Robot melanjutkan pekerjaan.",
+                    (String) job.get("robotName"), (String) job.get("processName"),
+                    Uuids.parseOrNull((String) job.get("id")));
+        }
     }
 
     // -----------------------------------------------------------------
@@ -201,13 +252,17 @@ public class AgentService {
 
         if (jobRepository.countHeldOnMachine(machineId) >= slots) return Optional.empty();
 
+        List<String> freeRuntimeTypes = freeRuntimeTypes(machineId);
+        if (freeRuntimeTypes.isEmpty()) return Optional.empty();
+
         UUID tenantId = agent.tenantId();
         String robotName = (String) robot.get("name");
         String machineName = (String) machine.get("name");
         int leaseSeconds = ((Number) machine.get("leaseSeconds")).intValue();
 
         Optional<Map<String, Object>> claimed = jobRepository.claimNextForAgent(tenantId, robotId, robotName,
-                machineId, machineName, leaseSeconds, properties.agent().retryAvoidWindow().toSeconds());
+                machineId, machineName, leaseSeconds, properties.agent().retryAvoidWindow().toSeconds(),
+                freeRuntimeTypes);
 
         if (claimed.isEmpty()) return Optional.empty();
 
@@ -251,6 +306,7 @@ public class AgentService {
         result.put("processName", processName);
         result.put("folderId", folderId == null ? null : folderId.toString());
         result.put("priority", job.get("priority"));
+        result.put("runtimeType", job.get("runtimeType"));
         result.put("package", packageInfo);
         result.put("entryPoint", plan.get("entryPoint"));
         result.put("inputJson", job.get("inputJson"));
