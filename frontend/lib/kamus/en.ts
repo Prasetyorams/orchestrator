@@ -376,7 +376,6 @@ export const EN: Record<string, string> = {
   "Atur robot folder ini": "Manage this folder's robots",
   "Robot yang ditugaskan ke folder ini mengambil pekerjaannya. Robot baru masuk ke folder Shared saat pertama kali tersambung.": "Robots assigned to this folder pick up its jobs. New robots join the Shared folder when they first connect.",
   "Belum ada catatan di folder ini.": "No logs in this folder yet.",
-  "Paling banyak 500 baris terbaru dari pekerjaan di folder ini. Untuk catatan satu proses atau satu pekerjaan, buka detailnya dari halaman Proses atau Pekerjaan.": "Shows at most the latest 500 lines from jobs in this folder. For the logs of one process or one job, open its details from the Processes or Jobs page.",
 
   // antrean
   "Tambah antrean": "Add queue",
@@ -670,7 +669,6 @@ export const EN: Record<string, string> = {
   "Dipakai job yang dijalankan dengan prioritas Diwarisi.": "Used by jobs started with Inherited priority.",
   "Jalankan lagi — sedang {0}": "Run again — currently {0}",
   "Hapus saringan pekerjaan": "Remove job filter",
-  "Belum ada catatan untuk pekerjaan ini.": "No logs for this job yet.",
   "Tanpa runtime": "No runtimes",
   "Job Robot Agent berjalan / slot yang berlaku": "Running Robot Agent jobs / effective slots",
   "{0} dari {1} slot terpakai": "{0} of {1} slots in use",
@@ -715,6 +713,36 @@ export const EN: Record<string, string> = {
   "Buat robot baru": "Create a new robot",
   "Buka konfigurasi mesin ini": "Open this machine's configuration",
   "Buka konfigurasi mesin": "Open machine configuration",
+
+  // halaman Catatan: saringan, kolom, ekspor
+  "15 menit terakhir": "Last 15 minutes",
+  "30 menit terakhir": "Last 30 minutes",
+  "1 jam terakhir": "Last hour",
+  "6 jam terakhir": "Last 6 hours",
+  "12 jam terakhir": "Last 12 hours",
+  "24 jam terakhir": "Last 24 hours",
+  "7 hari terakhir": "Last 7 days",
+  "Kemarin": "Yesterday",
+  "Rentang khusus": "Custom range",
+  "Sampai {0}": "Until {0}",
+  "Dari": "From",
+  "Sampai": "To",
+  "Terapkan": "Apply",
+  "Isi waktu awal, waktu akhir, atau keduanya.": "Fill in a start time, an end time, or both.",
+  "Waktu awal harus sebelum waktu akhir.": "The start time must be before the end time.",
+  "Belum ada nilai di catatan rentang ini.": "No values in the logs for this range yet.",
+  "Cari pesan...": "Search messages...",
+  "Cari...": "Search...",
+  "Ekspor": "Export",
+  "Mengekspor...": "Exporting...",
+  "Host Identity": "Host Identity",
+  "Kolom": "Columns",
+  "Waktu dan Pesan selalu tampil.": "Time and Message are always shown.",
+  "Saringan": "Filters",
+  "Kembalikan ke bawaan": "Reset to defaults",
+  "Reset saringan": "Reset filters",
+  "Tidak ada catatan yang cocok dengan saringan.": "No logs match the filters.",
+  "Paling banyak {0} baris terbaru yang cocok dengan saringan. Ekspor mengunduh sampai 50.000 baris dengan saringan yang sama.": "Shows at most the latest {0} lines that match the filters. Export downloads up to 50,000 lines with the same filters.",
 };
 
 /**
@@ -1029,4 +1057,10 @@ export const PESAN_EN: Record<string, string> = {
 
   // --- penerus /api dasbor ---
   "Dasbor tidak bisa menghubungi backend OpenOrchestrator.": "The dashboard can't reach the OpenOrchestrator backend.",
+
+  // --- galat: saringan catatan ---
+  "Rentang waktu tidak dikenal: '{0}'. Pilih 15m, 30m, 1h, 6h, 12h, 24h, today, yesterday, 7d, atau custom.": "Unknown time range: '{0}'. Choose 15m, 30m, 1h, 6h, 12h, 24h, today, yesterday, 7d, or custom.",
+  "Waktu tidak bisa dibaca: '{0}'. Pakai ISO-8601, mis. 2026-09-30T08:00:00+07:00.": "Can't read the time '{0}'. Use ISO-8601, e.g. 2026-09-30T08:00:00+07:00.",
+  "Waktu awal harus sebelum waktu akhir.": "The start time must be before the end time.",
+  "Teks pencarian paling panjang {0} karakter.": "The search text can be at most {0} characters.",
 };

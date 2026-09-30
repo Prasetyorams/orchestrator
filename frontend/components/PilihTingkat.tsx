@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 
 /** Warna titik tiap tingkat; sama dengan warna lencananya di tabel. */
-const WARNA: Record<string, string> = {
+export const WARNA_TINGKAT: Record<string, string> = {
   INFO: "bg-info",
   WARN: "bg-warn",
   WARNING: "bg-warn",
@@ -51,7 +51,7 @@ export function PilihTingkat({
 
       {pilihan.map((x) => (
         <Keping key={x} aktif={terpilih.includes(x)} onClick={() => alih(x)}>
-          <span className={cn("h-2 w-2 rounded-full", WARNA[x.toUpperCase()] ?? "bg-slate-400")} />
+          <span className={cn("h-2 w-2 rounded-full", WARNA_TINGKAT[x.toUpperCase()] ?? "bg-slate-400")} />
           {x}
         </Keping>
       ))}

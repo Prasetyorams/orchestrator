@@ -435,10 +435,55 @@ export type LogLine = {
   message: string;
   robotName: string | null;
   machineName: string | null;
+  /** Akun Windows tempat robot berjalan ("VM-01\robot"), kalau diketahui. */
+  hostIdentity?: string | null;
   processName: string | null;
   jobId: string | null;
   loggedAt: string;
 };
+
+/**
+ * Saringan catatan — sama untuk daftar, pilihan saringan, dan ekspor.
+ * Yang kosong tidak membatasi; yang terisi digabung dengan AND di server.
+ */
+export type SaringanLog = {
+  level?: string[];
+  robot?: string;
+  process?: string;
+  jobId?: string;
+  folderId?: string | null;
+  machine?: string;
+  host?: string;
+  /** 15m, 30m, 1h, 6h, 12h, 24h, today, yesterday, 7d, custom; kosong = semua waktu. */
+  time?: string;
+  /** Batas rentang custom, ISO-8601. */
+  from?: string;
+  to?: string;
+  /** Potongan teks di pesan. */
+  q?: string;
+};
+
+/**
+ * Tingkat dikirim dipisah koma ("WARN,ERROR"), bukan larik: axios mengubah
+ * larik menjadi level[]=..., dan nama berkurung itu tidak dikenali server
+ * sebagai parameter "level". Nilai kosong tidak dikirim sama sekali.
+ */
+function parameterLog(p?: SaringanLog & { limit?: number }) {
+  return {
+    ...p,
+    folderId: p?.folderId || undefined,
+    level: p?.level?.length ? p.level.join(",") : undefined,
+    robot: p?.robot || undefined,
+    process: p?.process || undefined,
+    jobId: p?.jobId || undefined,
+    machine: p?.machine || undefined,
+    host: p?.host || undefined,
+    time: p?.time || undefined,
+    from: p?.from || undefined,
+    to: p?.to || undefined,
+    q: p?.q?.trim() || undefined,
+  };
+}
 
 export type Alert = {
   id: number;
@@ -895,19 +940,18 @@ export const OpenOrchestratorApi = {
   // Tingkat boleh lebih dari satu dan dikirim dipisah koma ("WARN,ERROR").
   // Bukan larik: axios mengubah larik menjadi level[]=..., dan nama berkurung
   // itu tidak dikenali server sebagai parameter "level".
-  logs: (params?: {
-    level?: string[];
-    robot?: string;
-    process?: string;
-    jobId?: string;
-    folderId?: string | null;
-    limit?: number;
-  }) =>
-    get<LogLine[]>("/api/logs", {
-      ...params,
-      folderId: params?.folderId || undefined,
-      level: params?.level?.length ? params.level.join(",") : undefined,
-    }),
+  logs: (params?: SaringanLog & { limit?: number }) => get<LogLine[]>("/api/logs", parameterLog(params)),
+  /** Pilihan saringan Mesin, Proses, dan Host Identity — nilai yang ada di catatan folder dan rentang waktu itu. */
+  logFilterOptions: (params: Pick<SaringanLog, "folderId" | "jobId" | "time" | "from" | "to">) =>
+    get<{ machines: string[]; processes: string[]; hostIdentities: string[] }>("/api/logs/filters", parameterLog(params)),
+  /** Unduh CSV dengan saringan yang sama dengan tabel (server membatasi 50.000 baris). */
+  exportLogs: (params: SaringanLog, namaBerkas: string) => {
+    const kueri = new URLSearchParams();
+    for (const [kunci, nilai] of Object.entries(parameterLog(params))) {
+      if (nilai !== undefined && nilai !== "") kueri.set(kunci, String(nilai));
+    }
+    return unduh(`${api.defaults.baseURL}/api/logs/export?${kueri}`, namaBerkas);
+  },
   clearLogs: (olderThanDays: number) =>
     api.delete<{ ok: boolean; deleted: number }>("/api/logs", { params: { olderThanDays } })
       .then((r) => r.data),
@@ -963,7 +1007,24 @@ export const OpenOrchestratorApi = {
  * yang membawa tokennya, lalu diserahkan ke peramban sebagai blob.
  */
 export async function unduh(url: string, namaBerkas: string) {
-  const r = await api.get(url, { responseType: "blob", baseURL: "" });
+  let r;
+
+  try {
+    r = await api.get(url, { responseType: "blob", baseURL: "" });
+  } catch (e) {
+    // Galat dari server juga datang sebagai blob — dibaca dulu sebagai JSON,
+    // supaya errorText menampilkan pesan server ("Rentang waktu tidak
+    // dikenal"), bukan "Request failed with status code 400".
+    const err = e as AxiosError;
+    if (err.response?.data instanceof Blob) {
+      try {
+        err.response.data = JSON.parse(await err.response.data.text());
+      } catch {
+        // Bukan JSON: pesan bawaan axios tetap dipakai.
+      }
+    }
+    throw err;
+  }
 
   const objectUrl = window.URL.createObjectURL(r.data as Blob);
   const a = document.createElement("a");

@@ -44,6 +44,8 @@ type Props<T> = {
   /** Klik ganda pada baris. Dipakai untuk membuka detail. */
   onBuka?: (baris: T) => void;
   kosong?: string;
+  /** Tombol di bawah teks kosong, mis. "Reset saringan" saat saringan membuat tabel kosong. */
+  aksiKosong?: ReactNode;
   /** Bilah aksi yang muncul HANYA saat ada baris terpilih. */
   aksiTerpilih?: (terpilih: T[]) => ReactNode;
   /**
@@ -61,6 +63,7 @@ export function DataTable<T>({
   onPilih,
   onBuka,
   kosong,
+  aksiKosong,
   aksiTerpilih,
   rapat = false,
 }: Props<T>) {
@@ -68,7 +71,9 @@ export function DataTable<T>({
 
   const jarakSel = rapat ? "px-3 first:pl-5 last:pr-5" : "px-5";
 
-  const [urutKe, setUrutKe] = useState<number | null>(null);
+  // Kolom yang diurut diingat lewat judulnya, bukan urutannya: di tabel yang
+  // kolomnya bisa disembunyikan, urutan ke-3 bisa menjadi kolom lain.
+  const [urutKe, setUrutKe] = useState<string | null>(null);
   const [naik, setNaik] = useState(true);
   const [halaman, setHalaman] = useState(0);
   const [terpilih, setTerpilih] = useState<Set<string>>(new Set());
@@ -76,7 +81,7 @@ export function DataTable<T>({
   const terurut = useMemo(() => {
     if (urutKe === null) return data;
 
-    const ambil = kolom[urutKe]?.urut;
+    const ambil = kolom.find((k) => k.judul === urutKe)?.urut;
     if (!ambil) return data;
 
     // Salinan, bukan urut di tempat: data datang dari cache react-query, dan
@@ -113,12 +118,12 @@ export function DataTable<T>({
       ? terurut.slice(halamanAman * perHalaman, halamanAman * perHalaman + perHalaman)
       : terurut;
 
-  function ubahUrut(i: number) {
-    if (!kolom[i].urut) return;
+  function ubahUrut(k: Kolom<T>) {
+    if (!k.urut) return;
 
-    if (urutKe === i) setNaik(!naik);
+    if (urutKe === k.judul) setNaik(!naik);
     else {
-      setUrutKe(i);
+      setUrutKe(k.judul);
       setNaik(true);
     }
   }
@@ -180,10 +185,10 @@ export function DataTable<T>({
                 </th>
               ) : null}
 
-              {kolom.map((k, i) => (
+              {kolom.map((k) => (
                 <th
                   key={k.judul}
-                  onClick={() => ubahUrut(i)}
+                  onClick={() => ubahUrut(k)}
                   className={cn(
                     "py-2.5 text-xs font-medium uppercase tracking-wide text-muted",
                     jarakSel,
@@ -194,7 +199,7 @@ export function DataTable<T>({
                   <span className="inline-flex items-center gap-1">
                     {t(k.judul)}
                     {k.urut ? (
-                      urutKe === i ? (
+                      urutKe === k.judul ? (
                         naik ? <ChevronUp size={13} /> : <ChevronDown size={13} />
                       ) : (
                         <ChevronsUpDown size={13} className="opacity-40" />
@@ -245,7 +250,10 @@ export function DataTable<T>({
       </div>
 
       {terurut.length === 0 ? (
-        <p className="px-5 py-8 text-center text-sm text-muted">{t(kosong ?? "Belum ada data.")}</p>
+        <div className="px-5 py-8 text-center">
+          <p className="text-sm text-muted">{t(kosong ?? "Belum ada data.")}</p>
+          {aksiKosong ? <div className="mt-3 flex justify-center">{aksiKosong}</div> : null}
+        </div>
       ) : null}
 
       {perHalaman > 0 && jumlahHalaman > 1 ? (
