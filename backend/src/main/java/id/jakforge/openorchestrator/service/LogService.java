@@ -3,10 +3,13 @@ package id.jakforge.openorchestrator.service;
 import id.jakforge.openorchestrator.common.ApiException;
 import id.jakforge.openorchestrator.common.PageLimits;
 import id.jakforge.openorchestrator.common.RequestBodies;
+import id.jakforge.openorchestrator.common.Strings;
 import id.jakforge.openorchestrator.common.Uuids;
 import id.jakforge.openorchestrator.dto.request.LogBatchRequest;
+import id.jakforge.openorchestrator.dto.request.LogSearchRequest;
 import id.jakforge.openorchestrator.dto.response.DeletedCountResponse;
 import id.jakforge.openorchestrator.dto.response.LogWriteResponse;
+import id.jakforge.openorchestrator.model.FileContent;
 import id.jakforge.openorchestrator.model.LogLevel;
 import id.jakforge.openorchestrator.model.Severity;
 import id.jakforge.openorchestrator.repository.AlertRepository;
@@ -16,10 +19,23 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -45,37 +61,144 @@ public class LogService {
     /** Batas terkecil umur catatan yang boleh dibuang, dalam hari. */
     static final int MIN_PURGE_AGE_DAYS = 1;
 
+    /**
+     * Batas baris satu ekspor CSV. Jauh di atas yang terlihat di layar (500),
+     * tapi tetap terbatas: ekspor tanpa batas dari tabel yang paling cepat
+     * membesar adalah cara termudah membuat server kehabisan memori.
+     */
+    static final int MAX_EXPORT_ROWS = 50_000;
+
+    /** Nilai per jenis di daftar pilihan saringan Mesin, Proses, dan Host Identity. */
+    static final int MAX_FILTER_OPTIONS = 500;
+
+    /** Batas panjang teks yang dicari. */
+    static final int MAX_SEARCH_LENGTH = 200;
+
+    /** Panjang kolom logs.host_identity (V10). */
+    static final int MAX_HOST_IDENTITY_LENGTH = 200;
+
+    /** Rentang waktu siap pakai: kunci di alamat halaman → lama ke belakang dari sekarang. */
+    static final Map<String, Duration> RECENT_RANGES = Map.of(
+            "15m", Duration.ofMinutes(15),
+            "30m", Duration.ofMinutes(30),
+            "1h", Duration.ofHours(1),
+            "6h", Duration.ofHours(6),
+            "12h", Duration.ofHours(12),
+            "24h", Duration.ofHours(24),
+            "7d", Duration.ofDays(7));
+
     private static final String ALERT_SOURCE = "logs";
     private static final String UNKNOWN_ROBOT = "robot";
+    private static final DateTimeFormatter CSV_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter EXPORT_FILE_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     private final LogRepository logRepository;
     private final AlertRepository alertRepository;
     private final FolderAccessService folderAccessService;
+    private final Clock clock;
 
-    /**
-     * @param levels tingkat yang ingin dilihat — satu atau lebih, dari
-     *               {@code ?level=INFO,WARN} maupun {@code ?level=INFO&level=WARN}.
-     *               Kosong berarti semua tingkat.
-     */
+    /** Bentuk lama: tanpa mesin, host identity, waktu, dan teks. */
     public List<Map<String, Object>> search(OpenOrchestratorPrincipal principal, List<String> levels, String robotName,
                                             String processName, String jobId, String folderId, Integer limit) {
-        UUID folder = folderAccessService.resolveFolderFilter(principal, folderId);
+        return search(principal, LogSearchRequest.of(levels, robotName, processName, jobId, folderId, limit));
+    }
+
+    /**
+     * Catatan terbaru yang cocok dengan SEMUA saringan (AND).
+     *
+     * <p>Tingkat yang ingin dilihat boleh lebih dari satu, dari
+     * {@code ?level=INFO,WARN} maupun {@code ?level=INFO&level=WARN}; kosong
+     * berarti semua tingkat.
+     */
+    public List<Map<String, Object>> search(OpenOrchestratorPrincipal principal, LogSearchRequest request) {
+        return toFilter(principal, request)
+                .map(filter -> logRepository.search(principal.tenantId(), filter,
+                        PageLimits.clamp(request.limit(), DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)))
+                .orElse(List.of());
+    }
+
+    /**
+     * Pilihan saringan Mesin, Proses, dan Host Identity: nilai yang ada di
+     * catatan folder dan rentang waktu itu. Saringan lain tidak menyempitkan
+     * pilihannya — memilih Mesin tidak boleh membuat pilihan Mesin lain hilang.
+     */
+    public Map<String, List<String>> filterOptions(OpenOrchestratorPrincipal principal, LogSearchRequest request) {
+        return toFilter(principal, request)
+                .map(filter -> logRepository.findFilterOptions(principal.tenantId(), filter.scope(), MAX_FILTER_OPTIONS))
+                .orElseGet(LogService::noFilterOptions);
+    }
+
+    /** Tiga daftar kosong, dengan urutan kunci yang sama seperti jawaban biasa (bukan Map.of yang acak). */
+    private static Map<String, List<String>> noFilterOptions() {
+        Map<String, List<String>> options = new LinkedHashMap<>();
+        options.put("machines", List.of());
+        options.put("processes", List.of());
+        options.put("hostIdentities", List.of());
+        return options;
+    }
+
+    /**
+     * Ekspor CSV dengan saringan yang SAMA dengan yang tampil di layar — yang
+     * diunduh adalah yang sedang dilihat, bukan seluruh catatan.
+     *
+     * <p>UTF-8 dengan BOM supaya Excel membaca huruf non-ASCII dengan benar.
+     * Waktu ditulis di zona tampilan. Sel yang diawali =, +, -, @ diberi
+     * tanda kutip tunggal: pesan catatan datang dari workflow, dan spreadsheet
+     * menjalankan sel seperti itu sebagai rumus.
+     */
+    public FileContent export(OpenOrchestratorPrincipal principal, LogSearchRequest request) {
+        List<Map<String, Object>> rows = toFilter(principal, request)
+                .map(filter -> logRepository.search(principal.tenantId(), filter, MAX_EXPORT_ROWS))
+                .orElse(List.of());
+
+        ZoneId zone = clock.getZone();
+        StringBuilder csv = new StringBuilder("﻿");
+
+        csvRow(csv, "Waktu (" + zone.getId() + ")", "Tingkat", "Robot", "Mesin", "Host Identity", "Proses",
+                "Pekerjaan", "Pesan");
+
+        for (Map<String, Object> row : rows) {
+            Object loggedAt = row.get("loggedAt");
+
+            csvRow(csv,
+                    loggedAt == null ? "" : CSV_TIME.format(Instant.parse(loggedAt.toString()).atZone(zone)),
+                    text(row.get("level")), text(row.get("robotName")), text(row.get("machineName")),
+                    text(row.get("hostIdentity")), text(row.get("processName")), text(row.get("jobId")),
+                    text(row.get("message")));
+        }
+
+        String fileName = "catatan-" + EXPORT_FILE_TIME.format(LocalDateTime.now(clock)) + ".csv";
+
+        return new FileContent(fileName, "text/csv; charset=UTF-8", csv.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Permintaan menjadi saringan repositori, sesudah diperiksa.
+     *
+     * @return kosong kalau saringannya tidak mungkin cocok dengan apa pun —
+     *         jobId yang bukan UUID, atau hanya tingkat rincian — tanpa
+     *         bertanya ke basis data
+     */
+    private Optional<LogRepository.Filter> toFilter(OpenOrchestratorPrincipal principal, LogSearchRequest request) {
+        UUID folder = folderAccessService.resolveFolderFilter(principal, request.folderId());
         UUID job = null;
 
-        if (jobId != null && !jobId.isBlank()) {
-            job = Uuids.parseOrNull(jobId);
+        if (request.jobId() != null && !request.jobId().isBlank()) {
+            job = Uuids.parseOrNull(request.jobId());
 
             // Id yang bukan UUID tidak akan pernah cocok dengan apa pun. Yang
             // dikembalikan daftar kosong, bukan galat penguraian dari basis data.
-            if (job == null) return List.of();
+            if (job == null) return Optional.empty();
         }
 
-        Set<LogLevel> requestedLevels = parseRequestedLevels(levels);
+        Set<LogLevel> requestedLevels = parseRequestedLevels(request.levels());
 
         // Tingkat rincian tidak pernah ditampilkan (lihat LogLevel.isVerbose).
         // Yang HANYA meminta rincian memang tidak mendapat apa-apa; yang
         // memintanya bersama tingkat lain mendapat tingkat lain itu saja.
-        if (!requestedLevels.isEmpty() && requestedLevels.stream().allMatch(LogLevel::isVerbose)) return List.of();
+        if (!requestedLevels.isEmpty() && requestedLevels.stream().allMatch(LogLevel::isVerbose)) {
+            return Optional.empty();
+        }
 
         Set<String> storedSpellings = new LinkedHashSet<>();
 
@@ -83,8 +206,105 @@ public class LogService {
             if (!level.isVerbose()) storedSpellings.addAll(level.storedSpellings());
         }
 
-        return logRepository.search(principal.tenantId(), storedSpellings, robotName, processName, job, folder,
-                PageLimits.clamp(limit, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE));
+        TimeRange range = timeRange(request.time(), request.from(), request.to(), clock);
+
+        String text = Strings.trimToNull(request.q());
+
+        if (text != null && text.length() > MAX_SEARCH_LENGTH) {
+            throw ApiException.badRequest("Teks pencarian paling panjang " + MAX_SEARCH_LENGTH + " karakter.");
+        }
+
+        return Optional.of(new LogRepository.Filter(storedSpellings, request.robot(), request.process(), job, folder,
+                Strings.trimToNull(request.machine()), Strings.trimToNull(request.host()), range.from(), range.to(),
+                text));
+    }
+
+    /** Batas waktu saringan; null = tidak dibatasi di sisi itu. {@code to} tidak termasuk. */
+    record TimeRange(Instant from, Instant to) {
+    }
+
+    /**
+     * Rentang waktu dari kunci siap pakai, atau dari {@code from}/{@code to}.
+     *
+     * <p>"today" dan "yesterday" dihitung di zona TAMPILAN (zona {@link Clock}
+     * aplikasi) — "hari ini" yang sama dengan kartu di Beranda — bukan zona
+     * peramban atau UTC.
+     */
+    static TimeRange timeRange(String time, String from, String to, Clock clock) {
+        String key = Strings.trimToNull(time);
+        Instant now = clock.instant();
+
+        if (key == null || key.equalsIgnoreCase("all")) {
+            // Tanpa kunci tapi dengan batas: dianggap rentang khusus.
+            return from == null && to == null ? new TimeRange(null, null) : customRange(from, to, clock);
+        }
+
+        key = key.toLowerCase(Locale.ROOT);
+
+        Duration recent = RECENT_RANGES.get(key);
+        if (recent != null) return new TimeRange(now.minus(recent), null);
+
+        LocalDate today = LocalDate.now(clock);
+
+        return switch (key) {
+            case "today" -> new TimeRange(today.atStartOfDay(clock.getZone()).toInstant(), null);
+            case "yesterday" -> new TimeRange(today.minusDays(1).atStartOfDay(clock.getZone()).toInstant(),
+                    today.atStartOfDay(clock.getZone()).toInstant());
+            case "custom" -> customRange(from, to, clock);
+            default -> throw ApiException.badRequest("Rentang waktu tidak dikenal: '" + time.trim()
+                    + "'. Pilih 15m, 30m, 1h, 6h, 12h, 24h, today, yesterday, 7d, atau custom.");
+        };
+    }
+
+    private static TimeRange customRange(String from, String to, Clock clock) {
+        Instant start = parseInstant(from, clock);
+        Instant end = parseInstant(to, clock);
+
+        if (start != null && end != null && !start.isBefore(end)) {
+            throw ApiException.badRequest("Waktu awal harus sebelum waktu akhir.");
+        }
+
+        return new TimeRange(start, end);
+    }
+
+    /** ISO-8601 dengan zona, atau tanpa zona — yang terakhir dibaca di zona tampilan. */
+    private static Instant parseInstant(String text, Clock clock) {
+        String value = Strings.trimToNull(text);
+        if (value == null) return null;
+
+        try {
+            return OffsetDateTime.parse(value).toInstant();
+        } catch (DateTimeParseException withoutZone) {
+            try {
+                return LocalDateTime.parse(value).atZone(clock.getZone()).toInstant();
+            } catch (DateTimeParseException e) {
+                throw ApiException.badRequest("Waktu tidak bisa dibaca: '" + value
+                        + "'. Pakai ISO-8601, mis. 2026-09-30T08:00:00+07:00.");
+            }
+        }
+    }
+
+    private static String text(Object value) {
+        return value == null ? "" : value.toString();
+    }
+
+    /** Satu baris CSV (RFC 4180), dengan penjagaan rumus spreadsheet. */
+    private static void csvRow(StringBuilder csv, String... cells) {
+        for (int i = 0; i < cells.length; i++) {
+            if (i > 0) csv.append(',');
+            csv.append(csvCell(cells[i]));
+        }
+
+        csv.append("\r\n");
+    }
+
+    static String csvCell(String value) {
+        String cell = value;
+
+        if (!cell.isEmpty() && "=+-@\t\r".indexOf(cell.charAt(0)) >= 0) cell = "'" + cell;
+
+        boolean quoted = cell.contains(",") || cell.contains("\"") || cell.contains("\n") || cell.contains("\r");
+        return quoted ? "\"" + cell.replace("\"", "\"\"") + "\"" : cell;
     }
 
     /**
@@ -160,10 +380,17 @@ public class LogService {
                 continue;
             }
 
+            // hostIdentity (akun Windows robot) boleh dikirim robot; yang tidak
+            // dikirim diisi basis data dari pekerjaan atau robotnya, sama
+            // seperti mesin (V10). Yang melebihi kolomnya diabaikan, bukan
+            // menggagalkan seluruh kiriman — lalu diisi dengan cara yang sama.
+            String hostIdentity = Strings.trimToNull(RequestBodies.text(line, "hostIdentity"));
+            if (hostIdentity != null && hostIdentity.length() > MAX_HOST_IDENTITY_LENGTH) hostIdentity = null;
+
             logRepository.insert(tenantId, level, message,
                     RequestBodies.text(line, "robotName"), RequestBodies.text(line, "machineName"),
                     RequestBodies.text(line, "processName"), Uuids.parseOrNull(RequestBodies.text(line, "jobId")),
-                    RequestBodies.text(line, "loggedAt"));
+                    RequestBodies.text(line, "loggedAt"), hostIdentity);
 
             written++;
 

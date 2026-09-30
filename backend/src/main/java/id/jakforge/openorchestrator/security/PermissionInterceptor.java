@@ -208,6 +208,8 @@ public class PermissionInterceptor implements HandlerInterceptor {
 
             // --- catatan dan peringatan ---
             requires(GET, "/api/logs", "logs.read"),
+            requires(GET, "/api/logs/filters", "logs.read"),
+            requires(GET, "/api/logs/export", "logs.read"),
             requires(POST, "/api/logs", "logs.create"),
             requires(DELETE, "/api/logs", "logs.delete"),
             requires(GET, "/api/alerts", "alerts.read"),

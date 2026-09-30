@@ -589,3 +589,33 @@ Untuk sisi robot:
 Kodenya: `frontend/app/api/[...jalur]/route.ts` (penerus), `frontend/lib/api.ts`
 (`alamatApi`), dan `API_INTERNAL_URL` di `docker-compose.yml`. Penyebaran di server:
 `DEPLOY.md` langkah `.env`.
+
+## Saringan halaman Catatan: Mesin, Proses, Host Identity (30 Sep 2026, V10)
+
+Halaman Catatan di dasbor kini bisa disaring per Waktu, Tingkat, Mesin, Proses, dan
+**Host Identity** — akun Windows tempat robot berjalan, mis. `VM-01\robot` — ditambah
+pencarian teks pesan dan ekspor CSV.
+
+Untuk sisi robot:
+
+- **Tidak ada yang wajib diubah.** Mesin dan Host Identity diisi server sendiri saat baris
+  ditulis: dari job-nya (mesin dan akun Windows job itu), atau dari robotnya (mesin yang
+  terikat atau mesin dari denyut, dan akun Windows yang diatur di dasbor). Nilai yang dikirim
+  robot tidak pernah ditimpa.
+- **Disarankan untuk JakRunner dan agent v1:** kirim `hostIdentity` per baris di
+  `POST /api/logs`, berisi akun Windows yang menjalankan robot (`DOMAIN\user`, mis.
+  `Environment.UserDomainName + "\\" + Environment.UserName`). Tanpa itu, baris robot
+  attended hanya punya Host Identity kalau akun Windows robotnya diisi di dasbor.
+
+  ```json
+  { "lines": [ { "level": "Info", "message": "…", "robotName": "ROBOT-PC", "machineName": "PC-01",
+                 "processName": "Tagihan", "jobId": "…", "hostIdentity": "PC-01\\budi" } ] }
+  ```
+
+  Paling panjang 200 karakter; yang lebih panjang diabaikan (lalu diisi server seperti di
+  atas), bukan menggagalkan kiriman.
+- **Robot Agent v2 (`POST /api/agent/logs`):** tidak perlu apa-apa — Host Identity diambil
+  dari akun Windows job-nya.
+- Endpoint baca yang baru (`GET /api/logs/filters`, `GET /api/logs/export`, dan parameter
+  `machine`, `host`, `time`, `from`, `to`, `q` di `GET /api/logs`) hanya dipakai dasbor dan
+  butuh izin `logs.read`. Akun robot tidak memilikinya, jadi tidak berpengaruh.

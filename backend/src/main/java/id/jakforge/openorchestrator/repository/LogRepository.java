@@ -4,8 +4,12 @@ import id.jakforge.openorchestrator.model.LogLevel;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -24,18 +28,101 @@ public class LogRepository {
     private final Database database;
 
     /**
-     * @param levels   nama tingkat yang boleh tampil, persis seperti tersimpan.
-     *                 Kosong berarti semua tingkat — selain rincian, yang
-     *                 SELALU disaring.
-     * @param folderId null berarti seluruh penyewa. Catatan tidak menyimpan
-     *                 foldernya: catatan sebuah pekerjaan milik folder
-     *                 pekerjaannya, dan catatan tanpa pekerjaan — yang ditulis
-     *                 OpenOrchestrator sendiri — milik folder prosesnya.
+     * Saringan catatan. Medan null (atau koleksi kosong) tidak membatasi apa pun;
+     * yang terisi digabung dengan AND.
+     *
+     * @param levels       nama tingkat yang boleh tampil, persis seperti tersimpan
+     * @param folderId     null berarti seluruh penyewa. Catatan tidak menyimpan
+     *                     foldernya: catatan sebuah pekerjaan milik folder
+     *                     pekerjaannya, dan catatan tanpa pekerjaan — yang ditulis
+     *                     OpenOrchestrator sendiri — milik folder prosesnya.
+     * @param from         batas bawah waktu, termasuk
+     * @param to           batas atas waktu, tidak termasuk
+     * @param text         potongan teks yang harus ada di pesan, tanpa membedakan huruf besar
      */
+    public record Filter(Collection<String> levels, String robotName, String processName, UUID jobId, UUID folderId,
+                         String machineName, String hostIdentity, Instant from, Instant to, String text) {
+
+        /** Hanya tempat dan waktu — cakupan daftar pilihan saringan. */
+        public Filter scope() {
+            return new Filter(null, null, null, jobId, folderId, null, null, from, to, null);
+        }
+    }
+
+    /**
+     * Catatan terbaru yang cocok dengan saringan, dari yang paling baru.
+     *
+     * <p>Urutan argumennya dijaga: penyewa, tingkat rincian, tingkat yang
+     * diminta, lalu saringan lain — saringan yang kosong tidak menambah apa pun.
+     */
+    public List<Map<String, Object>> search(UUID tenantId, Filter filter, int limit) {
+        List<Object> args = new ArrayList<>();
+        String where = where(tenantId, filter, args);
+
+        args.add(limit);
+
+        return database.queryRows("""
+                SELECT id, level, message, robot_name, machine_name, host_identity, process_name, job_id, logged_at
+                  FROM logs
+                 WHERE %s
+                 ORDER BY id DESC
+                 LIMIT ?
+                """.formatted(where), args.toArray());
+    }
+
+    /** Bentuk lama: tanpa mesin, host identity, waktu, dan teks. */
     public List<Map<String, Object>> search(UUID tenantId, Collection<String> levels, String robotName,
                                             String processName, UUID jobId, UUID folderId, int limit) {
-        List<String> conditions = new ArrayList<>();
+        return search(tenantId, new Filter(levels, robotName, processName, jobId, folderId, null, null, null, null,
+                null), limit);
+    }
+
+    /**
+     * Pilihan saringan Mesin, Proses, dan Host Identity: nilai yang BENAR-BENAR
+     * ada di catatan dalam cakupan itu (folder, pekerjaan, waktu), tanpa
+     * ganda, tiap jenis paling banyak {@code perKind}.
+     *
+     * <p>Satu kali baca untuk ketiganya (GROUPING SETS), bukan tiga kueri.
+     */
+    public Map<String, List<String>> findFilterOptions(UUID tenantId, Filter scope, int perKind) {
         List<Object> args = new ArrayList<>();
+        String where = where(tenantId, scope, args);
+
+        Map<String, List<String>> options = new LinkedHashMap<>();
+        options.put("machines", new ArrayList<>());
+        options.put("processes", new ArrayList<>());
+        options.put("hostIdentities", new ArrayList<>());
+
+        for (Map<String, Object> row : database.queryRows("""
+                SELECT machine_name, process_name, host_identity,
+                       GROUPING(machine_name) AS without_machine,
+                       GROUPING(process_name) AS without_process,
+                       GROUPING(host_identity) AS without_host
+                  FROM logs
+                 WHERE %s
+                 GROUP BY GROUPING SETS ((machine_name), (process_name), (host_identity))
+                """.formatted(where), args.toArray())) {
+            collect(options.get("machines"), row, "withoutMachine", "machineName");
+            collect(options.get("processes"), row, "withoutProcess", "processName");
+            collect(options.get("hostIdentities"), row, "withoutHost", "hostIdentity");
+        }
+
+        for (List<String> values : options.values()) {
+            values.sort(String.CASE_INSENSITIVE_ORDER);
+            if (values.size() > perKind) values.subList(perKind, values.size()).clear();
+        }
+
+        return options;
+    }
+
+    private static void collect(List<String> target, Map<String, Object> row, String groupingColumn, String column) {
+        Object value = row.get(column);
+        if (value != null && ((Number) row.get(groupingColumn)).intValue() == 0) target.add(value.toString());
+    }
+
+    /** Kondisi WHERE bersama untuk daftar, pilihan saringan, dan ekspor; argumennya ditambahkan ke {@code args}. */
+    private static String where(UUID tenantId, Filter filter, List<Object> args) {
+        List<String> conditions = new ArrayList<>();
 
         conditions.add("tenant_id = ?");
         args.add(tenantId);
@@ -48,47 +135,72 @@ public class LogRepository {
         conditions.add("level NOT IN (" + Database.placeholders(verboseLevels.size()) + ")");
         args.addAll(verboseLevels);
 
-        if (levels != null && !levels.isEmpty()) {
-            conditions.add("level IN (" + Database.placeholders(levels.size()) + ")");
-            args.addAll(levels);
+        if (filter.levels() != null && !filter.levels().isEmpty()) {
+            conditions.add("level IN (" + Database.placeholders(filter.levels().size()) + ")");
+            args.addAll(filter.levels());
         }
 
-        if (robotName != null && !robotName.isBlank()) {
+        if (filter.robotName() != null && !filter.robotName().isBlank()) {
             conditions.add("robot_name = ?");
-            args.add(robotName);
+            args.add(filter.robotName());
         }
 
-        if (processName != null && !processName.isBlank()) {
+        if (filter.processName() != null && !filter.processName().isBlank()) {
             conditions.add("process_name = ?");
-            args.add(processName);
+            args.add(filter.processName());
         }
 
-        if (jobId != null) {
+        if (filter.jobId() != null) {
             conditions.add("job_id = ?");
-            args.add(jobId);
+            args.add(filter.jobId());
         }
 
-        if (folderId != null) {
+        if (filter.folderId() != null) {
             conditions.add("""
                     (job_id IN (SELECT j.id FROM jobs j WHERE j.tenant_id = ? AND j.folder_id = ?)
                      OR (job_id IS NULL
                          AND process_name IN (SELECT p.name FROM processes p
                                                WHERE p.tenant_id = ? AND p.folder_id = ?)))""");
             args.add(tenantId);
-            args.add(folderId);
+            args.add(filter.folderId());
             args.add(tenantId);
-            args.add(folderId);
+            args.add(filter.folderId());
         }
 
-        args.add(limit);
+        if (filter.machineName() != null && !filter.machineName().isBlank()) {
+            conditions.add("machine_name = ?");
+            args.add(filter.machineName());
+        }
 
-        return database.queryRows("""
-                SELECT id, level, message, robot_name, machine_name, process_name, job_id, logged_at
-                  FROM logs
-                 WHERE %s
-                 ORDER BY id DESC
-                 LIMIT ?
-                """.formatted(String.join(" AND ", conditions)), args.toArray());
+        if (filter.hostIdentity() != null && !filter.hostIdentity().isBlank()) {
+            conditions.add("host_identity = ?");
+            args.add(filter.hostIdentity());
+        }
+
+        if (filter.from() != null) {
+            conditions.add("logged_at >= ?");
+            args.add(OffsetDateTime.ofInstant(filter.from(), ZoneOffset.UTC));
+        }
+
+        if (filter.to() != null) {
+            conditions.add("logged_at < ?");
+            args.add(OffsetDateTime.ofInstant(filter.to(), ZoneOffset.UTC));
+        }
+
+        if (filter.text() != null && !filter.text().isBlank()) {
+            conditions.add("message ILIKE ? ESCAPE '\\'");
+            args.add("%" + escapeLike(filter.text()) + "%");
+        }
+
+        return String.join(" AND ", conditions);
+    }
+
+    /**
+     * % dan _ dari teks yang dicari berarti dirinya sendiri, bukan pola: yang
+     * mencari "100%" tidak boleh mendapat setiap baris yang memuat "100".
+     */
+    static String escapeLike(String text) {
+        return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 
     /**
@@ -99,11 +211,22 @@ public class LogRepository {
      */
     public void insert(UUID tenantId, LogLevel level, String message, String robotName, String machineName,
                        String processName, UUID jobId, String loggedAt) {
+        insert(tenantId, level, message, robotName, machineName, processName, jobId, loggedAt, null);
+    }
+
+    /**
+     * @param hostIdentity akun Windows tempat robot berjalan, kalau robotnya menyebut; yang kosong
+     *                     diisi pemicu basis data dari pekerjaan atau robotnya (V10), sama seperti
+     *                     mesinnya
+     */
+    public void insert(UUID tenantId, LogLevel level, String message, String robotName, String machineName,
+                       String processName, UUID jobId, String loggedAt, String hostIdentity) {
         database.update("""
                 INSERT INTO logs (tenant_id, level, message, robot_name, machine_name,
-                                  process_name, job_id, logged_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?::timestamptz, now()))
-                """, tenantId, level.name(), message, robotName, machineName, processName, jobId, loggedAt);
+                                  process_name, job_id, logged_at, host_identity)
+                VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?::timestamptz, now()), ?)
+                """, tenantId, level.name(), message, robotName, machineName, processName, jobId, loggedAt,
+                hostIdentity);
     }
 
     /**

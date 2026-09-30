@@ -2,6 +2,7 @@ package id.jakforge.openorchestrator.service;
 
 import id.jakforge.openorchestrator.common.ApiException;
 import id.jakforge.openorchestrator.dto.request.LogBatchRequest;
+import id.jakforge.openorchestrator.dto.request.LogSearchRequest;
 import id.jakforge.openorchestrator.dto.response.LogWriteResponse;
 import id.jakforge.openorchestrator.repository.AlertRepository;
 import id.jakforge.openorchestrator.repository.LogRepository;
@@ -12,6 +13,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -20,6 +24,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -35,8 +40,12 @@ class LogServiceTest {
     private final OpenOrchestratorPrincipal principal =
             new OpenOrchestratorPrincipal(UUID.randomUUID(), UUID.randomUUID(), "LAPTOP-uji", "Robot");
     private final RecordingDatabase database = new RecordingDatabase();
+
+    /** 30 Sep 2026 12.00 WIB — "hari ini" dan "kemarin" dihitung di zona ini. */
+    private final Clock clock = Clock.fixed(Instant.parse("2026-09-30T05:00:00Z"), ZoneId.of("Asia/Jakarta"));
+
     private final LogService logService = new LogService(new LogRepository(database),
-            new AlertRepository(database), TestFolderAccess.permitAll());
+            new AlertRepository(database), TestFolderAccess.permitAll(), clock);
 
     @Test
     @DisplayName("TRACE dan DEBUG dilewati; INFO, WARN, dan ERROR disimpan")
@@ -81,6 +90,22 @@ class LogServiceTest {
 
         assertEquals(1, result.written());
         assertEquals(List.of("INFO"), storedLevels());
+    }
+
+    @Test
+    @DisplayName("hostIdentity dari robot dipangkas dan disimpan; yang melebihi kolomnya diabaikan, bukan menggagalkan kiriman")
+    void hostIdentityFromRobot() {
+        Map<String, Object> withHost = new HashMap<>(line("INFO", "Dengan akun"));
+        withHost.put("hostIdentity", "  VM-01\\robot  ");
+        Map<String, Object> tooLong = new HashMap<>(line("INFO", "Akun kepanjangan"));
+        tooLong.put("hostIdentity", "x".repeat(201));
+
+        LogWriteResponse result = logService.write(principal, new LogBatchRequest(List.of(withHost, tooLong)));
+
+        assertEquals(2, result.written());
+        List<Object[]> inserts = logInserts();
+        assertEquals("VM-01\\robot", inserts.get(0)[8]);
+        assertNull(inserts.get(1)[8]);
     }
 
     @Test
@@ -180,6 +205,130 @@ class LogServiceTest {
         assertEquals(1, logService.purgeOlderThan(principal, 30).deleted());
     }
 
+    // ---------- saringan halaman Catatan ----------
+
+    @Test
+    @DisplayName("rentang waktu siap pakai dihitung mundur dari sekarang, tanpa batas atas")
+    void recentRanges() {
+        assertEquals(new LogService.TimeRange(Instant.parse("2026-09-30T04:45:00Z"), null),
+                LogService.timeRange("15m", null, null, clock));
+        assertEquals(new LogService.TimeRange(Instant.parse("2026-09-29T05:00:00Z"), null),
+                LogService.timeRange("24h", null, null, clock));
+        assertEquals(new LogService.TimeRange(Instant.parse("2026-09-23T05:00:00Z"), null),
+                LogService.timeRange("7D", null, null, clock));
+        assertEquals(new LogService.TimeRange(null, null), LogService.timeRange("all", null, null, clock));
+        assertEquals(new LogService.TimeRange(null, null), LogService.timeRange(null, null, null, clock));
+    }
+
+    @Test
+    @DisplayName("hari ini dan kemarin mengikuti zona tampilan, bukan UTC")
+    void todayAndYesterdayUseDisplayZone() {
+        // Tengah malam WIB = 17.00 UTC hari sebelumnya.
+        assertEquals(new LogService.TimeRange(Instant.parse("2026-09-29T17:00:00Z"), null),
+                LogService.timeRange("today", null, null, clock));
+        assertEquals(new LogService.TimeRange(Instant.parse("2026-09-28T17:00:00Z"), Instant.parse("2026-09-29T17:00:00Z")),
+                LogService.timeRange("yesterday", null, null, clock));
+    }
+
+    @Test
+    @DisplayName("rentang khusus: dengan zona, tanpa zona (zona tampilan), atau hanya satu sisi")
+    void customRange() {
+        assertEquals(new LogService.TimeRange(Instant.parse("2026-09-30T01:00:00Z"), Instant.parse("2026-09-30T03:00:00Z")),
+                LogService.timeRange("custom", "2026-09-30T08:00:00+07:00", "2026-09-30T03:00:00Z", clock));
+        assertEquals(new LogService.TimeRange(Instant.parse("2026-09-30T01:00:00Z"), null),
+                LogService.timeRange("custom", "2026-09-30T08:00", null, clock));
+        assertEquals(new LogService.TimeRange(null, Instant.parse("2026-09-30T01:00:00Z")),
+                LogService.timeRange(null, null, "2026-09-30T08:00", clock));
+    }
+
+    @Test
+    @DisplayName("rentang yang tidak dikenal, waktu yang tak terbaca, dan awal sesudah akhir ditolak 400")
+    void invalidRanges() {
+        assertEquals(HttpStatus.BAD_REQUEST,
+                assertThrows(ApiException.class, () -> LogService.timeRange("2h", null, null, clock)).status());
+        assertEquals(HttpStatus.BAD_REQUEST,
+                assertThrows(ApiException.class, () -> LogService.timeRange("custom", "kemarin", null, clock)).status());
+        assertEquals("Waktu awal harus sebelum waktu akhir.", assertThrows(ApiException.class,
+                () -> LogService.timeRange("custom", "2026-09-30T09:00", "2026-09-30T08:00", clock)).getMessage());
+    }
+
+    @Test
+    @DisplayName("saringan mesin, host identity, waktu, dan teks digabung dengan AND; % dan _ dicari apa adanya")
+    void newFiltersAreCombined() {
+        logService.search(principal, new LogSearchRequest(List.of("error"), null, "Tagihan", null, null, null,
+                "VM-01", "VM-01\\robot", "1h", null, null, " 100%_selesai "));
+
+        String sql = database.lastStatement();
+        List<Object> args = database.lastArguments();
+
+        for (String condition : List.of("level IN (?)", "process_name = ?", "machine_name = ?", "host_identity = ?",
+                "logged_at >= ?", "message ILIKE ? ESCAPE")) {
+            assertTrue(sql.contains(condition), condition + " — " + sql);
+        }
+
+        assertFalse(sql.contains("logged_at < ?"), "rentang siap pakai tidak punya batas atas: " + sql);
+        assertTrue(args.contains("VM-01") && args.contains("VM-01\\robot") && args.contains("Tagihan"), args.toString());
+        assertEquals("%100\\%\\_selesai%", args.get(args.size() - 2), "teks dicari apa adanya, tanpa spasi tepi");
+    }
+
+    @Test
+    @DisplayName("pilihan saringan hanya dibatasi folder, pekerjaan, dan waktu — bukan tingkat atau mesin")
+    void filterOptionsIgnoreValueFilters() {
+        logService.filterOptions(principal, new LogSearchRequest(List.of("error"), null, "Tagihan", null, null, null,
+                "VM-01", null, "today", null, null, "gagal"));
+
+        String sql = database.lastStatement();
+
+        assertTrue(sql.contains("GROUPING SETS") && sql.contains("logged_at >= ?"), sql);
+        assertFalse(sql.contains("level IN") || sql.contains("machine_name = ?") || sql.contains("process_name = ?")
+                || sql.contains("ILIKE"), sql);
+    }
+
+    @Test
+    @DisplayName("pilihan saringan untuk tingkat rincian saja: tiga daftar kosong, urutan kunci tetap, tanpa kueri")
+    void filterOptionsForVerboseOnlyAreEmpty() {
+        var options = logService.filterOptions(principal, LogSearchRequest.of(List.of("debug"), null, null, null, null,
+                null));
+
+        assertEquals(List.of("machines", "processes", "hostIdentities"), List.copyOf(options.keySet()));
+        assertTrue(options.values().stream().allMatch(List::isEmpty), options.toString());
+        assertTrue(database.statements.isEmpty(), database.statements.toString());
+    }
+
+    @Test
+    @DisplayName("teks pencarian lebih dari 200 karakter ditolak sebelum bertanya ke basis data")
+    void searchTextTooLong() {
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ApiException.class, () -> logService.search(principal,
+                new LogSearchRequest(null, null, null, null, null, null, null, null, null, null, null,
+                        "x".repeat(201)))).status());
+        assertTrue(database.statements.isEmpty(), database.statements.toString());
+    }
+
+    @Test
+    @DisplayName("ekspor CSV: BOM, kepala kolom dengan zona tampilan, nama berkas berwaktu")
+    void exportHasHeaderAndName() {
+        var file = logService.export(principal, LogSearchRequest.of(null, null, null, null, null, null));
+        String csv = new String(file.content(), java.nio.charset.StandardCharsets.UTF_8);
+
+        assertEquals("catatan-20260930-120000.csv", file.fileName());
+        assertEquals("text/csv; charset=UTF-8", file.contentType());
+        assertTrue(csv.startsWith("﻿Waktu (Asia/Jakarta),Tingkat,Robot,Mesin,Host Identity,Proses,Pekerjaan,Pesan\r\n"),
+                csv);
+        assertTrue(database.lastStatement().contains("LIMIT ?")
+                && database.lastArguments().getLast().equals(LogService.MAX_EXPORT_ROWS), database.lastArguments().toString());
+    }
+
+    @Test
+    @DisplayName("sel CSV: tanda kutip, koma, baris baru, dan rumus spreadsheet dijinakkan")
+    void csvCells() {
+        assertEquals("biasa", LogService.csvCell("biasa"));
+        assertEquals("\"a, b\"", LogService.csvCell("a, b"));
+        assertEquals("\"kata \"\"kutip\"\"\"", LogService.csvCell("kata \"kutip\""));
+        assertEquals("\"baris\nbaru\"", LogService.csvCell("baris\nbaru"));
+        assertEquals("'=HYPERLINK(1)", LogService.csvCell("=HYPERLINK(1)"));
+        assertEquals("'@SUM(A1)", LogService.csvCell("@SUM(A1)"));
+    }
+
     // ---------- alat ----------
 
     private static Map<String, Object> line(String level, String message) {
@@ -201,12 +350,17 @@ class LogServiceTest {
 
     /** Tingkat dari setiap INSERT ke tabel logs, sesuai urutan kirimannya. */
     private List<Object> storedLevels() {
-        List<Object> levels = new ArrayList<>();
+        return logInserts().stream().map(args -> args[1]).toList();
+    }
+
+    /** Argumen setiap INSERT ke tabel logs, sesuai urutan kirimannya. */
+    private List<Object[]> logInserts() {
+        List<Object[]> inserts = new ArrayList<>();
 
         for (int i = 0; i < database.statements.size(); i++) {
-            if (database.statements.get(i).contains("INSERT INTO logs")) levels.add(database.arguments.get(i)[1]);
+            if (database.statements.get(i).contains("INSERT INTO logs")) inserts.add(database.arguments.get(i));
         }
 
-        return levels;
+        return inserts;
     }
 }
