@@ -482,9 +482,83 @@ yang disengaja).
 Belum:
 
 1. Uji dengan Robot Agent sungguhan di VM (menunggu klien v2 di sisi robot).
-2. Jeda di sisi robot: JakRunner (v1) sudah menulisnya di cabang
-   `claude/interesting-sanderson-e62fa8-zvdgmb` tapi belum dikompilasi/diuji; Robot Agent (v2)
-   belum.
+2. Jeda dan matikan paksa di sisi robot — lihat Bagian 4.
 3. Beberapa robot per mesin baru bisa diuji di Windows Server + RDS.
 4. Tidak ada pembatasan laju untuk `/api/agent/login` (kunci 256 bit tidak bisa ditebak, tapi
    percobaan berulang tetap memakai sumber daya).
+
+---
+
+# Bagian 4 — Catatan integrasi untuk sisi robot (V9)
+
+Untuk tim Studio/robot. Dibaca dari kode Studio `main` (`f5e075b`) dan cabang JakRunner
+`claude/interesting-sanderson-e62fa8-zvdgmb` (`a43c4f3`) per 30 Sep 2026.
+
+## Yang WAJIB diubah: tidak ada
+
+Semua perubahan V9 menambah. Robot, JakRunner, dan Studio yang sekarang tetap bekerja tanpa
+diubah. Yang perlu diketahui karena perilakunya berubah:
+
+- **Prioritas di Start Job (activity Studio dan `POST /api/jobs`)** hanya `Low`, `Normal`,
+  `High`, atau `Inherited`, tanpa membedakan huruf besar. Nilai lain sekarang ditolak `400`
+  ("Prioritas tidak dikenal: …"); dulu diterima diam-diam lalu diurutkan seperti `Low`.
+  Tanpa prioritas = `Inherited` = prioritas bawaan proses (Normal selama belum diubah).
+- **Job yang meminta mesin** (dari Start Job dasbor) hanya diambil robot yang `machineName`
+  denyutnya sama persis dengan nama mesin itu. JakRunner dan agent mengirim
+  `Environment.MachineName`, jadi sudah cocok. Job dari Studio dan pemicu tidak meminta mesin
+  maupun tipe runtime — tidak berubah.
+- **Job v1 `STOPPING` yang robotnya diam 90 detik** kini menjadi `STOPPED` (kesimpulan server);
+  laporan akhir robot yang terlambat tetap diterima.
+- **Akun yang dipakai robot v1 untuk denyut** dicatat sekali sebagai pemilik robotnya. Dasbor
+  memakainya untuk "jalankan sebagai diri sendiri" di Start Job.
+
+## Yang disarankan, per komponen
+
+**JakRunner (cabang di atas).** Denyutnya (`pausedJobId`, `pauseSource`, 5 detik selama sibuk)
+dan penanganan `StopJob`/`PauseJob`/`ResumeJob` sudah persis sesuai server. Dua hal:
+
+1. `KillJob` belum ditangani (diabaikan — sesuai kontrak, tidak rusak). Server mengirimnya
+   BERSAMA `StopJob` saat orang memilih **Matikan** di dasbor. Saran: saat `KillJob` datang,
+   hentikan paksa seketika, tanpa menunggu 30 detik jeda `LocalExecution`.
+2. **Lanjutkan di PC robot untuk jeda dari dasbor.** Selama permintaan jeda dari dasbor masih
+   berlaku, server terus mengirim `PauseJob` (tabel di usulan), jadi job yang dilanjutkan di
+   PC akan dijeda lagi dalam ±5 detik. Saran: matikan tombol Lanjutkan JakRunner selama
+   `pauseSource = dashboard`, dengan keterangan "Dijeda dari dasbor". Kalau yang diinginkan
+   justru Lanjutkan lokal membatalkan permintaan dasbor, kabari kami — server perlu tanda
+   baru untuk itu.
+
+**Robot Agent mode v1 (`JakForge.Robot.Core`).** `RobotAgent` hanya bertindak atas `StopJob`
+dan mengabaikan jenis lain — benar menurut kontrak. Untuk mendukung aksi dasbor yang baru:
+
+- `KillJob` → jalur paksa `JobRunner`, bukan berhenti rapi.
+- `PauseJob`/`ResumeJob` → tahan runtime sebelum activity berikutnya (mekanisme yang sama
+  dengan perintah debug `pause` di cabang JakRunner), lalu sebut `pausedJobId` +
+  `pauseSource` di denyut.
+- Tambahkan `jobs.pause` dan `jobs.kill` ke `OrchestratorCapabilities`.
+
+**Robot Agent v2 (`/api/agent`),** kalau sudah pindah: `pausedJobs: [{jobId, source}]` per
+robot di denyut (jangan kirim medannya kalau belum mendukung jeda); `PauseJob`/`ResumeJob` di
+`commands`; `KillJob` bisa datang seketika tanpa menunggu `graceSeconds`. `runtimeType` di
+jawaban klaim hanya informasi; kapasitas per tipe runtime diurus server.
+
+**Studio — activity Start Job (`Custom.Orchestrator`).**
+
+- Ganti isian prioritas bebas dengan pilihan `Inherited`/`Low`/`Normal`/`High` (bawaan
+  `Inherited`), karena nilai lain kini ditolak.
+- Opsional: `POST /api/jobs` kini menerima `runtimeType`, `machineName` (mesin sasaran), dan
+  `count` (1–100). Jawabannya membawa `ids` (semua job yang dibuat); `id` tetap job pertama,
+  jadi kode yang sekarang tidak terpengaruh. Kombinasi yang tidak dimiliki folder proses
+  ditolak `400` dengan pesan yang menyebut sebabnya.
+
+## Cara menguji jeda dengan dasbor
+
+1. Jalankan workflow panjang (mis. beberapa Delay) di JakRunner lewat dasbor.
+2. Pekerjaan › ⋮ › **Jeda** → baris menampilkan "Menunggu robot menjeda…", lalu **Dijeda**
+   begitu JakRunner melaporkannya (≤ 5 detik).
+3. ⋮ › **Lanjutkan** → "Menunggu robot melanjutkan…", lalu kembali Berjalan.
+4. Tombol Jeda di JakRunner → dasbor menampilkan "Dijeda di PC robot", dan Lanjutkan di dasbor
+   nonaktif (server juga menolaknya `409`): jeda itu hanya dilanjutkan di PC robot.
+5. ⋮ › **Matikan** → `StopJob` + `KillJob`; log job mencatat siapa yang memintanya.
+
+Setiap perubahan jeda juga tercatat di log job ("Robot menjeda pekerjaan…", "Robot melanjutkan
+pekerjaan.").
