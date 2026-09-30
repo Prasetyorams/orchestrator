@@ -2,11 +2,12 @@
 //
 //   node tools/buat-ikon.mjs
 //
-// Bentuknya SAMA dengan frontend/app/icon.svg — kotak biru dengan "OO" putih —
-// dan digambar ulang di sini sebagai piksel, bukan diambil dari SVG-nya: tidak
-// ada pengubah SVG ke PNG di Node tanpa memasang paket, dan ikon cukup
-// sederhana untuk dihitung langsung. Kalau bentuk di icon.svg berubah, ubah
-// juga BENTUK di bawah ini.
+// Bentuknya SAMA dengan frontend/app/icon.svg (dan components/Logo.tsx) —
+// kotak oranye bergradien dengan cincin armada putus-putus, empat sumbu,
+// inti berlian, dan empat simpul robot — dan digambar ulang di sini sebagai
+// piksel, bukan diambil dari SVG-nya: tidak ada pengubah SVG ke PNG di Node
+// tanpa memasang paket. Kalau bentuk di icon.svg berubah, ubah juga
+// konstanta di bawah ini.
 //
 // Kenapa masih perlu .ico dan .png padahal sudah ada .svg:
 //   - peramban tetap meminta /favicon.ico sendiri (dan mencatat 404 kalau
@@ -23,23 +24,49 @@ import { fileURLToPath } from "node:url";
 
 const APP = join(dirname(fileURLToPath(import.meta.url)), "..", "frontend", "app");
 
-// Koordinat dalam kotak 64 x 64, persis seperti icon.svg.
-const BENTUK = {
-  latar: { warna: [0x2a, 0x6f, 0xdb], sudut: 14 },
-  // Dua huruf O, masing-masing goresan setebal `tebal` di sepanjang tepi dalam
-  // kotak [x, y, lebar, tinggi, sudut]. Kotak ini tepi LUAR goresan; di
-  // icon.svg goresannya digambar di garis tengahnya (x + 3, sudut 8).
-  huruf: {
-    tebal: 6,
-    kotak: [
-      [8, 19, 22, 26, 11],
-      [34, 19, 22, 26, 11],
-    ],
-  },
-};
+// ---------------------------------------------------------------------
+// Bentuk — koordinat viewBox 120 x 120 berkas aslinya, persis icon.svg
+// ---------------------------------------------------------------------
+
+/** Yang digambar: kotak latar 8..112. Tepi transparan di luarnya dipangkas, seperti viewBox icon.svg. */
+const TAMPIL = { dari: 8, lebar: 104 };
+
+const LATAR = { x: 8, y: 8, lebar: 104, tinggi: 104, sudut: 28 };
+
+/** Gradien linear diagonal (8,8) → (112,112), diinterpolasi di sRGB seperti peramban. */
+const GRADIEN = [
+  [0, [0xff, 0x6b, 0x3d]],
+  [0.52, [0xea, 0x43, 0x17]],
+  [1, [0xb8, 0x29, 0x05]],
+];
+
+/** Cincin putus-putus: garis 14, jeda 10, ujung bulat, mulai dari arah jam 3 searah jarum jam. */
+const CINCIN = { cx: 60, cy: 60, r: 34, tebal: 4.5, opasitas: 0.45, garis: 14, jeda: 10 };
+
+/** Empat sumbu, setebal 6 dengan ujung bulat. */
+const SUMBU = [
+  [[60, 24], [60, 42]],
+  [[60, 78], [60, 96]],
+  [[24, 60], [42, 60]],
+  [[78, 60], [96, 60]],
+];
+const TEBAL_SUMBU = 6;
+
+/** Kotak 34 x 34 bersudut 8, diputar 45° di pusat. */
+const BERLIAN = { cx: 60, cy: 60, setengah: 17, sudut: 8 };
+
+const R_TITIK = 6.5;
+const SIMPUL = [[60, 24], [96, 60], [60, 96], [24, 60]];
+
+const PUTIH = [255, 255, 255];
+const INTI = [0xea, 0x43, 0x17];
+
+// ---------------------------------------------------------------------
+// Uji titik
+// ---------------------------------------------------------------------
 
 /** Titik (x, y) di dalam kotak bersudut bulat [x, y, lebar, tinggi, sudut]? */
-function dalamKotak(x, y, [kx, ky, lebar, tinggi, sudut]) {
+function dalamKotak(x, y, kx, ky, lebar, tinggi, sudut) {
   if (x < kx || y < ky || x > kx + lebar || y > ky + tinggi) return false;
 
   // Hanya keempat sudut yang perlu diperiksa sebagai lingkaran.
@@ -49,26 +76,104 @@ function dalamKotak(x, y, [kx, ky, lebar, tinggi, sudut]) {
   return (x - cx) ** 2 + (y - cy) ** 2 <= sudut ** 2;
 }
 
-function dalamLatar(x, y, sudut) {
-  return dalamKotak(x, y, [0, 0, 64, 64, sudut]);
+function jarakKeRuas(x, y, [ax, ay], [bx, by]) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(x - (ax + t * dx), y - (ay + t * dy));
 }
 
-/** Di goresan O: di dalam tepi luarnya, tetapi tidak di lubangnya. */
-function dalamHuruf(x, y) {
-  const { tebal, kotak } = BENTUK.huruf;
+/**
+ * Di salah satu ruas garis putus-putus cincin?
+ *
+ * Ujung bulat SVG = cakram setengah tebal di kedua ujung ruas, jadi semua
+ * titiknya tetap berjarak paling jauh setengah tebal dari lingkaran — itu
+ * saringan pertamanya. Pola tidak habis dibagi keliling, jadi ruas terakhir
+ * disusul jeda yang lebih panjang sebelum kembali ke ruas pertama.
+ */
+function dalamCincin(x, y) {
+  const { cx, cy, r, tebal, garis, jeda } = CINCIN;
+  const setengah = tebal / 2;
+  const dx = x - cx;
+  const dy = y - cy;
 
-  return kotak.some(([kx, ky, lebar, tinggi, sudut]) =>
-    dalamKotak(x, y, [kx, ky, lebar, tinggi, sudut]) &&
-    !dalamKotak(x, y, [kx + tebal, ky + tebal, lebar - 2 * tebal, tinggi - 2 * tebal, Math.max(sudut - tebal, 0)]));
+  if (Math.abs(Math.hypot(dx, dy) - r) > setengah) return false;
+
+  let sudut = Math.atan2(dy, dx);
+  if (sudut < 0) sudut += 2 * Math.PI;
+
+  const keliling = 2 * Math.PI * r;
+  const posisi = sudut * r;
+
+  for (let mulai = 0; mulai < keliling; mulai += garis + jeda) {
+    const akhir = Math.min(mulai + garis, keliling);
+    if (posisi >= mulai && posisi <= akhir) return true;
+
+    for (const ujung of [mulai, akhir]) {
+      const a = ujung / r;
+      if (Math.hypot(x - (cx + r * Math.cos(a)), y - (cy + r * Math.sin(a))) <= setengah) return true;
+    }
+  }
+
+  return false;
+}
+
+function dalamBerlian(x, y) {
+  const { cx, cy, setengah, sudut } = BERLIAN;
+  const cos = Math.SQRT1_2;
+  const dx = x - cx;
+  const dy = y - cy;
+
+  // Putar balik 45°, lalu uji sebagai kotak biasa di sekitar titik pusat.
+  const rx = dx * cos + dy * cos;
+  const ry = -dx * cos + dy * cos;
+
+  return dalamKotak(rx, ry, -setengah, -setengah, 2 * setengah, 2 * setengah, sudut);
+}
+
+function warnaGradien(x, y) {
+  const t = Math.max(0, Math.min(1, (x - 8 + (y - 8)) / 208));
+
+  for (let i = 1; i < GRADIEN.length; i++) {
+    const [t1, w1] = GRADIEN[i];
+    const [t0, w0] = GRADIEN[i - 1];
+    if (t <= t1) return campur(w0, w1, (t - t0) / (t1 - t0));
+  }
+
+  return GRADIEN.at(-1)[1];
+}
+
+function campur([r0, g0, b0], [r1, g1, b1], t) {
+  return [r0 + (r1 - r0) * t, g0 + (g1 - g0) * t, b0 + (b1 - b0) * t];
+}
+
+/**
+ * Warna satu cuplikan, atau null kalau di luar latar. Lapisannya berurutan
+ * sama dengan icon.svg: latar, cincin (putih 45%), sumbu, berlian, inti,
+ * simpul.
+ */
+function warnaCuplikan(x, y, sudutLatar) {
+  if (!dalamKotak(x, y, LATAR.x, LATAR.y, LATAR.lebar, LATAR.tinggi, sudutLatar)) return null;
+
+  let warna = warnaGradien(x, y);
+
+  if (dalamCincin(x, y)) warna = campur(warna, PUTIH, CINCIN.opasitas);
+  if (SUMBU.some(([a, b]) => jarakKeRuas(x, y, a, b) <= TEBAL_SUMBU / 2)) warna = PUTIH;
+  if (dalamBerlian(x, y)) warna = PUTIH;
+  if (Math.hypot(x - 60, y - 60) <= R_TITIK) warna = INTI;
+  if (SIMPUL.some(([sx, sy]) => Math.hypot(x - sx, y - sy) <= R_TITIK)) warna = PUTIH;
+
+  return warna;
 }
 
 /**
  * Gambar ikon selebar `ukuran` piksel, RGBA.
  *
- * Tiap piksel dicuplik 8 x 8 kali lalu dirata-rata, supaya tepi huruf dan
- * sudut yang bulat halus — bukan bergerigi — di ukuran 16 dan 32 piksel.
+ * Tiap piksel dicuplik 8 x 8 kali lalu dirata-rata, supaya tepi lingkaran,
+ * garis, dan sudut yang bulat halus — bukan bergerigi — di ukuran 16 dan 32
+ * piksel.
  */
-function gambar(ukuran, { sudut = BENTUK.latar.sudut } = {}) {
+function gambar(ukuran, { sudut = LATAR.sudut } = {}) {
   const cuplik = 8;
   const piksel = Buffer.alloc(ukuran * ukuran * 4);
 
@@ -78,13 +183,13 @@ function gambar(ukuran, { sudut = BENTUK.latar.sudut } = {}) {
 
       for (let sy = 0; sy < cuplik; sy++) {
         for (let sx = 0; sx < cuplik; sx++) {
-          const x = ((px + (sx + 0.5) / cuplik) / ukuran) * 64;
-          const y = ((py + (sy + 0.5) / cuplik) / ukuran) * 64;
+          const x = TAMPIL.dari + ((px + (sx + 0.5) / cuplik) / ukuran) * TAMPIL.lebar;
+          const y = TAMPIL.dari + ((py + (sy + 0.5) / cuplik) / ukuran) * TAMPIL.lebar;
 
-          if (!dalamLatar(x, y, sudut)) continue;
+          const warna = warnaCuplikan(x, y, sudut);
+          if (!warna) continue;
 
-          const [cr, cg, cb] = dalamHuruf(x, y) ? [255, 255, 255] : BENTUK.latar.warna;
-          r += cr; g += cg; b += cb; a += 1;
+          r += warna[0]; g += warna[1]; b += warna[2]; a += 1;
         }
       }
 

@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { OpenOrchestratorApi, setToken } from "@/lib/api";
 import { useT } from "@/lib/i18n";
+import { Logo } from "@/components/Logo";
 import { Button, Card, CardBody } from "@/components/ui/primitives";
 
 export default function LoginPage() {
@@ -38,9 +39,7 @@ export default function LoginPage() {
       <Card className="w-full max-w-sm">
         <CardBody>
           <div className="mb-6 flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-md bg-brand text-sm font-bold text-white">
-              OO
-            </div>
+            <Logo size={36} className="shrink-0" />
             <p className="text-lg font-semibold">Open Orchestrator</p>
           </div>
 

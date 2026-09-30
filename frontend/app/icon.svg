@@ -1,15 +1,32 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- Tanda OpenOrchestrator: "OO" putih di atas biru, sama dengan logo di sidebar.
-       Hurufnya berupa bentuk, bukan <text>: huruf dari fon bergantung pada fon
-       yang terpasang di tiap komputer, dan favicon yang berubah bentuk di
-       mesin lain terlihat seperti situs yang berbeda.
-       Tiap O adalah goresan setebal 6: tepi luarnya kotak 22 x 26 bersudut 11,
-       lubangnya 10 x 14 bersudut 5.
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="8 8 104 104" fill="none">
+  <!-- Ikon OpenOrchestrator: satu inti yang mengatur empat simpul robot, di
+       dalam cincin armada. Sama dengan components/Logo.tsx.
+       Tepi transparan 8 satuan di berkas aslinya (viewBox 0 0 120 120)
+       dipangkas lewat viewBox, supaya ikonnya tidak mengecil di tab peramban;
+       bentuknya sendiri tidak berubah.
        favicon.ico dan apple-icon.png dibangkitkan dari bentuk yang sama oleh
-       tools/buat-ikon.mjs. -->
-  <rect width="64" height="64" rx="14" fill="#2A6FDB"/>
-  <g fill="none" stroke="#FFFFFF" stroke-width="6">
-    <rect x="11" y="22" width="16" height="20" rx="8"/>
-    <rect x="37" y="22" width="16" height="20" rx="8"/>
-  </g>
+       tools/buat-ikon.mjs — ubah keduanya bersama-sama. -->
+  <defs>
+    <linearGradient id="openorchestrator-grad" x1="8" y1="8" x2="112" y2="112" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FF6B3D"/>
+      <stop offset="52%" stop-color="#EA4317"/>
+      <stop offset="100%" stop-color="#B82905"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="8" y="8" width="104" height="104" rx="28" fill="url(#openorchestrator-grad)"/>
+
+  <circle cx="60" cy="60" r="34" stroke="#FFFFFF" stroke-width="4.5" stroke-opacity="0.45"
+          stroke-dasharray="14 10" stroke-linecap="round"/>
+
+  <path d="M60 24V42M60 78V96M24 60H42M78 60H96" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round"/>
+
+  <rect x="43" y="43" width="34" height="34" rx="8" transform="rotate(45 60 60)" fill="#FFFFFF"/>
+
+  <circle cx="60" cy="60" r="6.5" fill="#EA4317"/>
+
+  <circle cx="60" cy="24" r="6.5" fill="#FFFFFF"/>
+  <circle cx="96" cy="60" r="6.5" fill="#FFFFFF"/>
+  <circle cx="60" cy="96" r="6.5" fill="#FFFFFF"/>
+  <circle cx="24" cy="60" r="6.5" fill="#FFFFFF"/>
 </svg>

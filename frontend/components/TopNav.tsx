@@ -12,6 +12,7 @@ import { useIzin } from "@/lib/izin";
 import { useTema, type Tema } from "@/lib/tema";
 import { HALAMAN_CARI } from "@/lib/navigasi";
 import { cn, dateTimeOf } from "@/lib/utils";
+import { Logo } from "@/components/Logo";
 import { ProfileMenu } from "@/components/ProfileMenu";
 import { Badge } from "@/components/ui/primitives";
 
@@ -135,9 +136,7 @@ export function TopNav({ onMenu }: { onMenu: () => void }) {
           diklik. */}
       <div className="flex shrink-0 lg:w-56">
         <Link href="/" className="flex shrink-0 items-center gap-2.5 rounded-md pr-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-md bg-brand text-sm font-bold text-white">
-            OO
-          </span>
+          <Logo size={32} className="shrink-0" />
           <span className="hidden text-[17px] font-semibold tracking-tight text-ink md:block">
             Open Orchestrator
           </span>
