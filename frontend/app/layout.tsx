@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
 import { Providers } from "@/components/Providers";
+import { PenyediaNotifikasi } from "@/components/Notifikasi";
 import { I18nProvider } from "@/lib/i18n";
 import { SKRIP_TEMA, TemaProvider } from "@/lib/tema";
 import { Shell } from "@/components/Shell";
@@ -25,7 +26,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <Providers>
           <TemaProvider>
             <I18nProvider>
-              <Shell>{children}</Shell>
+              <PenyediaNotifikasi>
+                <Shell>{children}</Shell>
+              </PenyediaNotifikasi>
             </I18nProvider>
           </TemaProvider>
         </Providers>

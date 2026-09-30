@@ -119,6 +119,9 @@ const badgeTone: Record<string, string> = {
   FAULTED: "bg-red-50 text-danger ring-red-200",
   STOPPING: "bg-amber-50 text-warn ring-amber-200",
   STOPPED: "bg-slate-100 text-slate-600 ring-slate-200",
+  // Bukan keadaan job di server (job yang dijeda tetap RUNNING), tapi keadaan
+  // yang dilihat orang: robotnya menahan workflow.
+  PAUSED: "bg-amber-50 text-warn ring-amber-200",
   AVAILABLE: "bg-emerald-50 text-ok ring-emerald-200",
   BUSY: "bg-blue-50 text-info ring-blue-200",
   DISCONNECTED: "bg-slate-100 text-slate-600 ring-slate-200",
@@ -149,6 +152,7 @@ const LABEL_KEADAAN: Record<string, string> = {
   FAULTED: "Gagal",
   STOPPING: "Menghentikan",
   STOPPED: "Dihentikan",
+  PAUSED: "Dijeda",
   AVAILABLE: "Tersedia",
   BUSY: "Sibuk",
   DISCONNECTED: "Terputus",
@@ -189,7 +193,7 @@ export function Button({
 }: {
   children: ReactNode;
   onClick?: () => void;
-  variant?: "default" | "primary" | "ghost";
+  variant?: "default" | "primary" | "ghost" | "danger";
   type?: "button" | "submit";
   disabled?: boolean;
   className?: string;
@@ -198,6 +202,9 @@ export function Button({
     default: "border border-line bg-card hover:bg-slate-50",
     primary: "bg-brand text-white hover:bg-brandHover",
     ghost: "hover:bg-slate-100",
+    // Untuk yang tidak bisa dibatalkan — mematikan paksa, menghapus. Merah yang
+    // sama di kedua tema: tulisan putih di atasnya ≥ 4,5:1.
+    danger: "bg-danger text-white hover:opacity-90",
   }[variant];
 
   return (

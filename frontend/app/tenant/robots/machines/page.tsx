@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, KeyRound, Pencil, Plus, Trash2 } from "lucide-react";
-import { OpenOrchestratorApi, errorText, type Machine } from "@/lib/api";
+import { OpenOrchestratorApi, TIPE_RUNTIME, errorText, type Machine } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
-import { dateTimeOf } from "@/lib/utils";
+import { cn, dateTimeOf } from "@/lib/utils";
 import { Badge, Button, Card, Galat, IconButton } from "@/components/ui/primitives";
 import { DataTable } from "@/components/DataTable";
 import { BilahAlat } from "@/components/HalamanFolder";
@@ -31,6 +31,21 @@ export default function Mesin() {
 
   const mesin = useQuery({ queryKey: ["machines"], queryFn: OpenOrchestratorApi.machines, refetchInterval: 10_000 });
   const segarkan = () => klien.invalidateQueries({ queryKey: ["machines"] });
+
+  // ?ubah=NAMA — dari tombol mesin di Start Job — membuka setelan mesin itu
+  // begitu daftarnya ada. Dibaca lewat window: useSearchParams menuntut
+  // pembungkus Suspense di seluruh halaman hanya untuk nilai awal ini.
+  const [diminta, setDiminta] = useState<string | null>(null);
+  useEffect(() => setDiminta(new URLSearchParams(window.location.search).get("ubah")), []);
+  const bolehUbah = boleh("machines.update");
+  useEffect(() => {
+    if (!diminta || !mesin.data) return;
+    const m = mesin.data.find((x) => x.name === diminta);
+    if (m && bolehUbah) setUbah(m);
+    setDiminta(null);
+    // Memuat ulang halaman tidak boleh membuka lagi dialog yang sudah ditutup.
+    window.history.replaceState(null, "", window.location.pathname);
+  }, [diminta, mesin.data, bolehUbah]);
 
   const hapus = useMutation({
     mutationFn: OpenOrchestratorApi.deleteMachine,
@@ -93,12 +108,8 @@ export default function Mesin() {
               urut: (m) => (m.agentOnline ? 1 : 0),
             },
             {
-              judul: "Slot",
-              sel: (m) => (
-                <span className="tabular-nums" title={t("Job berjalan / slot")}>
-                  {m.activeJobs ?? 0} / {slotEfektif(m)}
-                </span>
-              ),
+              judul: "Runtime",
+              sel: (m) => <RingkasRuntime mesin={m} />,
               urut: (m) => m.slots,
             },
             {
@@ -199,14 +210,91 @@ function slotEfektif(m: Machine): number {
   return m.maxInteractiveSessions && m.maxInteractiveSessions > 0 ? Math.min(slot, m.maxInteractiveSessions) : slot;
 }
 
+/** "Production 2 · Testing 1", dan job Robot Agent yang sedang berjalan dari slot yang berlaku. */
+function RingkasRuntime({ mesin: m }: { mesin: Machine }) {
+  const { t } = useT();
+  const daftar = Object.entries(m.runtimes ?? {});
+
+  if (daftar.length === 0) return <span className="text-danger">{t("Tanpa runtime")}</span>;
+
+  return (
+    <span className="flex flex-col">
+      <span>{daftar.map(([tipe, n]) => `${t(tipe)} ${n}`).join(" · ")}</span>
+      <span className="text-[11px] tabular-nums text-muted" title={t("Job Robot Agent berjalan / slot yang berlaku")}>
+        {t("{0} dari {1} slot terpakai", m.activeJobs ?? 0, slotEfektif(m))}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * Jumlah runtime per tipe. Jumlahnya adalah slot mesin: job tipe itu yang
+ * boleh berjalan bersamaan di sana.
+ */
+function IsianRuntime({ nilai, onUbah }: { nilai: Record<string, string>; onUbah: (n: Record<string, string>) => void }) {
+  const { t } = useT();
+
+  return (
+    <fieldset className="mb-3">
+      <legend className="mb-1 text-xs font-medium text-muted">{t("Runtime")}</legend>
+      <div className="grid grid-cols-3 gap-3">
+        {TIPE_RUNTIME.map((tipe) => (
+          <label key={tipe} className="block">
+            <span className="mb-1 block text-xs text-muted">{t(tipe)}</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={50}
+              step={1}
+              value={nilai[tipe] ?? "0"}
+              onChange={(e) => onUbah({ ...nilai, [tipe]: e.target.value })}
+              className={kelasIsian}
+            />
+          </label>
+        ))}
+      </div>
+      <span className="mt-1 block text-xs text-muted">
+        {t("Berapa job tiap tipe yang boleh berjalan bersamaan di mesin ini. Start Job hanya menawarkan tipe yang dimiliki mesin di folder itu. Windows 10/11 hanya mengizinkan satu sesi; lebih dari satu butuh Windows Server dengan RDS.")}
+      </span>
+    </fieldset>
+  );
+}
+
+/** Isian runtime → yang dikirim ke server; null kalau ada yang bukan bilangan bulat 0–50. */
+function runtimeDariIsian(nilai: Record<string, string>): Record<string, number> | null {
+  const hasil: Record<string, number> = {};
+
+  for (const tipe of TIPE_RUNTIME) {
+    const teks = (nilai[tipe] ?? "0").trim() || "0";
+    if (!/^\d+$/.test(teks) || Number(teks) > 50) return null;
+    hasil[tipe] = Number(teks);
+  }
+
+  return hasil;
+}
+
+/** Mesin baru: satu runtime Production, sama dengan bawaan server. */
+function isianAwal(m?: Machine): Record<string, string> {
+  return Object.fromEntries(
+    TIPE_RUNTIME.map((tipe) => [tipe, String(m ? (m.runtimes?.[tipe] ?? 0) : tipe === "Production" ? 1 : 0)]),
+  );
+}
+
 function DialogMesinBaru({ onTutup, onSelesai }: { onTutup: () => void; onSelesai: () => void }) {
   const { t } = useT();
   const [nama, setNama] = useState("");
   const [ket, setKet] = useState("");
+  const [runtime, setRuntime] = useState(isianAwal());
   const [galat, setGalat] = useState("");
 
   const simpan = useMutation({
-    mutationFn: () => OpenOrchestratorApi.saveMachine({ name: nama.trim(), description: ket || undefined }),
+    mutationFn: () =>
+      OpenOrchestratorApi.saveMachine({
+        name: nama.trim(),
+        description: ket || undefined,
+        runtimes: runtimeDariIsian(runtime) ?? undefined,
+      }),
     onSuccess: () => {
       onSelesai();
       onTutup();
@@ -224,7 +312,13 @@ function DialogMesinBaru({ onTutup, onSelesai }: { onTutup: () => void; onSelesa
           <Button onClick={onTutup}>{t("Batal")}</Button>
           <Button
             variant="primary"
-            onClick={() => (nama.trim() ? simpan.mutate() : setGalat(t("Nama mesin wajib diisi.")))}
+            onClick={() =>
+              !nama.trim()
+                ? setGalat(t("Nama mesin wajib diisi."))
+                : !runtimeDariIsian(runtime)
+                  ? setGalat(t("Jumlah runtime harus bilangan bulat 0 sampai 50."))
+                  : simpan.mutate()
+            }
             disabled={simpan.isPending}
           >
             {simpan.isPending ? t("Menyimpan...") : t("Simpan")}
@@ -238,6 +332,7 @@ function DialogMesinBaru({ onTutup, onSelesai }: { onTutup: () => void; onSelesa
       <Isian label={t("Keterangan")}>
         <input value={ket} onChange={(e) => setKet(e.target.value)} className={kelasIsian} />
       </Isian>
+      <IsianRuntime nilai={runtime} onUbah={setRuntime} />
       <Galat pesan={galat} />
     </Dialog>
   );
@@ -256,7 +351,7 @@ function DialogUbahMesin({
 }) {
   const { t } = useT();
   const [ket, setKet] = useState(mesin.description ?? "");
-  const [slot, setSlot] = useState(String(mesin.slots ?? 1));
+  const [runtime, setRuntime] = useState(isianAwal(mesin));
   const [lease, setLease] = useState(String(mesin.leaseSeconds ?? 180));
   const [galat, setGalat] = useState("");
 
@@ -264,7 +359,7 @@ function DialogUbahMesin({
     mutationFn: () =>
       OpenOrchestratorApi.updateMachine(mesin.name, {
         description: ket,
-        slots: Number(slot),
+        runtimes: runtimeDariIsian(runtime) ?? undefined,
         leaseSeconds: Number(lease),
       }),
     onSuccess: () => {
@@ -287,23 +382,29 @@ function DialogUbahMesin({
             </Button>
           ) : null}
           <Button onClick={onTutup}>{t("Batal")}</Button>
-          <Button variant="primary" onClick={() => simpan.mutate()} disabled={simpan.isPending}>
+          <Button
+            variant="primary"
+            onClick={() =>
+              runtimeDariIsian(runtime) ? simpan.mutate() : setGalat(t("Jumlah runtime harus bilangan bulat 0 sampai 50."))
+            }
+            disabled={simpan.isPending}
+          >
             {simpan.isPending ? t("Menyimpan...") : t("Simpan")}
           </Button>
         </>
       }
     >
-      <div className="grid gap-x-4 sm:grid-cols-2">
-        <Isian
-          label={t("Slot")}
-          petunjuk={t("Job yang boleh berjalan bersamaan. Windows 10/11 hanya mengizinkan satu sesi; lebih dari satu butuh Windows Server dengan RDS.")}
-        >
-          <input type="number" min={1} max={50} value={slot} onChange={(e) => setSlot(e.target.value)} className={kelasIsian} />
-        </Isian>
-        <Isian label={t("Lease penyiapan (detik)")} petunjuk={t("Batas waktu menyiapkan sesi Windows tanpa kabar dari agent.")}>
-          <input type="number" min={30} max={3600} value={lease} onChange={(e) => setLease(e.target.value)} className={kelasIsian} />
-        </Isian>
-      </div>
+      <IsianRuntime nilai={runtime} onUbah={setRuntime} />
+      <Isian label={t("Lease penyiapan (detik)")} petunjuk={t("Batas waktu menyiapkan sesi Windows tanpa kabar dari agent.")}>
+        <input
+          type="number"
+          min={30}
+          max={3600}
+          value={lease}
+          onChange={(e) => setLease(e.target.value)}
+          className={cn(kelasIsian, "w-40")}
+        />
+      </Isian>
       <Isian label={t("Keterangan")}>
         <input value={ket} onChange={(e) => setKet(e.target.value)} className={kelasIsian} />
       </Isian>

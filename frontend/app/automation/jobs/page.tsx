@@ -1,14 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  CircleStop,
+  CirclePause,
+  CirclePlay,
+  CircleX,
+  FileText,
+  List,
+  MonitorPlay,
+  RotateCw,
+} from "lucide-react";
 import { KEADAAN_BERJALAN, OpenOrchestratorApi, errorText, type FolderNode, type Job, type JobAttachment } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
 import { cn, dateTimeOf } from "@/lib/utils";
 import { Badge, Button, Card, Galat, labelKeadaan } from "@/components/ui/primitives";
 import { DataTable } from "@/components/DataTable";
-import { Dialog, Isian, kelasIsian } from "@/components/Dialog";
+import { Dialog, kelasIsian } from "@/components/Dialog";
+import { DialogKonfirmasi } from "@/components/DialogKonfirmasi";
+import { MenuAksi, type ItemMenu } from "@/components/MenuAksi";
+import { IkonPrioritas, MulaiJob, labelPrioritas } from "@/components/MulaiJob";
+import { useNotifikasi } from "@/components/Notifikasi";
 import { BilahAlat, PerluFolder } from "@/components/HalamanFolder";
 
 const KEADAAN = [
@@ -24,6 +39,13 @@ const KEADAAN = [
   "STOPPED",
 ];
 
+/** Dipegang robot: sudah diambil, belum selesai — ada proses yang bisa dihentikan atau dimatikan. */
+const DIPEGANG_ROBOT = ["ASSIGNED", "PREPARING_SESSION", "RUNNING", "UNRESPONSIVE", "STOPPING"];
+
+const SELESAI = ["SUCCESSFUL", "FAULTED", "STOPPED"];
+
+type AksiJob = "stop" | "kill" | "pause" | "resume" | "restart";
+
 export default function Pekerjaan() {
   return <PerluFolder>{(folder) => <IsiPekerjaan folder={folder} />}</PerluFolder>;
 }
@@ -31,12 +53,16 @@ export default function Pekerjaan() {
 function IsiPekerjaan({ folder }: { folder: FolderNode }) {
   const { t } = useT();
   const klien = useQueryClient();
+  const router = useRouter();
+  const beritahu = useNotifikasi();
   const { boleh } = useIzin();
   const bolehPilih = boleh("jobs.update") || boleh("jobs.delete");
 
   const [saring, setSaring] = useState("");
   const [detail, setDetail] = useState<Job | null>(null);
   const [mulai, setMulai] = useState(false);
+  const [rekaman, setRekaman] = useState<Job | null>(null);
+  const [konfirmasi, setKonfirmasi] = useState<{ job: Job; aksi: "stop" | "kill" } | null>(null);
   const [galat, setGalat] = useState("");
 
   const jobs = useQuery({
@@ -47,12 +73,41 @@ function IsiPekerjaan({ folder }: { folder: FolderNode }) {
 
   const segarkan = useCallback(() => {
     klien.invalidateQueries({ queryKey: ["jobs"] });
+    klien.invalidateQueries({ queryKey: ["job"] });
     klien.invalidateQueries({ queryKey: ["processes"] });
     klien.invalidateQueries({ queryKey: ["dashboard"] });
   }, [klien]);
 
-  const hentikan = useMutation({
-    mutationFn: OpenOrchestratorApi.stopJob,
+  const aksi = useMutation({
+    mutationFn: ({ job, jenis }: { job: Job; jenis: AksiJob }) =>
+      ({
+        stop: OpenOrchestratorApi.stopJob,
+        kill: OpenOrchestratorApi.killJob,
+        pause: OpenOrchestratorApi.pauseJob,
+        resume: OpenOrchestratorApi.resumeJob,
+        restart: OpenOrchestratorApi.restartJob,
+      })[jenis](job.id),
+    onMutate: () => setGalat(""),
+    onSuccess: (_, { jenis }) => {
+      segarkan();
+      setKonfirmasi(null);
+      beritahu(
+        t(
+          {
+            stop: "Permintaan berhenti dikirim ke robot.",
+            kill: "Permintaan mematikan paksa dikirim ke robot.",
+            pause: "Permintaan jeda dikirim ke robot.",
+            resume: "Permintaan lanjut dikirim ke robot.",
+            restart: "Job berhasil dijalankan ulang.",
+          }[jenis],
+        ),
+      );
+    },
+    onError: (e) => setGalat(errorText(e)),
+  });
+
+  const hentikanBanyak = useMutation({
+    mutationFn: (daftar: Job[]) => Promise.all(daftar.map((j) => OpenOrchestratorApi.stopJob(j.id))),
     onSuccess: segarkan,
     onError: (e) => setGalat(errorText(e)),
   });
@@ -64,6 +119,121 @@ function IsiPekerjaan({ folder }: { folder: FolderNode }) {
   });
 
   const tutupMulai = useCallback(() => setMulai(false), []);
+
+  /**
+   * Isi menu tiga titik untuk satu job. Aksi yang tidak berlaku tetap tampil,
+   * nonaktif, dengan alasannya di petunjuk.
+   */
+  function menuJob(j: Job): ItemMenu[] {
+    const bolehUbah = boleh("jobs.update");
+    const bolehBuat = boleh("jobs.create");
+    const dipegang = DIPEGANG_ROBOT.includes(j.state);
+    const selesai = SELESAI.includes(j.state);
+    const tanpaIzin = t("Peran Anda tidak mengizinkan aksi ini.");
+
+    // Hentikan: yang menunggu dibatalkan, yang dipegang robot diminta berhenti.
+    const bisaHenti = j.state === "PENDING" || (dipegang && j.state !== "STOPPING");
+    // Jeda berlaku untuk yang sedang berjalan; Lanjutkan untuk yang dijeda dari dasbor.
+    const dijedaLokal = j.paused && j.pauseSource === "local" && !j.pauseRequested;
+    const bisaJeda = j.state === "RUNNING" && !j.pauseRequested && !j.paused;
+    const bisaLanjut = j.state === "RUNNING" && (j.pauseRequested || (j.paused && !dijedaLokal));
+    const adaRekaman = (j.attachmentCount ?? 0) > 0;
+
+    return [
+      {
+        label: t("Hentikan"),
+        ikon: CircleStop,
+        nonaktif: !bolehUbah || !bisaHenti,
+        petunjuk: !bolehUbah
+          ? tanpaIzin
+          : j.state === "STOPPING"
+            ? t("Sedang dihentikan. Pakai Matikan untuk menghentikannya paksa.")
+            : !bisaHenti
+              ? t("Pekerjaan ini sudah selesai.")
+              : j.state === "PENDING"
+                ? t("Batalkan sebelum diambil robot.")
+                : t("Minta robot menghentikan pekerjaan ini dengan rapi."),
+        onPilih: () => setKonfirmasi({ job: j, aksi: "stop" }),
+      },
+      {
+        label: t("Matikan|job"),
+        ikon: CircleX,
+        bahaya: true,
+        nonaktif: !bolehUbah || !dipegang,
+        petunjuk: !bolehUbah
+          ? tanpaIzin
+          : j.state === "PENDING"
+            ? t("Belum diambil robot — belum ada proses yang perlu dimatikan.")
+            : !dipegang
+              ? t("Pekerjaan ini sudah selesai.")
+              : t("Hentikan paksa, tanpa menunggu robot berhenti dengan rapi."),
+        onPilih: () => setKonfirmasi({ job: j, aksi: "kill" }),
+      },
+      {
+        label: t("Jeda"),
+        ikon: CirclePause,
+        nonaktif: !bolehUbah || !bisaJeda,
+        petunjuk: !bolehUbah
+          ? tanpaIzin
+          : j.paused || j.pauseRequested
+            ? t("Sudah dijeda atau sedang dijeda.")
+            : j.state !== "RUNNING"
+              ? t("Hanya pekerjaan yang sedang berjalan yang bisa dijeda.")
+              : t("Tahan workflow sebelum activity berikutnya. Robot yang belum mendukung jeda mengabaikannya."),
+        onPilih: () => aksi.mutate({ job: j, jenis: "pause" }),
+      },
+      {
+        label: t("Lanjutkan"),
+        ikon: CirclePlay,
+        nonaktif: !bolehUbah || !bisaLanjut,
+        petunjuk: !bolehUbah
+          ? tanpaIzin
+          : dijedaLokal
+            ? t("Dijeda langsung di PC robot — lanjutkan dari sana.")
+            : selesai
+              ? t("Pekerjaan yang sudah selesai tidak bisa dilanjutkan dari tengah. Pakai Jalankan Ulang.")
+              : !bisaLanjut
+                ? t("Pekerjaan ini tidak sedang dijeda.")
+                : t("Lanjutkan pekerjaan yang dijeda dari dasbor."),
+        onPilih: () => aksi.mutate({ job: j, jenis: "resume" }),
+      },
+      {
+        label: t("Jalankan Ulang"),
+        ikon: RotateCw,
+        nonaktif: !bolehBuat || j.state === "PENDING",
+        petunjuk: !bolehBuat
+          ? tanpaIzin
+          : j.state === "PENDING"
+            ? t("Pekerjaan ini belum berjalan.")
+            : t("Buat pekerjaan baru dengan konfigurasi yang sama. Pekerjaan ini tetap tercatat."),
+        onPilih: () => aksi.mutate({ job: j, jenis: "restart" }),
+      },
+      { pemisah: true },
+      {
+        label: t("Buka Rekaman"),
+        ikon: MonitorPlay,
+        nonaktif: !adaRekaman,
+        petunjuk: adaRekaman
+          ? t("{0} rekaman dari robot.", j.attachmentCount ?? 0)
+          : t("Tidak ada rekaman untuk pekerjaan ini. Robot Agent menyimpan tangkapan layar saat pekerjaan gagal."),
+        onPilih: () => setRekaman(j),
+      },
+      {
+        label: t("Lihat Log Job Ini"),
+        ikon: FileText,
+        nonaktif: !boleh("logs.read"),
+        petunjuk: boleh("logs.read") ? undefined : tanpaIzin,
+        onPilih: () => router.push(`/monitoring/logs?jobId=${encodeURIComponent(j.id)}`),
+      },
+      {
+        label: t("Lihat Semua Log Proses"),
+        ikon: List,
+        nonaktif: !boleh("logs.read"),
+        petunjuk: boleh("logs.read") ? undefined : tanpaIzin,
+        onPilih: () => router.push(`/monitoring/logs?process=${encodeURIComponent(j.processName)}`),
+      },
+    ];
+  }
 
   return (
     <div>
@@ -93,7 +263,8 @@ function IsiPekerjaan({ folder }: { folder: FolderNode }) {
         </select>
       </BilahAlat>
 
-      <Galat pesan={galat} className="mb-4" />
+      {/* Selama dialog konfirmasi terbuka, galatnya tampil di dialog itu. */}
+      <Galat pesan={konfirmasi ? "" : galat} className="mb-4" />
 
       <Card>
         <DataTable
@@ -106,13 +277,7 @@ function IsiPekerjaan({ folder }: { folder: FolderNode }) {
           aksiTerpilih={bolehPilih ? (dipilih) => (
               <>
                 {boleh("jobs.update") ? (
-                  <Button
-                    onClick={() =>
-                      dipilih
-                        .filter((j) => KEADAAN_BERJALAN.includes(j.state))
-                        .forEach((j) => hentikan.mutate(j.id))
-                    }
-                  >
+                  <Button onClick={() => hentikanBanyak.mutate(dipilih.filter((j) => KEADAAN_BERJALAN.includes(j.state)))}>
                     {t("Hentikan")}
                   </Button>
                 ) : null}
@@ -145,28 +310,48 @@ function IsiPekerjaan({ folder }: { folder: FolderNode }) {
               ),
               urut: (j) => j.processName,
             },
-            { judul: "Robot|satu", sel: (j) => j.robotName ?? "-", urut: (j) => j.robotName },
             {
-              judul: "Keadaan",
+              judul: "Robot|satu",
               sel: (j) => (
-                <span className="flex flex-col items-start gap-0.5">
-                  <Badge value={j.state} />
-                  {j.errorCode ? <span className="text-[11px] text-muted">{j.errorCode}</span> : null}
+                <span className="flex flex-col">
+                  <span>{j.robotName ?? j.targetRobotName ?? "-"}</span>
+                  {j.machineName ?? j.targetMachineName ? (
+                    <span className="text-[11px] text-muted">{j.machineName ?? j.targetMachineName}</span>
+                  ) : null}
                 </span>
               ),
-              urut: (j) => j.state,
+              urut: (j) => j.robotName ?? j.targetRobotName,
+            },
+            {
+              judul: "Runtime",
+              sel: (j) => <span className="text-muted">{j.runtimeType ? t(j.runtimeType) : "-"}</span>,
+              urut: (j) => j.runtimeType,
+            },
+            {
+              judul: "Keadaan",
+              sel: (j) => <SelKeadaan job={j} />,
+              urut: (j) => (j.paused ? "RUNNING-PAUSED" : j.state),
             },
             { judul: "Sumber", sel: (j) => <span className="text-muted">{j.source}</span>, urut: (j) => j.source },
-            { judul: "Prioritas", sel: (j) => j.priority, urut: (j) => j.priority },
             {
-              judul: "Kemajuan",
-              sel: (j) => <span className="tabular-nums text-muted">{j.progress}%</span>,
-              urut: (j) => j.progress,
+              judul: "Prioritas",
+              sel: (j) => (
+                <span className="inline-flex items-center gap-1.5">
+                  <IkonPrioritas prioritas={j.priority} />
+                  {t(labelPrioritas(j.priority))}
+                </span>
+              ),
+              urut: (j) => ({ High: 0, Normal: 1, Low: 2 } as Record<string, number>)[j.priority] ?? 3,
             },
             {
               judul: "Dibuat",
               sel: (j) => <span className="text-muted">{dateTimeOf(j.createdAt)}</span>,
               urut: (j) => j.createdAt,
+            },
+            {
+              judul: "",
+              kelas: "w-12 text-right",
+              sel: (j) => <MenuAksi label={t("Aksi untuk {0}", j.processName)} item={menuJob(j)} />,
             },
           ]}
         />
@@ -174,8 +359,70 @@ function IsiPekerjaan({ folder }: { folder: FolderNode }) {
 
       <DialogDetail job={detail} onTutup={() => setDetail(null)} />
 
-      {mulai ? <DialogJalankan folder={folder} onTutup={tutupMulai} onSelesai={segarkan} /> : null}
+      {rekaman ? <DialogRekaman job={rekaman} onTutup={() => setRekaman(null)} /> : null}
+
+      {konfirmasi ? (
+        <DialogKonfirmasi
+          judul={konfirmasi.aksi === "kill" ? t("Matikan paksa pekerjaan ini?") : t("Hentikan pekerjaan ini?")}
+          label={konfirmasi.aksi === "kill" ? t("Matikan|job") : t("Hentikan")}
+          bahaya={konfirmasi.aksi === "kill"}
+          sibuk={aksi.isPending}
+          galat={galat}
+          onTutup={() => {
+            setKonfirmasi(null);
+            setGalat("");
+          }}
+          onYa={() => aksi.mutate({ job: konfirmasi.job, jenis: konfirmasi.aksi })}
+        >
+          <p>
+            <span className="font-medium">{konfirmasi.job.processName}</span>
+            {konfirmasi.job.robotName ? ` — ${konfirmasi.job.robotName}` : ""} · {t(labelKeadaan(konfirmasi.job.state))}
+          </p>
+          {konfirmasi.aksi === "kill" ? (
+            <>
+              <p>
+                {t("Robot akan mematikan proses workflow SEKARANG, tanpa menunggu activity yang sedang berjalan selesai dan tanpa jeda berhenti rapi.")}
+              </p>
+              <p className="text-muted">
+                {t("Pekerjaan yang setengah jalan tidak dibereskan: berkas yang sedang ditulis bisa rusak, dan aplikasi yang dibuka workflow ditutup paksa. Pakai Hentikan kalau robot masih bisa berhenti dengan rapi.")}
+              </p>
+            </>
+          ) : konfirmasi.job.state === "PENDING" ? (
+            <p>{t("Pekerjaan ini belum diambil robot, jadi langsung dibatalkan.")}</p>
+          ) : (
+            <p>
+              {t("Robot diminta berhenti dengan rapi pada denyut berikutnya. Kalau robotnya tidak berhenti, pakai Matikan.")}
+            </p>
+          )}
+        </DialogKonfirmasi>
+      ) : null}
+
+      {mulai ? <MulaiJob folder={folder} onTutup={tutupMulai} /> : null}
+
+      <p className="mt-3 text-xs text-muted">
+        {t("Klik ganda pada barisnya untuk melihat rincian dan catatannya.")}
+      </p>
     </div>
+  );
+}
+
+/** Keadaan job, beserta yang sedang ditunggu dari robotnya: jeda, lanjut, atau mati paksa. */
+function SelKeadaan({ job: j }: { job: Job }) {
+  const { t } = useT();
+
+  let catatan: ReactNode = null;
+
+  if (j.state === "RUNNING" && j.pauseRequested && !j.paused) catatan = t("Menunggu robot menjeda…");
+  else if (j.state === "RUNNING" && !j.pauseRequested && j.paused && j.pauseSource === "dashboard") catatan = t("Menunggu robot melanjutkan…");
+  else if (j.state === "RUNNING" && j.paused && j.pauseSource === "local") catatan = t("Dijeda di PC robot");
+  else if (j.state === "STOPPING" && j.killRequestedAt) catatan = t("Dimatikan paksa…");
+  else if (j.errorCode) catatan = j.errorCode;
+
+  return (
+    <span className="flex flex-col items-start gap-0.5">
+      {j.state === "RUNNING" && j.paused ? <Badge value="PAUSED" /> : <Badge value={j.state} />}
+      {catatan ? <span className="text-[11px] text-muted">{catatan}</span> : null}
+    </span>
   );
 }
 
@@ -208,16 +455,21 @@ function DialogDetail({ job: ringkas, onTutup }: { job: Job | null; onTutup: () 
   if (!ringkas) return null;
 
   const job = rincian.data ?? ringkas;
+  const judulKeadaan = job.state === "RUNNING" && job.paused ? t("Dijeda") : t(labelKeadaan(job.state));
 
   return (
-    <Dialog judul={`${job.processName} — ${t(labelKeadaan(job.state))}`} terbuka onTutup={onTutup} lebar="max-w-3xl">
+    <Dialog judul={`${job.processName} — ${judulKeadaan}`} terbuka onTutup={onTutup} lebar="max-w-3xl">
       <dl className="mb-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
         <Medan label={t("Robot|satu")} nilai={job.robotName} />
         <Medan label={t("Mesin|satu")} nilai={job.machineName} />
+        <Medan label={t("Tipe runtime")} nilai={job.runtimeType ? t(job.runtimeType) : null} />
+        <Medan label={t("Akun yang diminta")} nilai={job.targetRobotName ?? t("Mana pun")} />
+        <Medan label={t("Mesin yang diminta")} nilai={job.targetMachineName ?? t("Mana pun")} />
+        <Medan label={t("Prioritas")} nilai={t(labelPrioritas(job.priority))} />
         <Medan label={t("Sumber")} nilai={job.source} />
-        <Medan label={t("Prioritas")} nilai={job.priority} />
         <Medan label={t("Dimulai")} nilai={dateTimeOf(job.startedAt)} />
         <Medan label={t("Selesai")} nilai={dateTimeOf(job.endedAt)} />
+        {job.pausedSeconds ? <Medan label={t("Lama dijeda")} nilai={t("{0} detik", job.pausedSeconds)} /> : null}
         {job.contractVersion === 2 ? (
           <>
             <Medan label={t("Percobaan")} nilai={String(job.attempt ?? 1)} />
@@ -240,6 +492,7 @@ function DialogDetail({ job: ringkas, onTutup }: { job: Job | null; onTutup: () 
       ) : null}
 
       {job.retryOf ? <p className="mb-3 text-xs text-muted">{t("Percobaan ulang otomatis dari pekerjaan {0}.", job.retryOf)}</p> : null}
+      {job.restartedFrom ? <p className="mb-3 text-xs text-muted">{t("Dijalankan ulang dari pekerjaan {0}.", job.restartedFrom)}</p> : null}
 
       {job.info ? <p className="mb-4 rounded-lg bg-slate-50 px-3 py-2 text-sm">{tp(job.info)}</p> : null}
 
@@ -248,7 +501,7 @@ function DialogDetail({ job: ringkas, onTutup }: { job: Job | null; onTutup: () 
 
       {lampiran.data?.length ? (
         <>
-          <h3 className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-muted">{t("Screenshot")}</h3>
+          <h3 className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-muted">{t("Rekaman")}</h3>
           <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
             {lampiran.data.map((a) => (
               <Gambar key={a.id} jobId={job.id} lampiran={a} />
@@ -279,10 +532,46 @@ function DialogDetail({ job: ringkas, onTutup }: { job: Job | null; onTutup: () 
 }
 
 /**
- * Screenshot lewat axios, bukan <img src> langsung: gambar harus membawa token,
+ * Rekaman eksekusi job: tangkapan layar (dan video, kalau robot mengirimnya)
+ * yang dilampirkan Robot Agent — terutama saat pekerjaan gagal.
+ */
+function DialogRekaman({ job, onTutup }: { job: Job; onTutup: () => void }) {
+  const { t } = useT();
+
+  const lampiran = useQuery({
+    queryKey: ["job", job.id, "lampiran"],
+    queryFn: () => OpenOrchestratorApi.jobAttachments(job.id),
+  });
+
+  return (
+    <Dialog judul={`${t("Rekaman")} — ${job.processName}`} terbuka onTutup={onTutup} lebar="max-w-4xl">
+      {lampiran.isLoading ? (
+        <p className="py-8 text-center text-sm text-muted">{t("Memuat...")}</p>
+      ) : lampiran.data?.length ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {lampiran.data.map((a) => (
+            <figure key={a.id} className="overflow-hidden rounded-lg border border-line">
+              <Gambar jobId={job.id} lampiran={a} besar />
+              <figcaption className="border-t border-line px-3 py-1.5 text-xs text-muted">
+                {a.fileName ?? a.kind} · {dateTimeOf(a.createdAt)}
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+      ) : (
+        <p className="py-8 text-center text-sm text-muted">
+          {t("Tidak ada rekaman untuk pekerjaan ini. Robot Agent menyimpan tangkapan layar saat pekerjaan gagal.")}
+        </p>
+      )}
+    </Dialog>
+  );
+}
+
+/**
+ * Lampiran lewat axios, bukan <img src> langsung: gambar harus membawa token,
  * dan peramban tidak menyertakan header Authorization untuk <img>.
  */
-function Gambar({ jobId, lampiran }: { jobId: string; lampiran: JobAttachment }) {
+function Gambar({ jobId, lampiran, besar = false }: { jobId: string; lampiran: JobAttachment; besar?: boolean }) {
   const [url, setUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -303,19 +592,29 @@ function Gambar({ jobId, lampiran }: { jobId: string; lampiran: JobAttachment })
     };
   }, [jobId, lampiran.id]);
 
+  const tinggi = besar ? "h-64" : "h-32";
+
+  if (lampiran.contentType.startsWith("video/")) {
+    return url ? (
+      <video src={url} controls className={cn("w-full bg-black", tinggi)} />
+    ) : (
+      <span className={cn("block bg-slate-50", tinggi)} />
+    );
+  }
+
   return (
     <a
       href={url ?? undefined}
       target="_blank"
       rel="noreferrer"
-      className="block overflow-hidden rounded-lg border border-line bg-slate-50"
+      className={cn("block overflow-hidden bg-slate-50", !besar && "rounded-lg border border-line")}
       title={`${lampiran.fileName ?? lampiran.kind} · ${dateTimeOf(lampiran.createdAt)}`}
     >
       {url ? (
         // eslint-disable-next-line @next/next/no-img-element -- blob: URL, bukan gambar yang bisa dioptimalkan Next
-        <img src={url} alt={lampiran.fileName ?? lampiran.kind} className="h-32 w-full object-cover object-top" />
+        <img src={url} alt={lampiran.fileName ?? lampiran.kind} className={cn("w-full object-cover object-top", tinggi)} />
       ) : (
-        <span className="block h-32" />
+        <span className={cn("block", tinggi)} />
       )}
     </a>
   );
@@ -336,139 +635,5 @@ function Kode({ judul, isi }: { judul: string; isi: string }) {
       <p className="mb-1 text-xs font-medium text-muted">{judul}</p>
       <pre className="overflow-x-auto rounded-lg bg-neutral-900 px-3 py-2 text-xs text-neutral-100 dark:bg-black/40">{isi}</pre>
     </div>
-  );
-}
-
-/**
- * Jalankan proses dari folder ini, pada robot mana pun yang ditugaskan ke
- * folder ini, atau pada satu robot tertentu.
- *
- * Pilihan robotnya hanya robot folder ini: robot yang dipilih langsung
- * dianggap sah di mana pun foldernya (lihat JobRepository.ambilBerikutnya),
- * jadi menawarkan robot folder lain di sini berarti diam-diam melompati
- * penugasan folder.
- */
-function DialogJalankan({
-  folder,
-  onTutup,
-  onSelesai,
-}: {
-  folder: FolderNode;
-  onTutup: () => void;
-  onSelesai: () => void;
-}) {
-  const { t } = useT();
-
-  const proses = useQuery({ queryKey: ["processes", folder.id], queryFn: () => OpenOrchestratorApi.processes(folder.id) });
-  const { boleh } = useIzin();
-  const robot = useQuery({
-    queryKey: ["robots", folder.id],
-    queryFn: () => OpenOrchestratorApi.robots(folder.id),
-    enabled: boleh("robots.read"),
-  });
-
-  const [nama, setNama] = useState("");
-  const [namaRobot, setNamaRobot] = useState("");
-  const [prioritas, setPrioritas] = useState("Normal");
-  const [masukan, setMasukan] = useState("");
-  const [galat, setGalat] = useState("");
-
-  const jalankan = useMutation({
-    mutationFn: OpenOrchestratorApi.startJob,
-    onSuccess: () => {
-      onSelesai();
-      onTutup();
-    },
-    onError: (e) => setGalat(errorText(e)),
-  });
-
-  function kirim() {
-    if (!nama) return setGalat(t("Pilih prosesnya dulu."));
-
-    // JSON diperiksa DI SINI. Dikirim apa adanya, yang gagal justru robotnya
-    // saat sudah mulai berjalan — dan kegagalan di sana terlihat sebagai
-    // automasi yang rusak, bukan sebagai salah ketik.
-    if (masukan.trim()) {
-      try {
-        JSON.parse(masukan);
-      } catch {
-        return setGalat(t("Argumen masukan bukan JSON yang sah."));
-      }
-    }
-
-    jalankan.mutate({
-      processName: nama,
-      folderId: folder.id,
-      robotName: namaRobot || undefined,
-      priority: prioritas,
-      source: "Dashboard",
-      inputJson: masukan.trim() || undefined,
-    });
-  }
-
-  const tanpaRobot = robot.isSuccess && robot.data.length === 0;
-
-  return (
-    <Dialog
-      judul={t("Jalankan")}
-      terbuka
-      onTutup={onTutup}
-      aksi={
-        <>
-          <Button onClick={onTutup}>{t("Batal")}</Button>
-          <Button variant="primary" onClick={kirim} disabled={jalankan.isPending}>
-            {t("Jalankan")}
-          </Button>
-        </>
-      }
-    >
-      <Isian label={t("Proses|satu")}>
-        <select value={nama} onChange={(e) => setNama(e.target.value)} className={kelasIsian}>
-          <option value="">—</option>
-          {(proses.data ?? []).map((p) => (
-            <option key={p.name} value={p.name}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-      </Isian>
-
-      <Isian
-        label={t("Robot|satu")}
-        petunjuk={
-          tanpaRobot
-            ? t("Belum ada robot yang ditugaskan ke folder ini; pekerjaannya akan menunggu.")
-            : t("Kosongkan supaya robot mana pun di folder ini yang sedang bebas mengambilnya.")
-        }
-      >
-        <select value={namaRobot} onChange={(e) => setNamaRobot(e.target.value)} className={kelasIsian}>
-          <option value="">{t("Robot mana pun di folder ini")}</option>
-          {(robot.data ?? []).map((r) => (
-            <option key={r.name} value={r.name}>
-              {`${r.name} — ${t(labelKeadaan(r.status))}`}
-            </option>
-          ))}
-        </select>
-      </Isian>
-
-      <Isian label={t("Prioritas")}>
-        <select value={prioritas} onChange={(e) => setPrioritas(e.target.value)} className={kelasIsian}>
-          <option>Low</option>
-          <option>Normal</option>
-          <option>High</option>
-        </select>
-      </Isian>
-
-      <Isian label="Input JSON" petunjuk={t('Contoh: {"in_Nama":"Budi"}')}>
-        <textarea
-          rows={4}
-          value={masukan}
-          onChange={(e) => setMasukan(e.target.value)}
-          className={`${kelasIsian} font-mono`}
-        />
-      </Isian>
-
-      <Galat pesan={galat} />
-    </Dialog>
   );
 }

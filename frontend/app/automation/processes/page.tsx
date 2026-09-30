@@ -14,6 +14,7 @@ import { DataTable } from "@/components/DataTable";
 import { Dialog, Isian, kelasIsian } from "@/components/Dialog";
 import { DialogPindah } from "@/components/DialogPindah";
 import { BilahAlat, PerluFolder } from "@/components/HalamanFolder";
+import { MulaiJob, labelPrioritas } from "@/components/MulaiJob";
 
 export default function Proses() {
   return <PerluFolder>{(folder) => <IsiProses folder={folder} />}</PerluFolder>;
@@ -28,6 +29,7 @@ function IsiProses({ folder }: { folder: FolderNode }) {
   const [sunting, setSunting] = useState<Process | null>(null);
   const [baru, setBaru] = useState(false);
   const [pindah, setPindah] = useState<Process | null>(null);
+  const [mulai, setMulai] = useState<Process | null>(null);
   const [cari, setCari] = useState("");
   const [galat, setGalat] = useState("");
 
@@ -61,27 +63,7 @@ function IsiProses({ folder }: { folder: FolderNode }) {
     onError: (e) => setGalat(errorText(e)),
   });
 
-  const jalankan = useMutation({
-    mutationFn: (nama: string) =>
-      OpenOrchestratorApi.startJob({ processName: nama, folderId: folder.id, source: "Dashboard" }),
-    onMutate: (nama) => {
-      setGalat("");
-
-      // Tombolnya langsung mati, tidak menunggu penyegaran berikutnya. Tanpa
-      // ini ada jeda beberapa detik saat tombol masih hidup, dan klik kedua
-      // di jeda itu menjadwalkan pekerjaan kedua.
-      klien.setQueryData<Process[]>(["processes", folder.id], (lama) =>
-        lama?.map((p) =>
-          p.name === nama ? { ...p, activeJobs: p.activeJobs + 1, activeState: p.activeState ?? "PENDING" } : p,
-        ),
-      );
-    },
-    onError: (e) => setGalat(errorText(e)),
-    onSettled: () => {
-      klien.invalidateQueries({ queryKey: ["jobs"] });
-      segarkan();
-    },
-  });
+  const tutupMulai = useCallback(() => setMulai(null), []);
 
   const tutupDialog = useCallback(() => {
     setBaru(false);
@@ -171,9 +153,11 @@ function IsiProses({ folder }: { folder: FolderNode }) {
             {
               judul: "",
               sel: (p) => {
-                // Mati selama proses ini masih punya pekerjaan yang belum
-                // selesai — menunggu robot, berjalan, atau sedang dihentikan.
-                const berjalan = p.activeJobs > 0 || (jalankan.isPending && jalankan.variables === p.name);
+                // Tombolnya membuka Start Job, bukan langsung membuat job: klik
+                // kedua tidak menggandakan apa pun, dan proses yang sedang
+                // berjalan boleh dijalankan lagi — "jalankan N kali" memang
+                // membuat beberapa job sekaligus.
+                const berjalan = p.activeJobs > 0;
 
                 return (
                   <div className="flex justify-end gap-0.5">
@@ -181,12 +165,11 @@ function IsiProses({ folder }: { folder: FolderNode }) {
                       <IconButton
                         label={
                           berjalan
-                            ? t("Sedang berjalan ({0}). Bisa dijalankan lagi setelah selesai.", t(p.activeState ? labelSingkat(p.activeState) : "Menunggu"))
+                            ? t("Jalankan lagi — sedang {0}", t(labelSingkat(p.activeState ?? "PENDING")).toLowerCase())
                             : t("Jalankan")
                         }
                         tone="ok"
-                        disabled={berjalan}
-                        onClick={() => jalankan.mutate(p.name)}
+                        onClick={() => setMulai(p)}
                       >
                         <Play size={16} fill="currentColor" />
                       </IconButton>
@@ -225,6 +208,8 @@ function IsiProses({ folder }: { folder: FolderNode }) {
       </p>
 
       <DialogProses proses={detail} folderId={folder.id} onTutup={() => setDetail(null)} />
+
+      {mulai ? <MulaiJob folder={folder} prosesAwal={mulai.name} onTutup={tutupMulai} /> : null}
 
       {baru || sunting ? (
         <DialogSimpanProses
@@ -303,6 +288,7 @@ function DialogSimpanProses({
   const [batasMenit, setBatasMenit] = useState(awal?.timeoutSeconds ? String(Math.round(awal.timeoutSeconds / 60)) : "");
   const [jeda, setJeda] = useState(String(awal?.stopGraceSeconds ?? 30));
   const [ulang, setUlang] = useState(String(awal?.maxRetries ?? 1));
+  const [prioritas, setPrioritas] = useState(awal?.priority ?? "Normal");
   const [galat, setGalat] = useState("");
 
   const dipilih = ringkasan.find((r) => r.name === namaPaket);
@@ -319,6 +305,7 @@ function DialogSimpanProses({
         timeoutSeconds: batasMenit.trim() ? Math.round(Number(batasMenit) * 60) : 0,
         stopGraceSeconds: Number(jeda) || 30,
         maxRetries: Number(ulang),
+        priority: prioritas,
       }),
     onSuccess: () => {
       onSelesai();
@@ -405,15 +392,27 @@ function DialogSimpanProses({
         />
       </Isian>
 
-      <Isian label={t("Lingkungan|satu")}>
-        <select value={env} onChange={(e) => setEnv(e.target.value)} className={kelasIsian}>
-          {(lingkungan.data?.map((l) => l.name) ?? ["Production"]).map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </select>
-      </Isian>
+      <div className="grid gap-x-4 sm:grid-cols-2">
+        <Isian label={t("Lingkungan|satu")}>
+          <select value={env} onChange={(e) => setEnv(e.target.value)} className={kelasIsian}>
+            {(lingkungan.data?.map((l) => l.name) ?? ["Production"]).map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </Isian>
+
+        <Isian label={t("Prioritas job")} petunjuk={t("Dipakai job yang dijalankan dengan prioritas Diwarisi.")}>
+          <select value={prioritas} onChange={(e) => setPrioritas(e.target.value)} className={kelasIsian}>
+            {["Low", "Normal", "High"].map((p) => (
+              <option key={p} value={p}>
+                {t(labelPrioritas(p))}
+              </option>
+            ))}
+          </select>
+        </Isian>
+      </div>
 
       <Isian label={t("Keterangan")}>
         <input value={ket} onChange={(e) => setKet(e.target.value)} className={kelasIsian} />

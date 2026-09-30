@@ -139,6 +139,49 @@ export type Job = {
   packageVersion?: string | null;
   packageSha256?: string | null;
   attachmentCount?: number;
+  /** Tipe runtime yang diminta — atau yang dipakai, sesudah diambil robot. */
+  runtimeType?: string | null;
+  /** Robot dan mesin yang DIMINTA saat job dibuat; robotName/machineName adalah yang menjalankannya. */
+  targetRobotName?: string | null;
+  targetMachineName?: string | null;
+  /** Job lama yang dijalankan ulang menjadi job ini. */
+  restartedFrom?: string | null;
+  /** Diminta dimatikan paksa: robot menerima KillJob tanpa menunggu jeda berhenti. */
+  killRequestedAt?: string | null;
+  /** Dasbor meminta jeda. Job tetap RUNNING. */
+  pauseRequested?: boolean;
+  /** Menurut robot: job ini sedang ditahan (hanya selama RUNNING). */
+  paused?: boolean;
+  /** Siapa yang menjeda, menurut robot: dari dasbor, atau tombol Jeda di PC robot. */
+  pauseSource?: "dashboard" | "local" | null;
+  pausedAt?: string | null;
+  /** Lama jeda yang sudah selesai, detik. */
+  pausedSeconds?: number;
+};
+
+/** Tipe runtime mesin — katalog tetap, sama dengan server. */
+export const TIPE_RUNTIME = ["Production", "Testing", "Development"] as const;
+
+/** Prioritas job. Inherited = ikut prioritas bawaan prosesnya. */
+export const PRIORITAS_JOB = ["Inherited", "Low", "Normal", "High"] as const;
+
+/** Pilihan Execution settings Start Job untuk satu folder (GET /api/jobs/start-options). */
+export type PilihanMulai = {
+  /** Katalog tipe runtime, urutan tampil. */
+  runtimeTypes: string[];
+  /** Mesin folder ini yang punya runtime. */
+  machines: { name: string; type: string; online: boolean; runtimes: Record<string, number> }[];
+  /** Robot folder ini yang bisa mengambil job di salah satu mesin itu. */
+  robots: {
+    name: string;
+    type: string;
+    status: "AVAILABLE" | "BUSY" | "DISCONNECTED";
+    machineName: string;
+    username: string | null;
+    userDisplayName: string | null;
+    /** Robot milik akun yang sedang membuka dasbor — "jalankan sebagai diri sendiri". */
+    self: boolean;
+  }[];
 };
 
 export type JobAttachment = {
@@ -214,6 +257,8 @@ export type Machine = {
   agentOnline?: boolean;
   unattendedRobotCount?: number;
   activeJobs?: number;
+  /** Tipe runtime → jumlah. Jumlahnya adalah slot mesin: job yang boleh berjalan bersamaan. */
+  runtimes?: Record<string, number>;
 };
 
 /** Setelan robot yang bisa diubah dari dasbor (POST/PUT /api/robots). */
@@ -255,6 +300,8 @@ export type Process = {
   timeoutSeconds?: number | null;
   stopGraceSeconds?: number;
   maxRetries?: number;
+  /** Prioritas bawaan job — dipakai job yang dijalankan dengan prioritas Inherited. */
+  priority?: string;
 };
 
 export type Package = {
@@ -659,12 +706,27 @@ export const OpenOrchestratorApi = {
   startJob: (body: {
     processName: string;
     folderId?: string;
+    /** Akun: robot yang diminta; kosong = robot mana pun di folder. */
     robotName?: string;
+    /** Mesin yang diminta; kosong = mesin mana pun. */
+    machineName?: string;
+    runtimeType?: string;
+    /** Low, Normal, High, atau Inherited (ikut prioritas proses). */
     priority?: string;
+    /** Berapa kali prosesnya dijalankan, 1–100. */
+    count?: number;
     inputJson?: string;
     source?: string;
-  }) => post<{ ok: boolean; id: string }>("/api/jobs", body),
+  }) => post<{ ok: boolean; id: string; ids: string[] }>("/api/jobs", body),
+  /** Pilihan tipe runtime, akun, dan mesin Start Job untuk satu folder. */
+  startOptions: (folderId: string) => get<PilihanMulai>("/api/jobs/start-options", { folderId }),
   stopJob: (id: string) => post<{ ok: boolean }>(`/api/jobs/${seg(id)}/stop`),
+  /** Matikan paksa: robot menerima KillJob tanpa menunggu jeda berhenti rapi. */
+  killJob: (id: string) => post<{ ok: boolean }>(`/api/jobs/${seg(id)}/kill`),
+  pauseJob: (id: string) => post<{ ok: boolean }>(`/api/jobs/${seg(id)}/pause`),
+  resumeJob: (id: string) => post<{ ok: boolean }>(`/api/jobs/${seg(id)}/resume`),
+  /** Job BARU dengan konfigurasi job ini; job ini sendiri tidak diubah. */
+  restartJob: (id: string) => post<{ ok: boolean; id: string; ids: string[] }>(`/api/jobs/${seg(id)}/restart`),
   jobAttachments: (id: string) => get<JobAttachment[]>(`/api/jobs/${seg(id)}/attachments`),
   /** Isi lampiran sebagai Blob — lewat axios supaya tokennya ikut; <img src> biasa tidak membawa header. */
   jobAttachmentBlob: (id: string, attachmentId: string) =>
@@ -682,10 +744,13 @@ export const OpenOrchestratorApi = {
   deleteRobot: (name: string) => del<{ ok: boolean }>(`/api/robots/${seg(name)}`),
 
   machines: () => get<Machine[]>("/api/machines"),
-  saveMachine: (body: { name: string; type?: string; description?: string }) =>
+  saveMachine: (body: { name: string; type?: string; description?: string; runtimes?: Record<string, number> }) =>
     post<{ ok: boolean }>("/api/machines", body),
   deleteMachine: (name: string) => del<{ ok: boolean }>(`/api/machines/${seg(name)}`),
-  updateMachine: (name: string, body: { description?: string; slots?: number; leaseSeconds?: number }) =>
+  updateMachine: (
+    name: string,
+    body: { description?: string; leaseSeconds?: number; runtimes?: Record<string, number> },
+  ) =>
     put<{ ok: boolean }>(`/api/machines/${seg(name)}`, body),
   /** Kuncinya hanya terlihat SEKALI di jawaban ini. */
   createMachineKey: (name: string) =>
@@ -710,6 +775,8 @@ export const OpenOrchestratorApi = {
     timeoutSeconds?: number;
     stopGraceSeconds?: number;
     maxRetries?: number;
+    /** Prioritas bawaan job: Low, Normal, atau High. */
+    priority?: string;
   }) => post<{ ok: boolean }>("/api/processes", body),
   /** Nama proses unik per folder: dari folder mana, ke folder mana. */
   moveProcess: (name: string, dari: string, ke: string) =>
