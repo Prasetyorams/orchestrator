@@ -76,6 +76,37 @@ public class TriggerRepository {
                 """.formatted(folderFilter), args.toArray());
     }
 
+    /**
+     * Pemicu yang bisa jalan di mesin Robot Agent itu (GET /api/agent/triggers):
+     * yang menargetkan salah satu robot mesin itu, atau yang tidak menargetkan
+     * robot tertentu tetapi foldernya — folder prosesnya — adalah folder salah
+     * satu robot mesin itu. Pemicu yang menargetkan robot lain tidak ikut,
+     * walaupun prosesnya ada di folder yang sama. Keduanya hanya kalau mesin
+     * itu terdaftar di folder pemicunya (V12): di folder lain job-nya tidak
+     * akan diambil mesin ini.
+     */
+    public List<Map<String, Object>> findForMachine(UUID tenantId, UUID machineId) {
+        return database.queryRows("""
+                SELECT t.id, t.name, t.folder_id, f.name AS folder_name, t.process_name,
+                       r.id AS robot_id, NULLIF(t.robot_name, '') AS robot_name,
+                       t.type, t.cron, t.interval_minutes, t.timezone, t.priority,
+                       t.enabled, t.next_run_at, t.last_run_at
+                  FROM triggers t
+                  JOIN folders f ON f.id = t.folder_id
+                  LEFT JOIN robots r ON r.tenant_id = t.tenant_id AND r.name = t.robot_name
+                 WHERE t.tenant_id = ?
+                   AND ((NULLIF(t.robot_name, '') IS NOT NULL AND r.machine_id = ?)
+                        OR (NULLIF(t.robot_name, '') IS NULL AND t.folder_id IN (
+                               SELECT fr.folder_id
+                                 FROM folder_robots fr
+                                 JOIN robots mr ON mr.id = fr.robot_id
+                                WHERE mr.tenant_id = ? AND mr.machine_id = ?)))
+                   AND EXISTS (SELECT 1 FROM folder_machines fm
+                                WHERE fm.folder_id = t.folder_id AND fm.machine_id = ?)
+                 ORDER BY t.enabled DESC, t.next_run_at NULLS LAST, lower(t.name)
+                """, tenantId, machineId, tenantId, machineId, machineId);
+    }
+
     public Optional<TriggerSchedule> findSchedule(UUID tenantId, UUID folderId, String name) {
         return database.query("""
                 SELECT enabled, cron, interval_minutes, timezone

@@ -24,6 +24,7 @@ import id.jakforge.openorchestrator.repository.JobRepository;
 import id.jakforge.openorchestrator.repository.LogRepository;
 import id.jakforge.openorchestrator.repository.MachineRepository;
 import id.jakforge.openorchestrator.repository.RobotRepository;
+import id.jakforge.openorchestrator.repository.TriggerRepository;
 import id.jakforge.openorchestrator.security.JwtService;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
 import id.jakforge.openorchestrator.security.SecretBox;
@@ -83,11 +84,26 @@ public class AgentService {
     private final JobRepository jobRepository;
     private final LogRepository logRepository;
     private final AttachmentRepository attachmentRepository;
+    private final TriggerRepository triggerRepository;
     private final AuditService auditService;
     private final JobOutcomeService jobOutcomeService;
     private final JwtService jwtService;
     private final SecretBox secretBox;
     private final OpenOrchestratorProperties properties;
+
+    // -----------------------------------------------------------------
+    // Jadwal
+    // -----------------------------------------------------------------
+
+    /**
+     * Pemicu yang bisa jalan di mesin ini, untuk halaman Jadwal Open Assistant
+     * yang tersambung dengan machine key (usulan PR orchestrator#3,
+     * ROBOT-API.md 2.10). Hanya dibaca; mengubah pemicu tetap lewat dasbor.
+     * {@code nextRunAt} dihitung server, di zona waktu pemicunya.
+     */
+    public Map<String, Object> triggers(OpenOrchestratorPrincipal agent) {
+        return Map.of("triggers", triggerRepository.findForMachine(agent.tenantId(), agent.machineId()));
+    }
 
     // -----------------------------------------------------------------
     // Denyut

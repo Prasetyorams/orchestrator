@@ -6,11 +6,13 @@ import id.jakforge.openorchestrator.dto.request.LoginRequest;
 import id.jakforge.openorchestrator.dto.request.UpdateProfileRequest;
 import id.jakforge.openorchestrator.dto.response.LoginResponse;
 import id.jakforge.openorchestrator.model.UserAccess;
+import id.jakforge.openorchestrator.repository.AssistantSessionRepository;
 import id.jakforge.openorchestrator.repository.UserRepository;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
 import id.jakforge.openorchestrator.security.JwtService;
 import id.jakforge.openorchestrator.security.Passwords;
 import id.jakforge.openorchestrator.security.PermissionService;
+import id.jakforge.openorchestrator.support.RecordingDatabase;
 import id.jakforge.openorchestrator.support.TestProperties;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -54,8 +56,13 @@ class AuthServiceTest {
     private final FakeUserRepository users = new FakeUserRepository();
     private final JwtService jwtService = new JwtService("k".repeat(32), 60);
 
+    /** Sambungan Open Assistant: hanya perintah SQL-nya yang direkam. */
+    private final RecordingDatabase assistantDatabase = new RecordingDatabase();
+
     private final AuthService authService = new AuthService(users, jwtService,
-            new PermissionService(users, TestProperties.defaults(), Clock.systemUTC()));
+            new PermissionService(users, TestProperties.defaults(), Clock.systemUTC()),
+            new AssistantSignInService(new AssistantSessionRepository(assistantDatabase), users, null, jwtService,
+                    Clock.systemUTC()));
 
     // ---------- masuk ----------
 
@@ -171,6 +178,20 @@ class AuthServiceTest {
                 new ChangePasswordRequest("sandi-lama-benar", "sandi-baru-123")).status());
 
         assertTrue(Passwords.verify("sandi-baru-123", users.newHash));
+    }
+
+    @Test
+    @DisplayName("ganti kata sandi mencabut semua Open Assistant yang tersambung; sandi lama salah tidak")
+    void passwordChangeRevokesAssistantSessions() {
+        users.storedHash = Passwords.hash("sandi-lama-benar");
+
+        statusOf(() -> authService.changePassword(principal, new ChangePasswordRequest("salah", "sandi-baru-123")));
+        assertTrue(assistantDatabase.statementsContaining("UPDATE assistant_sessions").isEmpty());
+
+        authService.changePassword(principal, new ChangePasswordRequest("sandi-lama-benar", "sandi-baru-123"));
+
+        assertEquals(1, assistantDatabase.statementsContaining("UPDATE assistant_sessions SET revoked_at").size());
+        assertEquals("password_changed", assistantDatabase.lastArguments().getFirst());
     }
 
     // ---------- alat ----------

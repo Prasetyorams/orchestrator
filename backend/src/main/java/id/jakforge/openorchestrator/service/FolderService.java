@@ -276,6 +276,8 @@ public class FolderService {
                 folderRepository.findAssignedUsers(principal.tenantId(), folderId),
                 folderRepository.findAssignedRobots(principal.tenantId(), folderId),
                 canManageUsers,
+                canManageRobots,
+                // Sama dengan robot: pengelola folder, atau pemilik Folder Saya (FolderMachineService).
                 canManageRobots);
     }
 

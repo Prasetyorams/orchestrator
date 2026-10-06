@@ -286,8 +286,8 @@ public class DashboardRepository {
      * pengguna, dan mesin — ditambah paket, ember, dan robot.
      *
      * <p>Untuk sebuah folder, pengguna dan mesin berarti yang DITUGASKAN ke
-     * sana: pengguna yang boleh melihatnya, dan mesin tempat robot-robotnya
-     * berjalan. Folder Saya selalu punya satu pengguna — pemiliknya. Tanpa
+     * sana: pengguna yang boleh melihatnya, dan mesin yang terdaftar di sana
+     * (V12). Folder Saya selalu punya satu pengguna — pemiliknya. Tanpa
      * folder, angka keduanya milik seluruh penyewa.
      *
      * <p>Folder dan penyewa dikirim SEKALI lewat CTE, bukan diulang untuk
@@ -327,10 +327,7 @@ public class DashboardRepository {
                                END FROM t, f) AS robots,
                        (SELECT CASE WHEN f.id IS NULL
                                     THEN (SELECT count(*) FROM machines m WHERE m.tenant_id = t.id)
-                                    ELSE (SELECT count(DISTINCT r.machine_name)
-                                            FROM folder_robots fr JOIN robots r ON r.id = fr.robot_id
-                                           WHERE fr.folder_id = f.id
-                                             AND r.machine_name IS NOT NULL AND r.machine_name <> '')
+                                    ELSE (SELECT count(*) FROM folder_machines fm WHERE fm.folder_id = f.id)
                                END FROM t, f) AS machines
                 """, tenantId, folderId).orElseGet(LinkedHashMap::new);
     }

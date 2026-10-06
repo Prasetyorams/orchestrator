@@ -21,6 +21,8 @@ import id.jakforge.openorchestrator.repository.AttachmentRepository;
 import id.jakforge.openorchestrator.repository.FolderRepository;
 import id.jakforge.openorchestrator.repository.JobRepository;
 import id.jakforge.openorchestrator.repository.LogRepository;
+import id.jakforge.openorchestrator.repository.MachineRepository;
+import id.jakforge.openorchestrator.repository.ProcessRepository;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -80,6 +82,8 @@ public class JobService {
     private final AttachmentRepository attachmentRepository;
     private final FolderAccessService folderAccessService;
     private final StartJobOptionsService startJobOptionsService;
+    private final ProcessRepository processRepository;
+    private final MachineRepository machineRepository;
     private final OpenOrchestratorProperties properties;
 
     /** Tanpa {@code folderId}: pekerjaan seluruh penyewa. */
@@ -118,8 +122,13 @@ public class JobService {
      * folder. Studio tidak mengirimnya — lihat {@link FolderLocations#resolve}.
      */
     @Transactional
-    public JobsCreatedResponse create(OpenOrchestratorPrincipal principal, CreateJobRequest request) {
+    public JobsCreatedResponse create(OpenOrchestratorPrincipal principal, CreateJobRequest body) {
         UUID tenantId = principal.tenantId();
+
+        // processId dan machineId (V12) menentukan proses, foldernya, dan
+        // mesinnya — lalu diperiksa dengan aturan yang sama dengan namanya.
+        CreateJobRequest request = resolveIds(tenantId, body);
+
         UUID requestedFolder = folderAccessService.resolveFolderFilter(principal, request.folderId());
 
         if (request.processName() == null) {
@@ -154,6 +163,11 @@ public class JobService {
         if (runtimeType != null || request.machineName() != null) {
             startJobOptionsService.validate(startJobOptionsService.forFolder(principal, folder), runtimeType,
                     request.machineName(), request.robotName());
+        } else if (request.robotName() != null) {
+            // Studio dan permintaan lama: robotnya boleh belum dikenal, tapi
+            // robot yang dikenal di mesin di luar folder ini tidak akan pernah
+            // mengambil job-nya (V12).
+            startJobOptionsService.requireRobotMachineInFolder(tenantId, folder, request.robotName());
         }
 
         if (JobPriorities.INHERITED.equals(priority)) {
@@ -187,6 +201,46 @@ public class JobService {
         }
 
         return JobsCreatedResponse.of(jobIds);
+    }
+
+    /**
+     * Permintaan dengan {@code processId} dan/atau {@code machineId} menjadi
+     * permintaan dengan nama — nama dan folder proses dari id-nya, nama mesin
+     * dari id-nya. Mesin yang tidak dikenal dijawab sama dengan mesin di luar
+     * folder: 409, tidak terdaftar pada folder proses.
+     */
+    private CreateJobRequest resolveIds(UUID tenantId, CreateJobRequest request) {
+        if (request.processId() == null && request.machineId() == null) return request;
+
+        String processName = request.processName();
+        String folderId = request.folderId();
+
+        if (request.processId() != null) {
+            UUID processId = Uuids.parseOrNull(request.processId());
+            Map<String, Object> process = processId == null ? null
+                    : processRepository.findById(tenantId, processId).orElse(null);
+
+            if (process == null) throw ApiException.notFound("Proses tidak ada.");
+
+            processName = (String) process.get("name");
+            folderId = (String) process.get("folderId");
+        }
+
+        String machineName = request.machineName();
+
+        if (request.machineId() != null) {
+            UUID machineId = Uuids.parseOrNull(request.machineId());
+            machineName = machineId == null ? null : machineRepository.findNameById(tenantId, machineId).orElse(null);
+
+            if (machineName == null) {
+                throw ApiException.conflict("Mesin itu tidak terdaftar pada folder proses ini.")
+                        .withCode(StartJobOptionsService.MACHINE_NOT_ASSIGNED);
+            }
+        }
+
+        return new CreateJobRequest(processName, request.robotName(), machineName, request.source(),
+                request.priority(), request.inputJson(), folderId, request.runtimeType(), request.count(),
+                request.countMalformed(), null, null);
     }
 
     /**
@@ -228,10 +282,21 @@ public class JobService {
             throw ApiException.badRequest("Proses '" + processName + "' sudah tidak ada di folder ini.");
         }
 
+        // Mesin yang sudah dikeluarkan dari folder ini tidak akan mengambil
+        // job ulangannya (V12) — tolak sekarang, bukan biarkan menunggu.
+        String targetMachine = (String) job.get("targetMachineName");
+        String targetRobot = (String) job.get("targetRobotName");
+
+        if (targetMachine != null) {
+            startJobOptionsService.requireMachineInFolder(tenantId, folder, targetMachine);
+        } else if (targetRobot != null) {
+            startJobOptionsService.requireRobotMachineInFolder(tenantId, folder, targetRobot);
+        }
+
         UUID newJobId = UUID.randomUUID();
 
         jobRepository.insert(new JobRepository.NewJob(newJobId, tenantId, folder, processName,
-                (String) job.get("targetRobotName"), (String) job.get("targetMachineName"),
+                targetRobot, targetMachine,
                 (String) job.get("runtimeType"), RESTART_SOURCE, (String) job.get("priority"),
                 "Dijalankan ulang dari pekerjaan " + jobId + ". Menunggu robot yang tersedia.",
                 (String) job.get("inputJson"), jobId));

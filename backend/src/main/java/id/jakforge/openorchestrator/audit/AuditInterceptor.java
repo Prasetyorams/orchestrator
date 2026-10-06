@@ -69,7 +69,7 @@ public class AuditInterceptor implements HandlerInterceptor {
 
     /** Medan badan yang mungkin menjadi nama sasaran; sisanya tidak pernah dibaca. */
     private static final Set<String> CAPTURED_BODY_FIELDS = Set.of("name", USERNAME_FIELD, "processName",
-            "fileName", "version", "robotName", FOLDER_ID_FIELD);
+            "fileName", "version", "robotName", FOLDER_ID_FIELD, "machine");
 
     /** Dari mana satu bagian nama sasaran diambil. */
     enum SourceKind {
@@ -123,6 +123,8 @@ public class AuditInterceptor implements HandlerInterceptor {
             rule(POST, LOGIN_PATH, "Sesi", "Masuk"),
             rule(PUT, "/api/auth/me", "Profil", "Ubah"),
             rule(POST, "/api/auth/password", "Profil", "Ganti kata sandi"),
+            rule(POST, "/api/auth/assistant/code", "Open Assistant", "Sambungkan", body("machine")),
+            rule(DELETE, "/api/auth/assistant/sessions/{id}", "Open Assistant", "Cabut", path("id")),
 
             rule(POST, "/api/processes", "Proses", "Simpan", body("name"), FOLDER_FROM_BODY),
             rule(DELETE, "/api/processes/{name}", "Proses", "Hapus", path("name"), FOLDER_FROM_PARAMETER),

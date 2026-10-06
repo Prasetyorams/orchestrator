@@ -141,7 +141,11 @@ class PermissionInterceptorTest {
                 .map(rule -> rule.method().name() + " " + rule.pathPattern())
                 .toList();
 
-        assertEquals(List.of("GET /api/health", "POST /api/auth/login", "POST /api/agent/login"), publicEndpoints);
+        // Token Open Assistant ditukar dan diperbarui tanpa token: buktinya kode
+        // sekali pakai + code_verifier, atau refresh token itu sendiri.
+        assertEquals(List.of("GET /api/health", "POST /api/auth/login",
+                "POST /api/auth/assistant/token", "POST /api/auth/assistant/refresh", "POST /api/auth/assistant/logout",
+                "POST /api/agent/login"), publicEndpoints);
     }
 
     /** Yang dipanggil JakRunner dan activity Studio selama automasi berjalan. */

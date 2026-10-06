@@ -9,6 +9,8 @@ import org.springframework.stereotype.Service;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -44,6 +46,21 @@ public class PermissionService implements PermissionChecker {
             "assets.read", "queues.read", "queues.update", "buckets.read", "buckets.update",
             "jobs.read", "jobs.create", "processes.read", "logs.create");
 
+    /**
+     * Paling banyak yang boleh dilakukan Open Assistant yang masuk lewat dasbor:
+     * pekerjaan robot attended — denyut, mengambil dan melaporkan job, catatan,
+     * jadwal, paket, dan yang dipanggil activity job-nya. Dipotong lagi oleh
+     * peran pemiliknya: Open Assistant seorang Auditor tidak mendapat
+     * robots.update hanya karena masuk lewat sini.
+     *
+     * <p>Token itu tersimpan di PC; Administrator yang menyambungkan Open
+     * Assistant tidak boleh meninggalkan token pengelola penyewa di sana.
+     */
+    static final List<String> ASSISTANT_PERMISSIONS = List.of(
+            "robots.read", "robots.update", "jobs.read", "jobs.create", "jobs.update",
+            "processes.read", "packages.read", "triggers.read", "logs.create",
+            "assets.read", "queues.read", "queues.update", "buckets.read", "buckets.update");
+
     private final UserRepository userRepository;
     private final OpenOrchestratorProperties properties;
     private final Clock clock;
@@ -56,7 +73,23 @@ public class PermissionService implements PermissionChecker {
         // ditentukan PermissionInterceptor (Access.AGENT), bukan izin.
         if (principal.isAgent()) return Set.of();
         if (principal.isExecutor()) return EXECUTOR_PATTERNS;
+        if (principal.isAssistant()) return assistantPermissions(rolePatterns(principal));
 
+        return rolePatterns(principal);
+    }
+
+    /** Izin peran yang juga ada di {@link #ASSISTANT_PERMISSIONS}, satu per satu (tanpa pola). */
+    static Set<String> assistantPermissions(Set<String> rolePatterns) {
+        Set<String> allowed = new LinkedHashSet<>();
+
+        for (String permission : ASSISTANT_PERMISSIONS) {
+            if (PermissionCatalog.matches(rolePatterns, permission)) allowed.add(permission);
+        }
+
+        return allowed;
+    }
+
+    private Set<String> rolePatterns(OpenOrchestratorPrincipal principal) {
         Instant now = clock.instant();
         CachedPatterns cached = cache.get(principal.userId());
 

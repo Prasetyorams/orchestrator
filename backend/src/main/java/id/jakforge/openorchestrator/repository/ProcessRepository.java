@@ -99,6 +99,12 @@ public class ProcessRepository {
                 """.formatted(folderFilter, ACTIVE_STATES), args.toArray());
     }
 
+    /** Satu proses lewat id-nya: nama dan folder tempat ia tinggal. */
+    public Optional<Map<String, Object>> findById(UUID tenantId, UUID processId) {
+        return database.queryRow("SELECT id, name, folder_id FROM processes WHERE tenant_id = ? AND id = ?",
+                tenantId, processId);
+    }
+
     /** Ada proses bernama itu di folder mana pun. */
     public boolean existsByName(UUID tenantId, String name) {
         return database.exists("SELECT count(*) FROM processes WHERE tenant_id = ? AND name = ?", tenantId, name);

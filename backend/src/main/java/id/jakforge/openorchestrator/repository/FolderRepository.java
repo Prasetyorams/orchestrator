@@ -208,14 +208,20 @@ public class FolderRepository {
     }
 
     /**
-     * Subfolder baru mewarisi pengguna dan robot induknya SAAT DIBUAT.
+     * Subfolder baru mewarisi pengguna, robot, dan mesin induknya SAAT DIBUAT.
      *
      * <p>Bukan pewarisan yang hidup: penugasan sesudahnya diatur per folder.
      * Tanpa salinan ini, folder baru langsung tidak terlihat oleh semua orang
      * yang bekerja di induknya, dan tidak satu robot pun mau menjalankan
-     * isinya.
+     * isinya — robot hanya bekerja di folder tempat mesinnya terdaftar (V12).
      */
     public void copyAssignments(UUID tenantId, UUID sourceFolderId, UUID targetFolderId) {
+        database.update("""
+                INSERT INTO folder_machines (folder_id, machine_id, tenant_id, created_at)
+                SELECT ?, machine_id, tenant_id, now() FROM folder_machines WHERE tenant_id = ? AND folder_id = ?
+                ON CONFLICT DO NOTHING
+                """, targetFolderId, tenantId, sourceFolderId);
+
         database.update("""
                 INSERT INTO folder_users (folder_id, user_id, tenant_id, created_at)
                 SELECT ?, user_id, tenant_id, now() FROM folder_users WHERE tenant_id = ? AND folder_id = ?
@@ -254,11 +260,26 @@ public class FolderRepository {
                 """, tenantId, folderId);
     }
 
+    /**
+     * Robot folder itu, beserta id mesin tempat ia bekerja (null kalau
+     * mesinnya belum dikenal). {@code machineRegistered}: mesin itu terdaftar
+     * di folder ini (V12) — tanpa itu robotnya tidak akan mengambil job folder
+     * ini, dan layar Setelan perlu mengatakannya.
+     */
     public List<Map<String, Object>> findAssignedRobots(UUID tenantId, UUID folderId) {
         return database.queryRows("""
-                SELECT r.id, r.name, r.machine_name, r.type, fr.created_at AS assigned_at
+                SELECT r.id, r.name, r.machine_name, r.type, fr.created_at AS assigned_at,
+                       m.id AS machine_id,
+                       (m.id IS NOT NULL AND EXISTS (SELECT 1 FROM folder_machines fm
+                                                      WHERE fm.folder_id = fr.folder_id
+                                                        AND fm.machine_id = m.id)) AS machine_registered
                   FROM folder_robots fr
                   JOIN robots r ON r.id = fr.robot_id
+                  LEFT JOIN LATERAL (SELECT mm.id FROM machines mm
+                                      WHERE mm.id = r.machine_id
+                                         OR (r.machine_id IS NULL AND mm.tenant_id = r.tenant_id
+                                             AND mm.name = r.machine_name)
+                                      LIMIT 1) m ON TRUE
                  WHERE fr.tenant_id = ? AND fr.folder_id = ?
                  ORDER BY lower(r.name)
                 """, tenantId, folderId);

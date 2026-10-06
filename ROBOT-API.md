@@ -12,6 +12,19 @@ job yang diminta **dimatikan paksa**, dan **tipe runtime** mesin yang menentukan
 yang boleh mengambil sebuah job. Semuanya menambah, tidak mengubah yang sudah ada; diuji
 ujung-ke-ujung (103 pemeriksaan) dan dengan regresi v1.
 
+**Tambahan V11** (`V11__open_assistant.sql`), dua usulan tim robot (PR #3 dan #4):
+`GET /api/agent/triggers` — jadwal untuk agent yang masuk dengan machine key (2.10) — dan
+**Open Assistant masuk lewat dasbor**, seperti UiPath Assistant (Bagian 5). Juga menambah;
+diuji ujung-ke-ujung (108 pemeriksaan) dan dengan regresi v1.
+
+**Tambahan V12** (`V12__mesin_per_folder.sql`): **mesin didaftarkan ke folder**, seperti
+Machines di folder UiPath (Bagian 6). Robot — v1 maupun v2, attended maupun unattended — hanya
+mengambil job dari folder tempat **mesinnya terdaftar**, selain folder tempat robotnya
+ditugaskan. Pendaftaran yang sudah berjalan diisi otomatis saat migrasi, jadi setup yang ada
+tetap jalan. **Tidak ada perubahan wajib di sisi robot**; yang baru untuk Studio: galat `409`
+dengan `errorCode` di `POST /api/jobs` (6.3). Diuji ujung-ke-ujung (120 pemeriksaan) dan
+dengan regresi v1.
+
 Dokumen ini punya dua bagian:
 
 - **v1** — API untuk JakRunner (attended), Studio, activities `Custom.Orchestrator`, dan
@@ -45,12 +58,14 @@ Semua memakai `Authorization: Bearer <token>` dari login akun pengguna.
 { "product": "OpenOrchestrator", "status": "OK", "time": "…",
   "contract": 2,
   "capabilities": ["jobs.next.package", "packages.sha256", "heartbeat.commands", "jobs.state.guard",
-                   "jobs.pause", "jobs.kill"],
+                   "jobs.pause", "jobs.kill", "agent.triggers", "assistant.signin",
+                   "folder.machines"],
   "apiVersions": [1, 2] }
 ```
 
 `contract` + `capabilities` = kemampuan tambahan v1 (lihat di bawah); `apiVersions` berisi 2
-kalau `/api/agent` tersedia.
+kalau `/api/agent` tersedia. `agent.triggers` = 2.10, `assistant.signin` = Bagian 5,
+`folder.machines` = Bagian 6.
 
 ### `POST /api/auth/login`
 
@@ -456,6 +471,45 @@ Berlaku untuk v1 dan v2; agent tidak perlu mengirim apa pun yang baru.
   yang masih kosong (urutan katalog), dan tipe itu yang dicatat di job.
 - Job dari Studio, pemicu, dan API lama tidak meminta tipe maupun mesin: perilakunya sama
   dengan sebelum V9.
+- **Sejak V12** ada syarat ketiga: (c) mesin robot itu **terdaftar di folder job** dan
+  keadaannya `Active` — lihat Bagian 6.
+
+## 2.10 Jadwal — `GET /api/agent/triggers` (V11)
+
+Usulan tim robot (PR #3, `USULAN-AGENT-TRIGGERS.md`): halaman Jadwal Open Assistant yang
+tersambung dengan machine key. Hanya membaca; mengubah pemicu tetap lewat dasbor.
+Kemampuan `agent.triggers` di `/api/health`.
+
+```json
+{ "triggers": [
+    { "id": "…", "name": "Tagihan harian", "folderId": "…", "folderName": "Shared",
+      "processName": "Tagihan", "robotId": "…", "robotName": "Robot_A",
+      "type": "Cron", "cron": "0 8 * * 1-5", "intervalMinutes": 60, "timezone": "Asia/Jakarta",
+      "priority": "Normal", "enabled": true,
+      "nextRunAt": "2026-10-02T01:00:00.000000Z", "lastRunAt": null } ] }
+```
+
+- **Cakupan:** pemicu yang menargetkan salah satu robot mesin ini (`robotId` sama dengan
+  `robots[].id` di jawaban login), ATAU yang tidak menargetkan robot tertentu (`robotId` dan
+  `robotName` null) dan foldernya — folder prosesnya — adalah folder salah satu robot mesin
+  ini. Pemicu untuk robot lain tidak ikut walau prosesnya di folder yang sama. Penyewa lain
+  tidak pernah. **Sejak V12** keduanya hanya kalau mesin ini terdaftar di folder pemicunya —
+  di folder lain job-nya tidak akan diambil mesin ini.
+- Pemicu yang **dimatikan** ikut, dengan `enabled: false`. Urutannya: yang aktif dulu, lalu
+  menurut `nextRunAt`.
+- `type`: `Time` (berkala tiap `intervalMinutes`) atau `Cron` — `cron` **lima ruas**: menit jam
+  tanggal bulan hari (`0 8 * * 1-5` = hari kerja pukul 08:00), bukan enam ruas seperti contoh
+  di usulan.
+- `nextRunAt` dihitung **server**, di zona waktu pemicunya (`timezone`, bawaan `UTC`), dan
+  ditulis dalam UTC seperti waktu lain. Agent tidak perlu menghitung cron sendiri.
+- Tidak ada → `200 {"triggers": []}`. `401` = token kedaluwarsa atau kunci diganti (login
+  ulang); token selain agent → `403`.
+- Beban: baca saat halaman Jadwal dibuka, paling sering tiap 60 detik. `triggersVersion` di
+  denyut belum ada.
+
+Jawaban pertanyaan di PR #3: (1) pemicu boleh menargetkan satu robot ATAU tidak (robot mana
+pun yang ditugaskan ke foldernya) — cakupan di atas mengikuti keduanya; (2) zona waktu **per
+pemicu**; (3) `nextRunAt` dihitung server.
 
 ---
 
@@ -469,22 +523,34 @@ Sudah ada di Orchestrator:
   percobaan ulang, stop/kill, jeda (`pausedJobs`, PauseJob/ResumeJob), akun Windows per job,
   token executor, log, lampiran.
 - Tipe runtime mesin dan sasaran job (2.9).
+- V12: mesin per folder (Bagian 6): tab **Mesin** di Setelan folder (tambah satu atau
+  beberapa, lihat, hapus dari folder), keadaan mesin Active/Maintenance/Disabled, Start Job
+  hanya menawarkan mesin folder prosesnya beserta statusnya.
+- V11: jadwal untuk agent (2.10) dan Open Assistant masuk lewat dasbor (Bagian 5): halaman
+  `/assistant/connect`, kode + PKCE, token yang bisa dicabut, daftar "Open Assistant
+  tersambung" di menu profil. Halaman Machines menandai agent online tanpa robot dan nama
+  komputer agent yang berbeda dari nama mesin.
 - Dasbor: Machines (kunci, runtime per tipe, lease, status agent), Robots (mesin, akun Windows,
   kebijakan sesi, status sesi dan alasan, job yang sedang dipegang), Jobs (state baru, kode
   galat, percobaan, konteks eksekusi, rekaman; menu Hentikan/Matikan/Jeda/Lanjutkan/Jalankan
   Ulang/log), Start Job (tipe runtime, akun, mesin, jumlah jalan, prioritas), setelan proses
   (batas waktu, jeda stop, ulang, prioritas bawaan).
 
-Diuji: 206 uji unit; uji ujung-ke-ujung 83 (agent) + 103 (Start Job, aksi job, jeda, runtime)
-pemeriksaan melawan PostgreSQL; regresi v1 253 panggilan (hanya tambahan medan dan perubahan
-yang disengaja).
+Diuji: 248 uji unit; uji ujung-ke-ujung 83 (agent) + 103 (Start Job, aksi job, jeda, runtime)
++ 108 (jadwal agent, masuk lewat dasbor) + 120 (mesin per folder) pemeriksaan melawan
+PostgreSQL; regresi v1 253 panggilan (hanya tambahan medan dan perubahan yang disengaja). Klien v2 tim robot sudah diuji
+melawan Orchestrator ini di VM (Windows 11 Pro dan Windows Server 2022) — lihat
+`UJI-ROBOT-UNATTENDED-VMWARE.md`.
 
 Belum:
 
-1. Uji dengan Robot Agent sungguhan di VM (menunggu klien v2 di sisi robot).
-2. Jeda dan matikan paksa di sisi robot — lihat Bagian 4.
+1. Jeda/lanjut v2 di sisi robot belum diuji di VM (tim robot, Studio `main` Fase 3h).
+2. Masuk lewat dasbor belum diuji dengan Open Assistant sungguhan (sisi robot di cabang
+   `claude/assistant-machine-key`, belum terkompilasi saat 30 Sep).
 3. Beberapa robot per mesin baru bisa diuji di Windows Server + RDS.
-4. Tidak ada pembatasan laju untuk `/api/agent/login` (kunci 256 bit tidak bisa ditebak, tapi
+4. Mesin per folder (V12) belum diuji dengan robot sungguhan di VM — baru dengan agent dan
+   robot v1 tiruan melawan PostgreSQL.
+5. Tidak ada pembatasan laju untuk `/api/agent/login` (kunci 256 bit tidak bisa ditebak, tapi
    percobaan berulang tetap memakai sumber daya).
 
 ---
@@ -619,3 +685,286 @@ Untuk sisi robot:
 - Endpoint baca yang baru (`GET /api/logs/filters`, `GET /api/logs/export`, dan parameter
   `machine`, `host`, `time`, `from`, `to`, `q` di `GET /api/logs`) hanya dipakai dasbor dan
   butuh izin `logs.read`. Akun robot tidak memilikinya, jadi tidak berpengaruh.
+
+## Open Assistant lewat dasbor dan mesin per folder (1 Okt 2026, V11–V12)
+
+Untuk tim Studio/robot. Rinciannya di 2.10, Bagian 5, dan Bagian 6; di sini yang perlu
+diketahui dan cara mengujinya.
+
+**Usulan kalian sudah jalan di Orchestrator.** PR #3 (`GET /api/agent/triggers`) → 2.10;
+PR #4 (masuk lewat dasbor) → Bagian 5, dengan jawaban pertanyaan PR #4 dan
+`CATATAN-IDENTITAS-OPEN-ASSISTANT.md` di 5.6–5.7. Kemampuannya `agent.triggers` dan
+`assistant.signin` di `/api/health`. Satu beda dari usulan: cron **lima ruas**, bukan enam.
+
+**Yang WAJIB diubah: tidak ada.** Semuanya menambah; JakRunner, Robot Agent (v1 maupun v2),
+dan Studio yang sekarang tetap bekerja.
+
+**Yang berubah perilakunya — mesin per folder (V12, Bagian 6):**
+
+- Robot hanya mengambil job dari folder tempat **mesinnya terdaftar**, selain robotnya
+  ditugaskan ke folder itu. Berlaku untuk semua robot, attended juga (JakRunner, Open
+  Assistant). Mesin baru — dibuat di dasbor, lahir dari denyut pertama, atau dari masuk Open
+  Assistant — otomatis terdaftar di **Shared**, jadi uji di Shared tidak berubah. Untuk
+  folder lain: dasbor › Setelan folder › tab **Mesin** › Tambah Mesin, atau tombol
+  **Daftarkan mesin** di tab Robot.
+- Mesin berkeadaan **Pemeliharaan** atau **Nonaktif** (Tenant › Robot › Mesin › Ubah) tidak
+  mengambil job baru; job yang sedang berjalan dibiarkan selesai.
+- `POST /api/jobs` (activity Start Job) bisa menjawab `409` dengan `errorCode`
+  `MACHINE_NOT_ASSIGNED_TO_FOLDER` atau `MACHINE_NOT_AVAILABLE` (6.3) — juga untuk
+  permintaan yang hanya menyebut `robotName`, kalau mesin robot itu tidak terdaftar di folder
+  prosesnya.
+- `GET /api/agent/triggers` hanya menyebut pemicu di folder tempat mesin agent terdaftar.
+- Orchestrator di Docker tidak lagi membuat mesin bernama host container setiap kali naik. Di
+  Docker uji yang baru, halaman Mesin kosong sampai robot pertama tersambung.
+
+**Yang disarankan, per komponen:**
+
+- **Open Assistant:** alur Bagian 5 — cek `assistant.signin`, buka `/assistant/connect` di
+  peramban, tangkap `openassistant://signin`, tukar kodenya di
+  `POST /api/auth/assistant/token`, simpan refresh token dengan DPAPI, dan perbarui sebelum
+  `expiresAt`. Robotnya (`robotName` di jawaban) dibuat server; tidak perlu mendaftarkan
+  robot sendiri. Tanpa `assistant.signin`, tetap pakai cara masuk yang sekarang.
+- **Studio — activity Start Job:** tampilkan `error` dari jawaban `409` apa adanya. Kalau
+  nanti ada pilihan mesin, ambil dari `GET /api/processes/{processId}/available-machines`,
+  bukan `GET /api/machines`.
+- **JakRunner dan Robot Agent:** tidak ada. Kalau job di folder selain Shared tidak pernah
+  diambil, periksa dulu apakah mesinnya terdaftar di folder itu.
+
+**Cara menguji mesin per folder (VM):**
+
+1. Dasbor: buat folder uji di akar (bukan subfolder — subfolder mewarisi mesin induknya),
+   pindahkan satu proses ke sana (Proses › **Pindahkan ke folder lain**), lalu tugaskan robot
+   VM ke folder itu (Setelan › Robot). Jangan daftarkan mesinnya dulu: tab Robot menandai
+   "Mesin ini belum terdaftar di folder ini", dan Start Job di dasbor belum bisa dijalankan
+   ("Tidak ada runtime yang tersedia … daftarkan mesin ke folder ini").
+2. Jalankan proses itu dari activity Start Job Studio tanpa robot → job dibuat tetapi
+   menunggu; robot VM tidak mengambilnya. Dengan `robotName` robot VM → `409`
+   `MACHINE_NOT_ASSIGNED_TO_FOLDER`.
+3. **Daftarkan mesin** di tab Robot → job tadi diambil pada klaim berikutnya (v1
+   `jobs/next`, v2 `jobs/claim`).
+4. Start Job di dasbor: pilihan Mesin hanya berisi mesin folder itu; mesin yang tidak online
+   tampil ○ dan tidak bisa dipilih. Hentikan agent → statusnya **Terputus** sesudah 60 detik
+   (robot v1: 45 detik).
+5. Mesin › Ubah › Keadaan **Pemeliharaan** → tidak ada job baru yang diambil; kembalikan ke
+   **Aktif** → diambil lagi.
+6. Setelan › Mesin › ⋮ › **Hapus dari Folder** → job baru folder itu tidak diambil lagi; job
+   yang sedang berjalan tidak terganggu.
+
+---
+
+# Bagian 5 — Open Assistant: masuk lewat dasbor (V11)
+
+Usulan tim robot (PR #4, `USULAN-ASSISTANT-SIGNIN.md`), diimplementasikan seperti
+diusulkan: OAuth 2.0 untuk aplikasi desktop (RFC 8252) dengan PKCE S256 (RFC 7636).
+Kemampuan `assistant.signin` di `/api/health`. Tidak ada sandi yang diketik di Open
+Assistant, dan tidak ada token di alamat.
+
+```
+Open Assistant                    Peramban / dasbor                       Orchestrator API
+  state, code_verifier (acak, di memori)
+  buka /assistant/connect?… ─────► belum masuk? → layar masuk, lalu kembali ke sini
+                                   "Sambungkan Open Assistant di PC-X sebagai Fajar?"
+                                   [Buka Open Assistant] ── POST /api/auth/assistant/code ─►
+  ◄── openassistant://signin?code=…&state=…
+  cocokkan state
+  POST /api/auth/assistant/token {code, codeVerifier, machineName, clientVersion} ─────────►
+  ◄──────────────────────────────── {token, expiresAt, refreshToken, user, robotName}
+  denyut / klaim job v1 sebagai robotName, dengan token itu
+```
+
+## 5.1 Halaman dasbor `GET /assistant/connect`
+
+| Parameter | Isi |
+|---|---|
+| `client` | `open-assistant` (hanya ini) |
+| `state` | penanda acak url-safe, 8–512 karakter (`[A-Za-z0-9._~=-]`) — dikembalikan apa adanya |
+| `code_challenge` | `BASE64URL(SHA256(code_verifier))`, 43 karakter |
+| `code_challenge_method` | `S256` (hanya ini) |
+| `redirect_uri` | `openassistant://signin` (hanya ini) |
+| `machine` | nama komputer, hanya untuk ditampilkan (opsional) |
+
+- Parameter yang salah → "Tautan sambungan tidak sah"; halaman tidak pernah meneruskan ke mana
+  pun.
+- Belum masuk → layar masuk dasbor, lalu kembali ke halaman ini dengan parameter yang sama.
+- Sudah masuk → kartu "Sambungkan Open Assistant? Open Assistant di **{machine}** akan
+  tersambung … sebagai **{nama}**" dengan **Buka Open Assistant** dan **Batal**, serta "Masuk
+  dengan akun lain". **Tidak pernah diteruskan otomatis tanpa klik.**
+- **Buka Open Assistant** → `openassistant://signin?code={kode}&state={state}`. Kodenya sekali
+  pakai, 256 bit, berlaku **60 detik**, terikat ke pengguna dan `code_challenge`. Halaman lalu
+  menampilkan "Kalau peramban bertanya, pilih Buka … tab ini boleh ditutup", dan tautan "Coba
+  buka lagi" selama kodenya belum dipakai.
+- **Batal** → `openassistant://signin?error=access_denied&state={state}`.
+- Peran tanpa izin `robots.update` (mis. Auditor) mendapat penjelasan, dan tombolnya mati.
+
+## 5.2 `POST /api/auth/assistant/token` (tanpa token)
+
+```json
+{ "code": "…", "codeVerifier": "…", "machineName": "DESKTOP-ILR0BGM", "clientVersion": "1.0.0.0" }
+```
+→ `200` (`Cache-Control: no-store`)
+```json
+{ "token": "eyJ…", "expiresAt": "2026-10-01T04:00:00.000000Z", "refreshToken": "…",
+  "user": { "username": "fajar", "displayName": "Fajar" },
+  "robotName": "fajar-DESKTOP-ILR0BGM" }
+```
+
+| Galat | Arti |
+|---|---|
+| `400` `errorCode: invalid_request` | `code` atau `codeVerifier` kosong |
+| `400` `errorCode: invalid_grant` | kode tidak dikenal, kedaluwarsa, atau sudah dipakai; atau `codeVerifier` salah |
+
+- Setiap percobaan **menghabiskan** kodenya — juga yang gagal karena verifier salah.
+- Kode yang dipakai **kedua kali** mencabut sambungan yang sudah terbit darinya.
+- `machineName` kosong → dipakai `machine` yang disebut di peramban.
+
+## 5.3 `POST /api/auth/assistant/refresh` dan `/logout` (tanpa token)
+
+- `refresh` `{ "refreshToken": "…" }` → bentuk yang sama dengan 5.2: token **dan** refresh
+  token baru (rotasi; yang lama langsung tidak berlaku). Refresh token LAMA yang dipakai lagi
+  dianggap disalin orang lain: **seluruh sambungan dicabut**. `401 invalid_grant` = sambungan
+  berakhir atau dicabut → tampilkan "Sesi berakhir" dan halaman Hubungkan. `400
+  invalid_request` kalau kosong.
+- `logout` `{ "refreshToken": "…" }` → `200 {"ok": true}`, idempoten. Untuk tombol Putuskan.
+
+## 5.4 Token akses
+
+- Token pengguna biasa (`Authorization: Bearer`), berlaku **1 jam**, membawa id sambungannya.
+  Sambungan yang dicabut memutusnya **seketika**: `401 errorCode: AssistantSessionRevoked`.
+- Izinnya = izin peran pengguna yang juga termasuk pekerjaan robot attended: `robots.read`,
+  `robots.update` (denyut), `jobs.read`/`create`/`update`, `processes.read`, `packages.read`,
+  `triggers.read` (halaman Jadwal), `logs.create`, `assets.read`, `queues.read`/`update`,
+  `buckets.read`/`update`. Administrator pun tidak mendapat izin mengelola penyewa lewat token
+  ini. Endpoint untuk orang hanya bisa dibaca (`GET /api/auth/me`, folder); mengubah profil
+  atau sandi → `403`.
+- Dipakai seperti akun robot v1: `POST /api/robots/{robotName}/heartbeat`,
+  `GET /api/jobs/next?robot={robotName}`, laporan state, `POST /api/logs`, jadwal
+  `GET /api/triggers?folderId=`, dan `session.json` job (activity).
+
+## 5.5 Dasbor
+
+- Menu profil › **Open Assistant tersambung**: mesin, robot, versi, terakhir aktif, dengan
+  tombol **Cabut**.
+- Semua sambungan seseorang dicabut otomatis saat ia mengganti sandi, sandinya direset admin,
+  atau akunnya dinonaktifkan atau dihapus.
+
+## 5.6 Jawaban pertanyaan PR #4
+
+1. **Robot attended dibuat otomatis** saat masuk pertama: tipe `Attended`, pemilik = pengguna
+   itu, masuk folder bawaan seperti robot baru lain. Namanya `{username}-{komputer}` (selain
+   huruf, angka, titik, garis bawah, dan tanda hubung menjadi `-`), mis.
+   `fajar-DESKTOP-ILR0BGM`. Kalau nama itu sudah dipakai robot lain (pemilik lain atau robot
+   unattended) → `-2`, `-3`, dan seterusnya.
+2. **Satu robot per pengguna + mesin**, bukan per pengguna: robot yang berdenyut dari dua
+   komputer sekaligus berganti mesin setiap denyut, dan job untuknya bisa diambil komputer
+   yang salah. Masuk lagi dari komputer yang sama memakai robot yang sama.
+3. **Umur:** token akses 1 jam; refresh token 30 hari, bergeser (setiap pembaruan
+   memperpanjangnya); kode 60 detik. **Tidak ada izin baru:** yang boleh menyambungkan adalah
+   peran yang punya `robots.update` — izin denyut robot (Administrator, Automation Developer,
+   Automation User, Robot). Token Open Assistant sendiri tidak bisa menyetujui sambungan baru.
+
+## 5.7 Jawaban `CATATAN-IDENTITAS-OPEN-ASSISTANT.md`
+
+1. **PC attended:** tonjolkan **Masuk lewat dasbor** — identitasnya pengguna, robotnya robot
+   attended milik pengguna itu, seperti UiPath. Machine key untuk mesin unattended (robot
+   diikat ke mesin, akun Windows robot). Machine key di PC attended tetap bisa (robot tipe
+   unattended dengan akun Windows = orang yang memakai PC), tapi bukan jalur utamanya.
+2. **Mesin tanpa robot:** halaman Machines kini menandai mesin yang agent-nya online tetapi
+   belum melayani robot unattended mana pun ("Belum ada robot").
+3. **Nama komputer:** halaman Machines menampilkan nama komputer dari login agent
+   (`agentHostName`) di bawah nama mesin kalau keduanya berbeda.
+
+---
+
+# Bagian 6 — Mesin per folder (V12)
+
+Seperti Machines di folder UiPath: mesin **didaftarkan** ke folder, terpisah dari penugasan
+robot. Kemampuan `folder.machines` di `/api/health`.
+
+## 6.1 Aturan
+
+- Robot mengambil job sebuah folder hanya kalau (1) robotnya ditugaskan ke folder itu — atau
+  job-nya menyebut robot itu langsung — **dan** (2) **mesinnya terdaftar di folder itu** dan
+  keadaannya `Active`. Berlaku untuk `GET /api/jobs/next` (v1: JakRunner, Open Assistant)
+  dan `POST /api/agent/jobs/claim` (v2). Yang tidak memenuhi: tidak mendapat job (seperti
+  antrean kosong), bukan galat.
+- Mesin robot v1 = mesin bernama `machineName` di denyutnya; robot v2 = mesin yang diikat.
+- **Migrasi:** setiap mesin didaftarkan ke folder tempat robotnya bekerja; mesin tanpa robot
+  ke folder bawaan (Shared). Setup yang ada tetap jalan.
+- **Mesin baru** — dibuat di dasbor, lahir dari denyut robot, atau dari masuk Open Assistant
+  — otomatis terdaftar di **Shared**, seperti robot baru. Untuk folder lain, admin
+  mendaftarkannya: Setelan folder › tab **Mesin** › Tambah Mesin, atau **Daftarkan mesin** di
+  tab Robot (robot yang mesinnya belum terdaftar diberi tanda). Subfolder baru mewarisi mesin
+  induknya.
+- **Attended juga:** PC orang yang memakai Open Assistant/JakRunner harus terdaftar di folder
+  proses yang dijalankannya. Kalau job di folder selain Shared tidak pernah diambil, periksa
+  ini dulu.
+- Mesin yang ditanam server saat naik (nama host container) tidak didaftarkan ke folder mana
+  pun.
+- Mesin yang dikeluarkan dari folder tetap ada; job yang sedang berjalan di sana tidak
+  dihentikan.
+
+## 6.2 Keadaan dan status mesin
+
+- `state` (Tenant › Robot › Mesin › Ubah): `Active` | `Maintenance` (sementara tidak
+  mengambil job baru) | `Disabled` (tidak dipakai; juga tidak bisa didaftarkan ke folder).
+  Job yang sedang berjalan dibiarkan selesai.
+- `status` (dihitung server): `DISABLED` / `MAINTENANCE` dari keadaannya; `ONLINE` kalau
+  Robot Agent-nya, atau robot v1 di sana, baru berdenyut; `DISCONNECTED` kalau pernah
+  tersambung lalu hilang; selebihnya `OFFLINE`.
+
+## 6.3 `POST /api/jobs` (Start Job, termasuk activity Studio)
+
+Medan lama tetap. Tambahan opsional: `processId` (menentukan proses dan foldernya) dan
+`machineId` (sama dengan `machineName`, lewat id). Penolakan baru:
+
+| Kasus | Jawaban |
+|---|---|
+| Mesin yang diminta tidak terdaftar di folder proses (atau tidak dikenal) | `409`, `errorCode: MACHINE_NOT_ASSIGNED_TO_FOLDER` |
+| Hanya `robotName`, dan mesin robot itu (yang dikenal) tidak terdaftar di folder proses | `409`, `MACHINE_NOT_ASSIGNED_TO_FOLDER` |
+| Mesin terdaftar tapi tidak `ONLINE` | `409`, `errorCode: MACHINE_NOT_AVAILABLE`, `state` = statusnya |
+| `processId` tidak dikenal | `404` |
+
+"Mesin mana pun" (tanpa mesin) tetap diterima walau belum ada mesin online — job menunggu,
+dan hanya diambil mesin folder itu. Jalankan Ulang job yang meminta mesin atau robot yang
+mesinnya sudah dikeluarkan dari folder juga `409 MACHINE_NOT_ASSIGNED_TO_FOLDER`. Pemicu tidak
+diperiksa saat membuat job (job-nya menunggu sampai mesinnya terdaftar).
+
+```json
+{ "error": "Mesin 'RPA-PROD-03' sedang offline, jadi tidak bisa dipilih. Pilih mesin yang online, atau Mesin mana pun.",
+  "errorCode": "MACHINE_NOT_AVAILABLE", "state": "OFFLINE" }
+```
+
+## 6.4 Endpoint (token pengguna)
+
+| Endpoint | Siapa / jawaban |
+|---|---|
+| `GET /api/folders/{folderId}/machines` | yang boleh membuka folder itu |
+| `GET /api/folders/{folderId}/available-machines` | pengelola folder (`folders.update`); pemilik Folder Saya hanya melihat mesin tempat robotnya sendiri bekerja |
+| `POST /api/folders/{folderId}/machines` `{"machineId"}` | sama; sudah terdaftar → `409 MACHINE_ALREADY_ASSIGNED`; Disabled → `400` |
+| `POST /api/folders/{folderId}/machines/bulk` `{"machineIds": [...]}` | sama; satu transaksi (satu ditolak = semua batal), paling banyak 100 → `{"added", "skipped"}` |
+| `DELETE /api/folders/{folderId}/machines/{machineId}` | sama; tidak terdaftar → `404` |
+| `GET /api/processes/{processId}/available-machines?runtimeType=` | `jobs.create` + akses ke folder proses |
+
+```json
+{ "processId": "…", "processName": "Tagihan", "folderId": "…",
+  "machines": [
+    { "id": "…", "name": "RPA-PROD-01", "hostname": "rpa-prod-01", "type": "Standard",
+      "state": "Active", "status": "ONLINE", "available": true, "slots": 2,
+      "runtimes": { "Production": 2 }, "folderRobots": 1, "assignedAt": "…", "assignedBy": "admin" },
+    { "id": "…", "name": "RPA-PROD-03", "hostname": null, "status": "OFFLINE", "available": false } ] }
+```
+
+`available` = bisa dipilih di Start Job (ONLINE dan punya runtime); yang lain dikirim supaya
+bisa ditampilkan tidak aktif beserta statusnya. Tambah/hapus tercatat di Audit (komponen
+Folder: "Tambah mesin" / "Keluarkan mesin").
+
+## 6.5 Untuk sisi robot
+
+- **Wajib: tidak ada.** Klien yang tidak mengenal medan atau endpoint baru tetap jalan.
+- **Studio (activity / tombol Start Job):** tampilkan `error` dari jawaban `409` apa adanya;
+  bercabang dengan `errorCode` kalau perlu. Kalau ada pilihan mesin, ambil dari
+  `GET /api/processes/{id}/available-machines`, bukan `GET /api/machines`.
+- **Open Assistant / JakRunner:** tidak ada perubahan; kalau job di folder selain Shared tidak
+  pernah diambil, mesinnya belum terdaftar di folder itu (6.1).
+- **Robot Agent:** tidak ada perubahan. `GET /api/agent/triggers` kini hanya menyebut pemicu
+  di folder tempat mesinnya terdaftar (2.10).

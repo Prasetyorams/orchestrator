@@ -26,6 +26,8 @@ import java.util.Map;
  * @param runtimeType    tipe runtime yang diminta; kosong = runtime mana pun
  * @param count          berapa kali prosesnya dijalankan ("Execute the process N times"); null = 1
  * @param countMalformed {@code count} dikirim tapi bukan bilangan bulat — "1.5", "-", "dua"
+ * @param processId      proses lewat id-nya (V12); kalau dikirim, ia yang menentukan nama dan foldernya
+ * @param machineId      mesin lewat id-nya (V12); kalau dikirim, ia yang menentukan {@code machineName}
  */
 public record CreateJobRequest(
         String processName,
@@ -37,7 +39,9 @@ public record CreateJobRequest(
         String folderId,
         String runtimeType,
         Integer count,
-        boolean countMalformed) {
+        boolean countMalformed,
+        String processId,
+        String machineId) {
 
     static final String DEFAULT_SOURCE = "Manual";
 
@@ -55,7 +59,9 @@ public record CreateJobRequest(
                 RequestBodies.text(body, "folderId"),
                 RequestBodies.trimmedText(body, "runtimeType"),
                 count,
-                rawCount != null && count == null);
+                rawCount != null && count == null,
+                RequestBodies.trimmedText(body, "processId"),
+                RequestBodies.trimmedText(body, "machineId"));
     }
 
     /**

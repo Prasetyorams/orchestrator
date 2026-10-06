@@ -21,10 +21,14 @@ import java.util.UUID;
  *       token yang diberikan saat job diambil. {@code userId} adalah id
  *       robotnya. Tokennya berhenti berlaku begitu job-nya selesai.</li>
  * </ul>
+ *
+ * <p>Pengguna yang masuk lewat Open Assistant ("masuk lewat dasbor") tetap
+ * {@link Kind#USER}, dengan {@code assistantSessionId}: tokennya bisa dicabut
+ * dari dasbor, dan izinnya dipersempit ke pekerjaan robot (PermissionService).
  */
 public record OpenOrchestratorPrincipal(UUID userId, UUID tenantId, String username, String role,
                                         Kind kind, UUID machineId, UUID robotId, UUID jobId, UUID folderId,
-                                        String keyId) {
+                                        String keyId, UUID assistantSessionId) {
 
     public enum Kind { USER, AGENT, EXECUTOR }
 
@@ -34,19 +38,26 @@ public record OpenOrchestratorPrincipal(UUID userId, UUID tenantId, String usern
 
     /** Pengguna: bentuk yang dipakai sejak sebelum Robot Agent ada. */
     public OpenOrchestratorPrincipal(UUID userId, UUID tenantId, String username, String role) {
-        this(userId, tenantId, username, role, Kind.USER, null, null, null, null, null);
+        this(userId, tenantId, username, role, Kind.USER, null, null, null, null, null, null);
     }
 
     /** @param keyId penanda machine key yang dipakai masuk; kunci yang diganti atau dicabut memutus tokennya */
     public static OpenOrchestratorPrincipal agent(UUID machineId, UUID tenantId, String machineName, String keyId) {
         return new OpenOrchestratorPrincipal(machineId, tenantId, machineName, AGENT_ROLE, Kind.AGENT,
-                machineId, null, null, null, keyId);
+                machineId, null, null, null, keyId, null);
     }
 
     public static OpenOrchestratorPrincipal executor(UUID robotId, UUID tenantId, String robotName, UUID jobId,
                                                      UUID folderId) {
         return new OpenOrchestratorPrincipal(robotId, tenantId, robotName, EXECUTOR_ROLE, Kind.EXECUTOR,
-                null, robotId, jobId, folderId, null);
+                null, robotId, jobId, folderId, null, null);
+    }
+
+    /** @param sessionId sambungan Open Assistant yang menerbitkan tokennya; dicabut, tokennya ikut berhenti */
+    public static OpenOrchestratorPrincipal assistant(UUID userId, UUID tenantId, String username, String role,
+                                                      UUID sessionId) {
+        return new OpenOrchestratorPrincipal(userId, tenantId, username, role, Kind.USER,
+                null, null, null, null, null, sessionId);
     }
 
     public boolean isUser() {
@@ -59,5 +70,10 @@ public record OpenOrchestratorPrincipal(UUID userId, UUID tenantId, String usern
 
     public boolean isExecutor() {
         return kind == Kind.EXECUTOR;
+    }
+
+    /** Pengguna yang memanggil lewat Open Assistant, bukan lewat dasbor. */
+    public boolean isAssistant() {
+        return assistantSessionId != null;
     }
 }

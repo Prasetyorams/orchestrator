@@ -184,6 +184,11 @@ public class JobRepository {
      * job yang meminta tipe runtime hanya oleh robot yang mesinnya punya
      * runtime tipe itu. Job tanpa tipe mendapat tipe pertama mesinnya — yang
      * benar-benar dipakai, dan yang tampil di kolom Runtime.
+     *
+     * <p>Sejak V12 mesin robotnya juga harus TERDAFTAR di folder job itu dan
+     * berkeadaan Active — juga untuk job yang menyebut nama robotnya. Mesin
+     * yang belum dikenal (denyut tanpa nama mesin) tidak mengambil job apa
+     * pun: tidak ada folder yang bisa memastikannya.
      */
     public Optional<Map<String, Object>> claimNext(UUID tenantId, String robotName) {
         return database.queryRows(V1_ROBOT_CTE + """
@@ -209,6 +214,7 @@ public class JobRepository {
                                                   AND fr.robot_id = (SELECT id FROM robot))))
                           AND (j.target_machine_name IS NULL
                                OR j.target_machine_name = (SELECT machine_name FROM robot))
+                          AND %s
                           AND (j.runtime_type IS NULL
                                OR EXISTS (SELECT 1 FROM machine_runtimes mr
                                            WHERE mr.machine_id = (SELECT machine_id FROM robot)
@@ -223,8 +229,26 @@ public class JobRepository {
                         FOR UPDATE OF j SKIP LOCKED)
              RETURNING id, process_name, robot_name, state, priority, input_json,
                        created_at, started_at, folder_id
-                """.formatted(RuntimeTypes.sqlOrder("mr.runtime_type")),
+                """.formatted(RuntimeTypes.sqlOrder("mr.runtime_type"),
+                        machineServesFolder("(SELECT machine_id FROM robot)")),
                 tenantId, robotName, robotName, tenantId, robotName).stream().findFirst();
+    }
+
+    /**
+     * Mesin itu terdaftar di folder job {@code j} (V12) dan berkeadaan Active:
+     * syarat setiap klaim, v1 maupun Robot Agent. Mesin dalam pemeliharaan
+     * atau yang dinonaktifkan tidak mengambil job baru; job yang sedang
+     * berjalan di sana tidak terganggu.
+     *
+     * @param machineIdSql ekspresi id mesin — dari kode, bukan dari masukan
+     */
+    static String machineServesFolder(String machineIdSql) {
+        return """
+                EXISTS (SELECT 1 FROM folder_machines fm
+                          JOIN machines fmm ON fmm.id = fm.machine_id
+                         WHERE fm.folder_id = j.folder_id
+                           AND fm.machine_id = %s
+                           AND fmm.state = 'Active')""".formatted(machineIdSql);
     }
 
     /**
@@ -251,7 +275,7 @@ public class JobRepository {
                                                            long avoidSeconds, List<String> freeRuntimeTypes) {
         List<Object> args = new ArrayList<>(List.of(robotName, robotId, machineName, machineId,
                 freeRuntimeTypes.getFirst(), leaseSeconds, tenantId, robotName, robotId, avoidSeconds, robotId,
-                machineName));
+                machineName, machineId));
         args.addAll(freeRuntimeTypes);
 
         return database.queryRows("""
@@ -278,6 +302,7 @@ public class JobRepository {
                                    AND j.created_at > now() - make_interval(secs => ?)
                                    AND EXISTS (SELECT 1 FROM jobs x WHERE x.id = j.retry_of AND x.robot_id = ?))
                           AND (j.target_machine_name IS NULL OR j.target_machine_name = ?)
+                          AND %s
                           AND (j.runtime_type IS NULL OR j.runtime_type IN (%s))
                         ORDER BY CASE j.priority
                                    WHEN 'High' THEN 0
@@ -288,7 +313,8 @@ public class JobRepository {
                         LIMIT 1
                         FOR UPDATE SKIP LOCKED)
              RETURNING id, process_name, folder_id, input_json, attempt, priority, lease_expires_at, runtime_type
-                """.formatted(Database.placeholders(freeRuntimeTypes.size())), args.toArray())
+                """.formatted(machineServesFolder("?"), Database.placeholders(freeRuntimeTypes.size())),
+                args.toArray())
                 .stream().findFirst();
     }
 

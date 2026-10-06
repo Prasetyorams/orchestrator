@@ -40,6 +40,8 @@ public class JwtService {
     static final String CLAIM_JOB_ID = "jobId";
     static final String CLAIM_FOLDER_ID = "folderId";
     static final String CLAIM_KEY_ID = "keyId";
+    /** Sambungan Open Assistant yang menerbitkan token pengguna ini (V11). */
+    static final String CLAIM_ASSISTANT_SESSION = "asid";
 
     static final String KIND_AGENT = "agent";
     static final String KIND_EXECUTOR = "executor";
@@ -68,6 +70,20 @@ public class JwtService {
                 CLAIM_TENANT_ID, tenantId.toString(),
                 CLAIM_USERNAME, username,
                 CLAIM_ROLE, role), Duration.ofMinutes(expirationMinutes)).token();
+    }
+
+    /**
+     * Token pengguna untuk Open Assistant yang masuk lewat dasbor: bentuk token
+     * pengguna biasa, ditambah sambungan yang menerbitkannya — mencabut
+     * sambungan itu menghentikan tokennya.
+     */
+    public IssuedToken issueAssistantToken(UUID userId, UUID tenantId, String username, String role,
+                                           UUID sessionId, Duration ttl) {
+        return sign(userId, Map.of(
+                CLAIM_TENANT_ID, tenantId.toString(),
+                CLAIM_USERNAME, username,
+                CLAIM_ROLE, role,
+                CLAIM_ASSISTANT_SESSION, sessionId.toString()), ttl);
     }
 
     /** Token Robot Agent: hanya berlaku di /api/agent. */
@@ -139,6 +155,13 @@ public class JwtService {
         }
 
         if (kind != null) throw new IllegalArgumentException("Jenis token tidak dikenal: " + kind);
+
+        String assistantSession = claims.get(CLAIM_ASSISTANT_SESSION, String.class);
+
+        if (assistantSession != null) {
+            return OpenOrchestratorPrincipal.assistant(subject, tenantId, name, claims.get(CLAIM_ROLE, String.class),
+                    UUID.fromString(assistantSession));
+        }
 
         return new OpenOrchestratorPrincipal(subject, tenantId, name, claims.get(CLAIM_ROLE, String.class));
     }

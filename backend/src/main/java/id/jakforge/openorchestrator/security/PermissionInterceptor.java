@@ -2,6 +2,7 @@ package id.jakforge.openorchestrator.security;
 
 import id.jakforge.openorchestrator.common.ApiException;
 import id.jakforge.openorchestrator.service.AgentAccessService;
+import id.jakforge.openorchestrator.service.AssistantSignInService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -91,6 +92,18 @@ public class PermissionInterceptor implements HandlerInterceptor {
             signedIn(PUT, "/api/auth/me"),
             signedIn(POST, "/api/auth/password"),
 
+            // --- Open Assistant masuk lewat dasbor (ROBOT-API.md bagian 5) ---
+            //
+            // Menyetujui sambungan berarti menjalankan robot attended atas nama
+            // orang itu, jadi butuh izin denyut robot. Penukaran dan pembaruan
+            // token dibuktikan oleh kode + code_verifier atau refresh token.
+            requires(POST, "/api/auth/assistant/code", "robots.update"),
+            open(POST, "/api/auth/assistant/token"),
+            open(POST, "/api/auth/assistant/refresh"),
+            open(POST, "/api/auth/assistant/logout"),
+            signedIn(GET, "/api/auth/assistant/sessions"),
+            signedIn(DELETE, "/api/auth/assistant/sessions/{id}"),
+
             // --- beranda dan pencarian: isinya sudah disaring folder dan izin ---
             signedIn(GET, "/api/dashboard"),
             signedIn(GET, "/api/dashboard/history"),
@@ -109,9 +122,19 @@ public class PermissionInterceptor implements HandlerInterceptor {
             // Robot Folder Saya diatur pemiliknya sendiri; FolderService yang memutuskan.
             signedIn(POST, "/api/folders/{id}/robots"),
             signedIn(DELETE, "/api/folders/{id}/robots/{name}"),
+            // Mesin folder (V12): melihat = boleh membuka foldernya; mendaftarkan dan
+            // mengeluarkan = pengelola folder, atau pemilik Folder Saya untuk mesin
+            // robotnya sendiri. FolderMachineService yang memutuskan.
+            signedIn(GET, "/api/folders/{id}/machines"),
+            signedIn(GET, "/api/folders/{id}/available-machines"),
+            signedIn(POST, "/api/folders/{id}/machines"),
+            signedIn(POST, "/api/folders/{id}/machines/bulk"),
+            signedIn(DELETE, "/api/folders/{id}/machines/{machineId}"),
 
             // --- proses dan paket ---
             requires(GET, "/api/processes", "processes.read"),
+            // Mesin yang bisa dipilih Start Job: siapa pun yang boleh menjalankan job.
+            requires(GET, "/api/processes/{id}/available-machines", "jobs.create"),
             requires(POST, "/api/processes", "processes.create", "processes.update"),
             requires(PUT, "/api/processes/{name}/folder", "processes.update"),
             requires(DELETE, "/api/processes/{name}", "processes.delete"),
@@ -205,6 +228,7 @@ public class PermissionInterceptor implements HandlerInterceptor {
             agent(POST, "/api/agent/jobs/{id}/windows-credential"),
             agent(POST, "/api/agent/jobs/{id}/attachments"),
             agent(POST, "/api/agent/logs"),
+            agent(GET, "/api/agent/triggers"),
 
             // --- catatan dan peringatan ---
             requires(GET, "/api/logs", "logs.read"),
@@ -236,6 +260,7 @@ public class PermissionInterceptor implements HandlerInterceptor {
 
     private final PermissionChecker permissionChecker;
     private final AgentAccessService agentAccessService;
+    private final AssistantSignInService assistantSignInService;
 
     @Override
     public boolean preHandle(@NonNull HttpServletRequest request, @NonNull HttpServletResponse response,
@@ -258,6 +283,16 @@ public class PermissionInterceptor implements HandlerInterceptor {
 
         OpenOrchestratorPrincipal principal = CurrentPrincipal.find()
                 .orElseThrow(() -> ApiException.unauthorized(JwtAuthenticationFilter.INVALID_TOKEN_MESSAGE));
+
+        if (principal.isAssistant()) {
+            assistantSignInService.requireActive(principal);
+
+            // Endpoint untuk orang hanya dibaca: mengubah profil, sandi, atau
+            // folder tetap lewat dasbor, bukan lewat token yang tersimpan di PC.
+            if (rule.access() == Access.AUTHENTICATED && !GET.matches(request.getMethod())) {
+                throw ApiException.forbidden("Token Open Assistant tidak berlaku untuk endpoint ini. Pakai dasbor.");
+            }
+        }
 
         if (principal.isAgent()) {
             agentAccessService.requireCurrentKey(principal);

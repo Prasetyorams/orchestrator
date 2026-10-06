@@ -6,6 +6,7 @@ import id.jakforge.openorchestrator.config.OpenOrchestratorProperties;
 import id.jakforge.openorchestrator.dto.request.CreateMachineRequest;
 import id.jakforge.openorchestrator.dto.request.UpdateMachineRequest;
 import id.jakforge.openorchestrator.dto.response.MachineKeyResponse;
+import id.jakforge.openorchestrator.model.MachineStates;
 import id.jakforge.openorchestrator.model.RuntimeTypes;
 import id.jakforge.openorchestrator.repository.MachineRepository;
 import id.jakforge.openorchestrator.security.MachineKeys;
@@ -31,7 +32,7 @@ public class MachineService {
     /** Setiap mesin beserta runtime-nya ({@code runtimes}: tipe → jumlah). */
     public List<Map<String, Object>> findAll(OpenOrchestratorPrincipal principal) {
         List<Map<String, Object>> machines = machineRepository.findAll(principal.tenantId(),
-                properties.agent().offlineAfter().toSeconds());
+                properties.agent().offlineAfter().toSeconds(), properties.robot().heartbeatTimeout().toSeconds());
         Map<String, Map<String, Integer>> runtimes = machineRepository.findRuntimesForTenant(principal.tenantId());
 
         for (Map<String, Object> machine : machines) {
@@ -68,8 +69,12 @@ public class MachineService {
                 : request.slots() != null ? Map.of(RuntimeTypes.PRODUCTION, request.slots())
                 : null;
 
+        String state = request.state() == null ? null : MachineStates.parse(request.state()).orElseThrow(() ->
+                ApiException.badRequest("Keadaan mesin tidak dikenal: '" + request.state()
+                        + "'. Pilih Active, Maintenance, atau Disabled."));
+
         if (machineRepository.updateSettings(tenantId, name, request.type(), request.description(),
-                request.leaseSeconds()) == 0) {
+                request.leaseSeconds(), state) == 0) {
             throw machineNotFound(name);
         }
 

@@ -27,6 +27,25 @@ class AgentTokenTest {
         assertTrue(principal.isUser());
         assertEquals(userId, principal.userId());
         assertEquals("Administrator", principal.role());
+        assertTrue(!principal.isAssistant());
+    }
+
+    @Test
+    @DisplayName("token Open Assistant: pengguna yang sama, ditambah sambungan yang menerbitkannya")
+    void assistantToken() {
+        UUID userId = UUID.randomUUID();
+        UUID tenantId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+
+        var issued = jwt.issueAssistantToken(userId, tenantId, "fajar", "Automation User", sessionId, Duration.ofHours(1));
+        OpenOrchestratorPrincipal principal = jwt.parsePrincipal(issued.token());
+
+        assertTrue(principal.isUser());
+        assertTrue(principal.isAssistant());
+        assertEquals(userId, principal.userId());
+        assertEquals("fajar", principal.username());
+        assertEquals("Automation User", principal.role());
+        assertEquals(sessionId, principal.assistantSessionId());
     }
 
     @Test

@@ -15,6 +15,8 @@ import org.springframework.stereotype.Component;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.UUID;
 
 /**
@@ -32,7 +34,8 @@ import java.util.UUID;
  *   <li><b>Mesin tempat OpenOrchestrator berjalan.</b> Namanya baru diketahui saat
  *       dijalankan. Tanpa barisnya, denyut pertama dari JakRunner tiba untuk
  *       mesin yang belum dikenal dan halaman Machines kosong padahal jelas ada
- *       satu yang aktif.</li>
+ *       satu yang aktif. Di dalam container hanya kalau namanya disetel —
+ *       lihat {@link #seedLocalMachine}.</li>
  * </ol>
  *
  * <p>Keduanya diperiksa dulu, bukan disisipkan buta. Ini berjalan setiap kali
@@ -51,6 +54,9 @@ public class InitialDataSeeder implements ApplicationRunner {
     static final String FALLBACK_MACHINE_NAME = "openorchestrator";
 
     private static final String LOCAL_MACHINE_DESCRIPTION = "Mesin tempat OpenOrchestrator berjalan.";
+
+    /** Penanda yang dibuat Docker dan Podman di akar setiap container. */
+    private static final Path[] CONTAINER_MARKERS = {Path.of("/.dockerenv"), Path.of("/run/.containerenv")};
 
     private final TenantRepository tenantRepository;
     private final UserRepository userRepository;
@@ -85,22 +91,38 @@ public class InitialDataSeeder implements ApplicationRunner {
     }
 
     /**
-     * Nama mesin di dalam container adalah nama CONTAINER, bukan nama komputer
-     * yang sebenarnya. Itu tidak apa-apa: yang penting barisnya ada supaya
-     * denyut robot punya tempat mendarat, dan robot mengirimkan nama mesinnya
-     * sendiri saat berdenyut.
+     * Mesin bernama host komputer ini, supaya JakRunner di komputer yang sama
+     * punya tempat mendarat.
+     *
+     * <p>Di dalam container nama host adalah nama CONTAINER: acak, dan baru
+     * setiap kali container dibuat ulang. Robot mana pun mengirim nama
+     * mesinnya sendiri, jadi baris itu tidak pernah dipakai — hanya menumpuk,
+     * satu per deploy, dan sejak V12 setiap mesin baru masuk folder bawaan
+     * sebagai pilihan Start Job yang selalu offline. Di container hanya nama
+     * yang disetel ({@code OPENORCHESTRATOR_MACHINE_NAME}) yang ditanam.
      */
     private void seedLocalMachine(UUID tenantId, OpenOrchestratorProperties.Bootstrap bootstrap) {
-        String machineName = resolveMachineName(bootstrap.machineName());
+        String configuredName = bootstrap.machineName();
+        boolean named = configuredName != null && !configuredName.isBlank();
+
+        if (!named && runningInContainer()) return;
+
+        String machineName = named ? configuredName.trim() : hostName();
 
         if (machineRepository.existsByName(tenantId, machineName)) return;
 
         machineRepository.insert(tenantId, machineName, MachineTypes.STANDARD, null, LOCAL_MACHINE_DESCRIPTION);
     }
 
-    private static String resolveMachineName(String configuredName) {
-        if (configuredName != null && !configuredName.isBlank()) return configuredName.trim();
+    private static boolean runningInContainer() {
+        for (Path marker : CONTAINER_MARKERS) {
+            if (Files.exists(marker)) return true;
+        }
 
+        return false;
+    }
+
+    private static String hostName() {
         try {
             return InetAddress.getLocalHost().getHostName();
         } catch (UnknownHostException e) {

@@ -2,8 +2,10 @@ package id.jakforge.openorchestrator.service;
 
 import id.jakforge.openorchestrator.common.ApiException;
 import id.jakforge.openorchestrator.config.OpenOrchestratorProperties;
+import id.jakforge.openorchestrator.model.MachineStates;
 import id.jakforge.openorchestrator.model.RoleNames;
 import id.jakforge.openorchestrator.model.RuntimeTypes;
+import id.jakforge.openorchestrator.repository.FolderMachineRepository;
 import id.jakforge.openorchestrator.repository.MachineRepository;
 import id.jakforge.openorchestrator.repository.RobotRepository;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
@@ -31,15 +33,21 @@ import java.util.UUID;
  * menawarkan pilihan yang lalu ditolak server — atau lebih buruk, server
  * menerima job yang menunggu selamanya.
  *
- * <p>Aturannya:
+ * <p>Aturannya (sejak V12, mesin per folder):
  * <ul>
- *   <li>Robot: ditugaskan ke folder itu, akunnya boleh mengambil job
- *       ({@code jobs.update}, aktif) — kecuali robot Robot Agent, yang masuk
- *       lewat machine key, bukan akun — dan mesinnya dikenal serta punya
- *       runtime.</li>
- *   <li>Mesin: tempat robot-robot itu berjalan, yang punya runtime.</li>
- *   <li>Tipe runtime: yang dimiliki mesin-mesin itu.</li>
+ *   <li>Mesin: yang TERDAFTAR di folder itu dan punya runtime — bukan semua
+ *       mesin penyewa, dan bukan sekadar mesin tempat robot folder itu
+ *       bekerja.</li>
+ *   <li>Robot: ditugaskan ke folder itu, mesinnya terdaftar di folder itu, dan
+ *       akunnya boleh mengambil job ({@code jobs.update}, aktif) — kecuali
+ *       robot Robot Agent, yang masuk lewat machine key, bukan akun.</li>
+ *   <li>Tipe runtime: yang dimiliki mesin-mesin itu, kecuali mesin yang
+ *       dinonaktifkan.</li>
  * </ul>
+ *
+ * <p>Mesin yang DIPILIH harus online: memilih mesin yang mati berarti job yang
+ * menunggu tanpa kepastian. "Mesin mana pun" boleh menunggu — robot yang
+ * mengambilnya nanti pasti di mesin folder ini (lihat klaim di JobRepository).
  */
 @Service
 @RequiredArgsConstructor
@@ -48,8 +56,14 @@ public class StartJobOptionsService {
     /** Izin yang dipakai robot v1 untuk mengambil job (GET /api/jobs/next). */
     static final String CLAIM_PERMISSION = "jobs.update";
 
+    /** errorCode: mesin yang diminta tidak terdaftar di folder proses. */
+    public static final String MACHINE_NOT_ASSIGNED = "MACHINE_NOT_ASSIGNED_TO_FOLDER";
+    /** errorCode: mesin terdaftar, tetapi tidak online atau tidak aktif. */
+    public static final String MACHINE_NOT_AVAILABLE = "MACHINE_NOT_AVAILABLE";
+
     private final RobotRepository robotRepository;
     private final MachineRepository machineRepository;
+    private final FolderMachineRepository folderMachineRepository;
     private final OpenOrchestratorProperties properties;
 
     /** Satu robot yang bisa dipilih sebagai Akun. {@code self}: robot milik orang yang sedang membuka dasbor. */
@@ -57,21 +71,28 @@ public class StartJobOptionsService {
                               String userDisplayName, boolean self) {
     }
 
-    /** Satu mesin yang bisa dipilih. {@code runtimes}: tipe → jumlah, urutan katalog. */
-    public record MachineOption(String name, String type, boolean online, Map<String, Integer> runtimes) {
+    /**
+     * Satu mesin yang terdaftar di folder itu. {@code status}: ONLINE, OFFLINE,
+     * DISCONNECTED, MAINTENANCE, atau DISABLED ({@link MachineStates}).
+     * {@code runtimes}: tipe → jumlah, urutan katalog.
+     */
+    public record MachineOption(String id, String name, String type, boolean online, String status,
+                                Map<String, Integer> runtimes) {
     }
 
     /**
      * @param runtimeTypes katalog tipe runtime, urutan tampil
-     * @param machines     mesin folder ini yang punya runtime
+     * @param machines     mesin yang terdaftar di folder ini dan punya runtime
      * @param robots       robot folder ini yang bisa mengambil job di salah satu mesin itu
      */
     public record StartOptions(List<String> runtimeTypes, List<MachineOption> machines, List<RobotOption> robots) {
 
-        /** Tipe runtime yang dimiliki setidaknya satu mesin, urutan katalog. */
+        /** Tipe runtime yang dimiliki setidaknya satu mesin yang tidak dinonaktifkan, urutan katalog. */
         public List<String> availableRuntimeTypes() {
             Set<String> present = new LinkedHashSet<>();
-            machines.forEach(machine -> present.addAll(machine.runtimes().keySet()));
+            machines.stream()
+                    .filter(machine -> !MachineStates.DISABLED_STATUS.equals(machine.status()))
+                    .forEach(machine -> present.addAll(machine.runtimes().keySet()));
             return runtimeTypes.stream().filter(present::contains).toList();
         }
 
@@ -86,32 +107,28 @@ public class StartJobOptionsService {
 
     public StartOptions forFolder(OpenOrchestratorPrincipal principal, UUID folderId) {
         UUID tenantId = principal.tenantId();
-
-        List<Map<String, Object>> candidates = robotRepository.findForStartJob(tenantId, folderId).stream()
-                .filter(StartJobOptionsService::canClaim)
-                .filter(robot -> robot.get("machineName") != null)
-                .toList();
-
-        Set<String> machineNames = new LinkedHashSet<>();
-        candidates.forEach(robot -> machineNames.add((String) robot.get("machineName")));
-
         Map<String, Map<String, Integer>> runtimesById = machineRepository.findRuntimesForTenant(tenantId);
 
         List<MachineOption> machines = new ArrayList<>();
-        for (Map<String, Object> machine : machineRepository.findConnectionByNames(tenantId, machineNames,
+
+        for (Map<String, Object> machine : folderMachineRepository.findForFolder(tenantId, folderId,
                 properties.agent().offlineAfter().toSeconds(), properties.robot().heartbeatTimeout().toSeconds())) {
             Map<String, Integer> runtimes = runtimesById.getOrDefault((String) machine.get("id"), Map.of());
             if (runtimes.isEmpty()) continue;
 
-            machines.add(new MachineOption((String) machine.get("name"), (String) machine.get("type"),
-                    Boolean.TRUE.equals(machine.get("online")), new LinkedHashMap<>(runtimes)));
+            String status = (String) machine.get("status");
+
+            machines.add(new MachineOption((String) machine.get("id"), (String) machine.get("name"),
+                    (String) machine.get("type"), MachineStates.ONLINE.equals(status), status,
+                    new LinkedHashMap<>(runtimes)));
         }
 
-        Set<String> usableMachines = new LinkedHashSet<>();
-        machines.forEach(machine -> usableMachines.add(machine.name()));
+        Set<String> registered = new LinkedHashSet<>();
+        machines.forEach(machine -> registered.add(machine.name()));
 
-        List<RobotOption> robots = candidates.stream()
-                .filter(robot -> usableMachines.contains((String) robot.get("machineName")))
+        List<RobotOption> robots = robotRepository.findForStartJob(tenantId, folderId).stream()
+                .filter(StartJobOptionsService::canClaim)
+                .filter(robot -> robot.get("machineName") != null && registered.contains((String) robot.get("machineName")))
                 .map(robot -> new RobotOption(
                         (String) robot.get("name"),
                         (String) robot.get("type"),
@@ -130,6 +147,11 @@ public class StartJobOptionsService {
      * itu. Pesannya menyebut apa yang salah, bukan sekadar "tidak valid":
      * yang membacanya harus tahu apakah yang kurang runtime, mesin, atau
      * penugasan robotnya.
+     *
+     * <p>Mesin di luar folder proses dijawab {@code 409 MACHINE_NOT_ASSIGNED_TO_FOLDER}
+     * — termasuk yang dikirim tangan, tanpa dasbor. Mesin terdaftar yang
+     * tidak online (atau dalam pemeliharaan, atau dinonaktifkan) dijawab
+     * {@code 409 MACHINE_NOT_AVAILABLE}, dengan statusnya di {@code state}.
      */
     public void validate(StartOptions options, String runtimeType, String machineName, String robotName) {
         if (runtimeType != null && !options.availableRuntimeTypes().contains(runtimeType)) {
@@ -140,8 +162,14 @@ public class StartJobOptionsService {
         MachineOption machine = null;
 
         if (machineName != null) {
-            machine = options.machine(machineName).orElseThrow(() -> ApiException.badRequest(
-                    "Mesin '" + machineName + "' tidak tersedia di folder ini."));
+            machine = options.machine(machineName).orElseThrow(() -> ApiException.conflict(
+                    "Mesin '" + machineName + "' tidak terdaftar pada folder proses ini.").withCode(MACHINE_NOT_ASSIGNED));
+
+            if (!machine.online()) {
+                throw ApiException.conflict("Mesin '" + machineName + "' sedang " + statusWord(machine.status())
+                        + ", jadi tidak bisa dipilih. Pilih mesin yang online, atau Mesin mana pun.")
+                        .withCode(MACHINE_NOT_AVAILABLE).withState(machine.status());
+            }
 
             if (runtimeType != null && !machine.runtimes().containsKey(runtimeType)) {
                 throw ApiException.badRequest("Mesin '" + machineName + "' tidak punya runtime " + runtimeType + ".");
@@ -161,6 +189,42 @@ public class StartJobOptionsService {
                 throw ApiException.badRequest("Mesin robot '" + robotName + "' tidak punya runtime " + runtimeType + ".");
             }
         }
+    }
+
+    /**
+     * Permintaan yang hanya menyebut robot (Studio, Start Job lama): robotnya
+     * boleh saja belum dikenal, tapi robot yang dikenal di mesin yang TIDAK
+     * terdaftar di folder proses tidak akan pernah mengambil job itu.
+     */
+    public void requireRobotMachineInFolder(UUID tenantId, UUID folderId, String robotName) {
+        folderMachineRepository.findRobotMachine(tenantId, folderId, robotName)
+                .filter(row -> !Boolean.TRUE.equals(row.get("registered")))
+                .ifPresent(row -> {
+                    throw ApiException.conflict("Mesin '" + row.get("name") + "' tempat robot '" + robotName
+                            + "' bekerja tidak terdaftar pada folder proses ini.").withCode(MACHINE_NOT_ASSIGNED);
+                });
+    }
+
+    /**
+     * Jalankan ulang: mesin yang diminta job lama harus masih terdaftar di
+     * folder prosesnya. Statusnya tidak diperiksa — job ulangan boleh
+     * menunggu mesinnya online lagi.
+     */
+    public void requireMachineInFolder(UUID tenantId, UUID folderId, String machineName) {
+        if (!folderMachineRepository.isAssignedByName(tenantId, folderId, machineName)) {
+            throw ApiException.conflict("Mesin '" + machineName + "' tidak terdaftar pada folder proses ini.")
+                    .withCode(MACHINE_NOT_ASSIGNED);
+        }
+    }
+
+    /** "offline", "terputus", ... — untuk kalimat galat, sebelum diterjemahkan dasbor. */
+    static String statusWord(String status) {
+        return switch (status == null ? "" : status) {
+            case MachineStates.DISCONNECTED -> "terputus";
+            case MachineStates.MAINTENANCE_STATUS -> "dalam pemeliharaan";
+            case MachineStates.DISABLED_STATUS -> "dinonaktifkan";
+            default -> "offline";
+        };
     }
 
     /**

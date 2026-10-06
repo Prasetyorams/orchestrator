@@ -19,6 +19,7 @@ import id.jakforge.openorchestrator.repository.JobRepository;
 import id.jakforge.openorchestrator.repository.LogRepository;
 import id.jakforge.openorchestrator.repository.MachineRepository;
 import id.jakforge.openorchestrator.repository.RobotRepository;
+import id.jakforge.openorchestrator.security.AssistantSignIn;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
 import id.jakforge.openorchestrator.security.SecretBox;
 import lombok.RequiredArgsConstructor;
@@ -39,6 +40,8 @@ public class RobotService {
     private static final String ALERT_SOURCE = "robots";
     private static final String AUTO_REGISTERED_MACHINE_DESCRIPTION = "Terdaftar sendiri lewat denyut robot.";
     private static final String ATTENDED = "Attended";
+    private static final String SESSION_POLICY_DEFAULT = "Logoff";
+    private static final int MAX_ASSISTANT_NAME_ATTEMPTS = 20;
 
     private final RobotRepository robotRepository;
     private final MachineRepository machineRepository;
@@ -84,6 +87,11 @@ public class RobotService {
         if (robotRepository.existsByName(tenantId, name)) {
             robotRepository.recordHeartbeat(tenantId, name, heartbeat.machineName(), principal.username(),
                     status, heartbeat.cpuPercent(), heartbeat.memoryMb());
+
+            // Robot lama yang kini berdenyut dari komputer lain: mesin barunya
+            // didaftarkan juga (dan masuk folder bawaan, V12). Tanpa baris
+            // mesin, robot itu tidak bisa mengambil job di folder mana pun.
+            ensureMachineRegistered(tenantId, heartbeat.machineName());
         } else {
             robotRepository.registerFromHeartbeat(tenantId, name, heartbeat.machineName(), principal.username(),
                     status, heartbeat.cpuPercent(), heartbeat.memoryMb());
@@ -125,6 +133,52 @@ public class RobotService {
             logRepository.insertJobEntry(tenantId, LogLevel.INFO, "Robot melanjutkan pekerjaan.",
                     robotName, (String) job.get("processName"), Uuids.parseOrNull((String) job.get("id")));
         }
+    }
+
+    /**
+     * Robot attended untuk Open Assistant yang masuk lewat dasbor: satu per
+     * pengguna dan komputer ("fajar-DESKTOP-01"). Yang sudah ada dipakai lagi
+     * kalau memang milik pengguna itu dan bukan robot unattended; nama yang
+     * terpakai robot lain diberi akhiran "-2", "-3", dan seterusnya.
+     *
+     * <p>Dibuat di sini — bukan menunggu denyut pertama — supaya nama yang
+     * dijawab ke Open Assistant pasti miliknya, dan robotnya langsung tampil
+     * di dasbor.
+     *
+     * <p>Sengaja tanpa {@code @Transactional} sendiri: dipanggil di dalam
+     * transaksi penukaran kode, yang menyimpan tanda "kode sudah dipakai"
+     * walaupun langkah ini gagal. Transaksi bersarang yang gagal di sini akan
+     * menandai seluruh transaksi itu untuk dibatalkan.
+     *
+     * @return nama robot yang dipakai Open Assistant untuk denyut dan job
+     */
+    public String ensureAssistantRobot(UUID tenantId, String username, String machineName) {
+        String baseName = AssistantSignIn.robotNameFor(username, machineName);
+
+        for (int attempt = 1; attempt <= MAX_ASSISTANT_NAME_ATTEMPTS; attempt++) {
+            String name = attempt == 1 ? baseName : baseName + "-" + attempt;
+            Map<String, Object> robot = robotRepository.findByName(tenantId, name).orElse(null);
+
+            if (robot == null) {
+                robotRepository.insert(tenantId, name, machineName, username, ATTENDED, "Production",
+                        "Open Assistant (masuk lewat dasbor).", null, null, null, false, SESSION_POLICY_DEFAULT);
+
+                ensureMachineRegistered(tenantId, machineName);
+
+                alertRepository.insert(tenantId, Severity.Info, "Robot baru terdaftar",
+                        "Robot '" + name + "' dibuat untuk Open Assistant " + username + " di " + machineName + ".",
+                        ALERT_SOURCE);
+
+                return name;
+            }
+
+            if (username.equalsIgnoreCase((String) robot.get("username")) && robot.get("machineId") == null) {
+                return name;
+            }
+        }
+
+        throw ApiException.conflict("Nama robot untuk " + username + " di " + machineName
+                + " sudah dipakai robot lain. Ganti nama robot yang bentrok di dasbor, lalu sambungkan lagi.");
     }
 
     @Transactional

@@ -18,6 +18,7 @@ import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -88,6 +89,12 @@ public class AgentController {
     public LogWriteResponse writeLogs(@AuthenticationPrincipal OpenOrchestratorPrincipal principal,
                                       @RequestBody(required = false) Map<String, Object> body) {
         return agentService.writeLogs(principal, LogBatchRequest.fromBody(body));
+    }
+
+    /** Jadwal yang bisa jalan di mesin ini; {@code {"triggers": []}} kalau tidak ada. */
+    @GetMapping("/triggers")
+    public Map<String, Object> triggers(@AuthenticationPrincipal OpenOrchestratorPrincipal principal) {
+        return agentService.triggers(principal);
     }
 
     @PostMapping(value = "/jobs/{id}/attachments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

@@ -16,6 +16,8 @@ import java.util.Map;
  *                     seluruh runtime mesin; tipe yang tidak disebut atau bernilai 0 dihapus.
  *                     Jumlahnya menjadi batas job bersamaan di mesin ini, yang dibatasi lagi oleh
  *                     jumlah sesi interaktif yang dilaporkan Windows.
+ * @param state        Active, Maintenance (sementara tidak mengambil job baru), atau Disabled
+ *                     (tidak dipakai sama sekali) — V12
  */
 public record UpdateMachineRequest(
         String type,
@@ -26,9 +28,11 @@ public record UpdateMachineRequest(
         @Min(value = 30, message = "Lease minimal 30 detik.")
         @Max(value = 3600, message = "Lease paling lama 3600 detik.")
         Integer leaseSeconds,
-        Map<String, Integer> runtimes) {
+        Map<String, Integer> runtimes,
+        String state) {
 
     public UpdateMachineRequest {
         type = Strings.emptyToNull(type);
+        state = Strings.emptyToNull(state);
     }
 }

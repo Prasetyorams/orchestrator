@@ -128,6 +128,33 @@ class PermissionServiceTest {
         assertEquals("Peran Anda tidak punya izin 'assets.update'.", error.getMessage());
     }
 
+    @Test
+    @DisplayName("Open Assistant: izin peran dipotong ke pekerjaan robot — Administrator pun tidak bisa mengelola penyewa")
+    void assistantPermissionsAreNarrowed() {
+        OpenOrchestratorPrincipal admin = OpenOrchestratorPrincipal.assistant(UUID.randomUUID(), tenantId, "budi",
+                "Administrator", UUID.randomUUID());
+
+        Set<String> granted = serviceReading(new FakeUserRepository("Administrator", true, "*")).patternsOf(admin);
+
+        assertEquals(Set.copyOf(PermissionService.ASSISTANT_PERMISSIONS), granted);
+        assertTrue(granted.contains("robots.update") && granted.contains("triggers.read"));
+        assertFalse(granted.contains("users.update") || granted.contains("roles.create")
+                || granted.contains("robots.create") || granted.contains("*"));
+    }
+
+    @Test
+    @DisplayName("Open Assistant: tidak pernah LEBIH dari peran pemiliknya")
+    void assistantNeverExceedsRole() {
+        PermissionService permissions = serviceReading(new FakeUserRepository("Auditor", true, "*.read"));
+        OpenOrchestratorPrincipal auditor = OpenOrchestratorPrincipal.assistant(UUID.randomUUID(), tenantId, "budi",
+                "Auditor", UUID.randomUUID());
+
+        assertTrue(permissions.isAllowed(auditor, "triggers.read"));
+        assertFalse(permissions.isAllowed(auditor, "robots.update"));
+        assertFalse(permissions.isAllowed(auditor, "jobs.update"));
+        assertFalse(permissions.isAllowed(auditor, "users.read"));
+    }
+
     /** Satu baris users ⨝ roles, tanpa basis data. */
     private static final class FakeUserRepository extends UserRepository {
 

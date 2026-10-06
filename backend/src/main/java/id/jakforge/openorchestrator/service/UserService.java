@@ -33,6 +33,7 @@ public class UserService {
     private final FolderRepository folderRepository;
     private final RoleService roleService;
     private final PermissionService permissionService;
+    private final AssistantSignInService assistantSignInService;
 
     public List<Map<String, Object>> findAll(OpenOrchestratorPrincipal principal) {
         return userRepository.findAll(principal.tenantId());
@@ -106,6 +107,14 @@ public class UserService {
 
             userRepository.updatePasswordHashByUsername(tenantId, request.username(),
                     Passwords.hash(request.password()));
+
+            // Sandi direset — biasanya karena dikhawatirkan bocor. Open
+            // Assistant yang tersambung atas namanya ikut terputus.
+            assistantSignInService.revokeAllOf(tenantId, request.username(), "password_reset");
+        }
+
+        if (!request.isActive()) {
+            assistantSignInService.revokeAllOf(tenantId, request.username(), "user_deactivated");
         }
     }
 
@@ -141,6 +150,7 @@ public class UserService {
         }
 
         deletePersonalFolder(tenantId, username);
+        assistantSignInService.revokeAllOf(tenantId, username, "user_deleted");
 
         if (userRepository.deleteByUsername(tenantId, username) == 0) {
             throw ApiException.notFound("Pengguna tidak ada.");

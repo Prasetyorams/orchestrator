@@ -42,6 +42,7 @@ public class AuthService {
     private final UserRepository userRepository;
     private final JwtService jwtService;
     private final PermissionService permissionService;
+    private final AssistantSignInService assistantSignInService;
 
     @Transactional
     public LoginResponse login(LoginRequest request) {
@@ -144,6 +145,10 @@ public class AuthService {
         }
 
         userRepository.updatePasswordHash(principal.userId(), Passwords.hash(request.newPassword()));
+
+        // Sandi baru = semua Open Assistant yang tersambung atas nama orang ini
+        // perlu disambungkan lagi, sama seperti di UiPath.
+        assistantSignInService.revokeAllOf(principal.tenantId(), principal.username(), "password_changed");
 
         return StatusResponse.ok();
     }

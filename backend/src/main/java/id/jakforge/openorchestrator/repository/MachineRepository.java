@@ -1,11 +1,10 @@
 package id.jakforge.openorchestrator.repository;
 
+import id.jakforge.openorchestrator.model.MachineStates;
 import id.jakforge.openorchestrator.model.RuntimeTypes;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
-import java.util.ArrayList;
-import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,8 +23,11 @@ public class MachineRepository {
 
     private final Database database;
 
-    /** @param offlineSeconds tanpa denyut agent selama ini: Offline */
-    public List<Map<String, Object>> findAll(UUID tenantId, long offlineSeconds) {
+    /**
+     * @param offlineSeconds      tanpa denyut agent selama ini: Offline
+     * @param robotOnlineSeconds  denyut robot v1 selama ini masih berarti tersambung (untuk {@code status})
+     */
+    public List<Map<String, Object>> findAll(UUID tenantId, long offlineSeconds, long robotOnlineSeconds) {
         return database.queryRows("""
                 SELECT m.id, m.name, m.type, m.license_key, m.description, m.created_at,
                        m.slots, m.lease_seconds, m.key_hash IS NOT NULL AS has_key, m.key_prefix, m.key_created_at,
@@ -38,11 +40,21 @@ public class MachineRepository {
                          WHERE r.tenant_id = m.tenant_id AND r.machine_name = m.name) AS robot_count,
                        (SELECT count(*) FROM robots r WHERE r.machine_id = m.id) AS unattended_robot_count,
                        (SELECT count(*) FROM jobs j WHERE j.machine_id = m.id AND j.contract_version = 2
-                           AND j.state IN %s) AS active_jobs
+                           AND j.state IN %s) AS active_jobs,
+                       m.state, %s AS status,
+                       (SELECT array_agg(f.name ORDER BY lower(f.name))
+                          FROM folder_machines fm JOIN folders f ON f.id = fm.folder_id
+                         WHERE fm.machine_id = m.id AND f.owner_id IS NULL) AS folders
                   FROM machines m
                  WHERE m.tenant_id = ?
                  ORDER BY m.name
-                """.formatted(JobRepository.HELD_STATES), offlineSeconds, tenantId);
+                """.formatted(JobRepository.HELD_STATES,
+                MachineStates.statusSql("m", offlineSeconds, robotOnlineSeconds)), offlineSeconds, tenantId);
+    }
+
+    public Optional<String> findNameById(UUID tenantId, UUID machineId) {
+        return database.queryScalar("SELECT name FROM machines WHERE tenant_id = ? AND id = ?", tenantId, machineId)
+                .map(Object::toString);
     }
 
     public boolean existsByName(UUID tenantId, String name) {
@@ -82,16 +94,20 @@ public class MachineRepository {
      * Ubah setelan mesin; yang null tidak diubah. Versi setelannya naik supaya
      * agent mengambil yang baru. Jumlah slot tidak diubah di sini — slot
      * adalah jumlah runtime, lihat {@link #replaceRuntimes}.
+     *
+     * @param state Active, Maintenance, atau Disabled ({@link MachineStates}); null tidak diubah
      */
-    public int updateSettings(UUID tenantId, String name, String type, String description, Integer leaseSeconds) {
+    public int updateSettings(UUID tenantId, String name, String type, String description, Integer leaseSeconds,
+                              String state) {
         return database.update("""
                 UPDATE machines
                    SET type = COALESCE(?, type),
                        description = COALESCE(?, description),
                        lease_seconds = COALESCE(?, lease_seconds),
+                       state = COALESCE(?, state),
                        settings_version = settings_version + 1
                  WHERE tenant_id = ? AND name = ?
-                """, type, description, leaseSeconds, tenantId, name);
+                """, type, description, leaseSeconds, state, tenantId, name);
     }
 
     // -----------------------------------------------------------------
@@ -153,31 +169,6 @@ public class MachineRepository {
                 total, machineId);
     }
 
-    /**
-     * Mesin-mesin bernama itu, beserta apakah ada yang menyambung dari sana:
-     * Robot Agent-nya, atau robot v1 yang berdenyut dengan nama mesin itu.
-     */
-    public List<Map<String, Object>> findConnectionByNames(UUID tenantId, Collection<String> names,
-                                                           long agentOfflineSeconds, long robotTimeoutSeconds) {
-        if (names.isEmpty()) return List.of();
-
-        List<Object> args = new ArrayList<>(List.of(agentOfflineSeconds, robotTimeoutSeconds, tenantId));
-        args.addAll(names);
-
-        return database.queryRows("""
-                SELECT m.id, m.name, m.type,
-                       (m.last_agent_heartbeat_at IS NOT NULL
-                            AND now() - m.last_agent_heartbeat_at <= make_interval(secs => ?))
-                       OR EXISTS (SELECT 1 FROM robots r
-                                   WHERE r.tenant_id = m.tenant_id
-                                     AND r.machine_id IS NULL AND r.machine_name = m.name
-                                     AND r.last_heartbeat_at IS NOT NULL
-                                     AND now() - r.last_heartbeat_at <= make_interval(secs => ?)) AS online
-                  FROM machines m
-                 WHERE m.tenant_id = ? AND m.name IN (%s)
-                 ORDER BY m.name
-                """.formatted(Database.placeholders(names.size())), args.toArray());
-    }
 
     /** Pasang kunci baru; kunci lama langsung tidak berlaku. */
     public int setKey(UUID tenantId, String name, String keyHash, String keyPrefix) {
