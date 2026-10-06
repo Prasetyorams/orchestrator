@@ -816,6 +816,23 @@ export const EN: Record<string, string> = {
   "{0} robot folder ini": "{0} of this folder's robots",
   "Pemeliharaan": "Maintenance",
   "Keluarkan mesin": "Remove machine",
+
+  // Resolusi robot, sibuk lokal, pemicu catatan (V13–V14)
+  "0 = bawaan agent (1024x768). Hanya berlaku untuk robot yang sesinya dibuat agent (sandi Windows disimpan di Orchestrator). Sesi konsol/auto-logon memakai resolusi layar mesin.": "0 = agent default (1024x768). Only applies to robots whose session the agent creates (Windows password stored in Orchestrator). Console/auto-logon sessions use the machine's screen resolution.",
+  "Automasi lokal": "Local automation",
+  "Dijalankan di PC robot, di luar Orchestrator. Robot ini tidak diberi job sampai selesai.": "Running on the robot's PC, outside Orchestrator. This robot gets no jobs until it finishes.",
+  "Kedalaman warna": "Color depth",
+  "Lebar": "Width",
+  "Pemicu|jalan": "Trigger",
+  "Resolusi layar (unattended)": "Screen resolution (unattended)",
+  "Resolusi layar: lebar dan tinggi diisi berpasangan, masing-masing 200 sampai 8192 — atau keduanya 0 untuk bawaan agent (1024x768).": "Screen resolution: fill in width and height together, each 200 to 8192 — or both 0 for the agent default (1024x768).",
+  "Resolusi {0}": "Resolution {0}",
+  "Sandi robot ini disimpan di mesin robot, jadi sesinya bukan buatan agent dan resolusi ini tidak diterapkan.": "This robot's password is stored on the robot machine, so its session isn't created by the agent and this resolution isn't applied.",
+  "Sibuk (lokal)": "Busy (local)",
+  "sejak {0}": "since {0}",
+  "Job": "Job",
+  "Manual": "Manual",
+  "Jadwal lokal": "Local schedule",
 };
 
 /**
@@ -1172,4 +1189,9 @@ export const PESAN_EN: Record<string, string> = {
   "Di Folder Saya hanya bisa didaftarkan mesin tempat robot Anda sendiri bekerja.": "In My Workspace, you can only add machines where your own robots work.",
   "Proses tidak ada.": "Process not found.",
   "Keadaan mesin tidak dikenal: '{0}'. Pilih Active, Maintenance, atau Disabled.": "Unknown machine state: '{0}'. Choose Active, Maintenance, or Disabled.",
+
+  // --- galat: resolusi robot, pemicu catatan, versi paket (V13–V14) ---
+  "Kedalaman warna harus 0 (bawaan), 15, 16, 24, atau 32.": "Color depth must be 0 (default), 15, 16, 24, or 32.",
+  "Paket '{0}' versi {1} sudah ada. Naikkan versinya, lalu terbitkan lagi.": "Package '{0}' version {1} already exists. Bump the version, then publish again.",
+  "Pemicu tidak dikenal: '{0}'. Pilih job, manual, atau local-schedule.": "Unknown trigger: '{0}'. Choose job, manual, or local-schedule.",
 };

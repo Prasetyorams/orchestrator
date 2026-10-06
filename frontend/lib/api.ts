@@ -316,7 +316,21 @@ export type Robot = {
   currentJobId?: string | null;
   currentJobProcess?: string | null;
   currentJobState?: JobState | null;
+  /** Resolusi sesi unattended (V13); 0 = bawaan agent (1024x768). */
+  resolutionWidth?: number;
+  resolutionHeight?: number;
+  /** 0 (bawaan), 15, 16, 24, atau 32. */
+  resolutionDepth?: number;
+  /** Sedang menjalankan automasi lokal Open Assistant (V14) sejak kapan; null = tidak. */
+  busyLocalSince?: string | null;
+  busyLocalName?: string | null;
+  busyLocalTrigger?: PemicuLokal | null;
 };
+
+/** Pemicu jalan automasi (V14): job Orchestrator, Play manual, atau jadwal lokal Open Assistant. */
+export type PemicuJalan = "job" | "manual" | "local-schedule";
+export type PemicuLokal = Exclude<PemicuJalan, "job">;
+export const PEMICU_JALAN: PemicuJalan[] = ["job", "manual", "local-schedule"];
 
 export type Machine = {
   id: string;
@@ -362,6 +376,10 @@ export type RobotSetelan = {
   windowsPassword?: string;
   windowsPasswordLocal?: boolean;
   sessionPolicy?: "Logoff" | "KeepLoggedIn";
+  /** Resolusi sesi unattended (V13): lebar dan tinggi berpasangan, 0 = bawaan. */
+  resolutionWidth?: number;
+  resolutionHeight?: number;
+  resolutionDepth?: number;
 };
 
 export type Environment = {
@@ -506,6 +524,8 @@ export type LogLine = {
   processName: string | null;
   jobId: string | null;
   loggedAt: string;
+  /** Pemicu jalannya (V14); null untuk baris Orchestrator yang tidak menyebut pekerjaan. */
+  trigger?: PemicuJalan | null;
 };
 
 /**
@@ -527,6 +547,8 @@ export type SaringanLog = {
   to?: string;
   /** Potongan teks di pesan. */
   q?: string;
+  /** Pemicu jalan (V14). */
+  trigger?: PemicuJalan | "";
 };
 
 /**
@@ -548,6 +570,7 @@ function parameterLog(p?: SaringanLog & { limit?: number }) {
     from: p?.from || undefined,
     to: p?.to || undefined,
     q: p?.q?.trim() || undefined,
+    trigger: p?.trigger || undefined,
   };
 }
 

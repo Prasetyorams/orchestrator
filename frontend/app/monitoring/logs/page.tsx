@@ -3,7 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp, Columns3, Download, ListFilter, RotateCw, Search, X } from "lucide-react";
-import { OpenOrchestratorApi, errorText, type FolderNode, type LogLine, type SaringanLog } from "@/lib/api";
+import {
+  OpenOrchestratorApi,
+  PEMICU_JALAN,
+  errorText,
+  type FolderNode,
+  type LogLine,
+  type PemicuJalan,
+  type SaringanLog,
+} from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { cn, dateTimeOf } from "@/lib/utils";
 import { Badge, Button, Card, Galat } from "@/components/ui/primitives";
@@ -12,6 +20,7 @@ import { kelasIsian } from "@/components/Dialog";
 import { BilahAlat, PerluFolder } from "@/components/HalamanFolder";
 import { WARNA_TINGKAT } from "@/components/PilihTingkat";
 import { DaftarCentang, DaftarPilihan, DaftarSakelar, Munculan, PilSaringan, Pilihan } from "@/components/Saringan";
+import { labelPemicu } from "@/components/PekerjaanRobot";
 
 // Tanpa TRACE dan DEBUG: OpenOrchestrator tidak menyimpan maupun menampilkan tingkat
 // rincian (lihat LogLevel.rincian di backend), jadi pilihan itu selalu kosong.
@@ -44,14 +53,26 @@ type Saringan = {
   mesin: string;
   proses: string;
   host: string;
+  /** Pemicu jalan (V14): job, manual, local-schedule; "" = semua. */
+  pemicu: PemicuJalan | "";
   /** Satu pekerjaan — dari "Lihat Log Job Ini" di menu halaman Pekerjaan. */
   jobId: string;
 };
 
-const SARINGAN_AWAL: Saringan = { waktu: "", dari: "", sampai: "", tingkat: [], mesin: "", proses: "", host: "", jobId: "" };
+const SARINGAN_AWAL: Saringan = {
+  waktu: "",
+  dari: "",
+  sampai: "",
+  tingkat: [],
+  mesin: "",
+  proses: "",
+  host: "",
+  pemicu: "",
+  jobId: "",
+};
 
 /** Kolom yang bisa disembunyikan; Waktu dan Pesan selalu tampil. */
-const KOLOM_PILIHAN = ["Tingkat", "Robot|satu", "Mesin|satu", "Host Identity", "Proses|satu"];
+const KOLOM_PILIHAN = ["Tingkat", "Robot|satu", "Mesin|satu", "Host Identity", "Proses|satu", "Pemicu|jalan"];
 
 /** Pilihan kolom disimpan per peramban — kenyamanan tampilan, bukan data. */
 const KUNCI_KOLOM = "openorchestrator.catatan.kolom";
@@ -99,6 +120,7 @@ function IsiCatatan({ folder }: { folder: FolderNode }) {
       mesin: alamat.get("machine") ?? "",
       proses: alamat.get("process") ?? "",
       host: alamat.get("host") ?? "",
+      pemicu: PEMICU_JALAN.find((p) => p === alamat.get("trigger")) ?? "",
       jobId: alamat.get("jobId") ?? "",
     });
 
@@ -135,6 +157,7 @@ function IsiCatatan({ folder }: { folder: FolderNode }) {
     if (saringan.mesin) alamat.set("machine", saringan.mesin);
     if (saringan.proses) alamat.set("process", saringan.proses);
     if (saringan.host) alamat.set("host", saringan.host);
+    if (saringan.pemicu) alamat.set("trigger", saringan.pemicu);
     if (saringan.jobId) alamat.set("jobId", saringan.jobId);
     if (q) alamat.set("q", q);
 
@@ -152,6 +175,7 @@ function IsiCatatan({ folder }: { folder: FolderNode }) {
     machine: saringan.mesin,
     process: saringan.proses,
     host: saringan.host,
+    trigger: saringan.pemicu,
     time: saringan.waktu,
     from: khusus ? saringan.dari : undefined,
     to: khusus ? saringan.sampai : undefined,
@@ -201,6 +225,7 @@ function IsiCatatan({ folder }: { folder: FolderNode }) {
     (saringan.mesin ? 1 : 0) +
     (saringan.proses ? 1 : 0) +
     (saringan.host ? 1 : 0) +
+    (saringan.pemicu ? 1 : 0) +
     (saringan.jobId ? 1 : 0);
   const disaring = jumlahAktif > 0 || !!q;
 
@@ -283,6 +308,20 @@ function IsiCatatan({ folder }: { folder: FolderNode }) {
       judul: "Proses|satu",
       sel: (l) => <span className="text-muted">{l.processName ?? "-"}</span>,
       urut: (l) => l.processName,
+    },
+    {
+      // Job Orchestrator, atau jalan lokal Open Assistant di PC attended (V14).
+      kunci: "Pemicu|jalan",
+      judul: "Pemicu|jalan",
+      sel: (l) =>
+        l.trigger === "manual" || l.trigger === "local-schedule" ? (
+          <span className="whitespace-nowrap rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-warn">
+            {t(labelPemicu(l.trigger))}
+          </span>
+        ) : (
+          <span className="text-muted">{t(labelPemicu(l.trigger))}</span>
+        ),
+      urut: (l) => l.trigger,
     },
     { kunci: "Pesan", judul: "Pesan", sel: (l) => <span className="break-all">{tp(l.message)}</span> },
   ];
@@ -475,6 +514,25 @@ function IsiCatatan({ folder }: { folder: FolderNode }) {
                 kosong={belumAdaNilai}
                 onPilih={(host) => {
                   ubah({ host });
+                  tutup();
+                }}
+              />
+            )}
+          </PilSaringan>
+
+          <PilSaringan
+            label={t("Pemicu|jalan")}
+            nilai={saringan.pemicu ? t(labelPemicu(saringan.pemicu)) : t("Semua")}
+            aktif={!!saringan.pemicu}
+          >
+            {(tutup) => (
+              <DaftarPilihan
+                pilihan={PEMICU_JALAN}
+                nilai={saringan.pemicu}
+                labelSemua={t("Semua")}
+                label={(x) => t(labelPemicu(x))}
+                onPilih={(pemicu) => {
+                  ubah({ pemicu: pemicu as PemicuJalan | "" });
                   tutup();
                 }}
               />

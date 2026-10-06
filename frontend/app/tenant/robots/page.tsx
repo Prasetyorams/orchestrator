@@ -11,6 +11,7 @@ import { Badge, Button, Card, Galat, IconButton } from "@/components/ui/primitiv
 import { DataTable } from "@/components/DataTable";
 import { BilahAlat } from "@/components/HalamanFolder";
 import { Dialog, Isian, kelasIsian } from "@/components/Dialog";
+import { PekerjaanRobot } from "@/components/PekerjaanRobot";
 
 /**
  * Semua robot penyewa, dengan folder tempat masing-masing ditugaskan.
@@ -89,15 +90,7 @@ export default function RobotPenyewa() {
             },
             {
               judul: "Pekerjaan|satu",
-              sel: (r) =>
-                r.currentJobProcess ? (
-                  <span className="flex items-center gap-2">
-                    <span className="max-w-40 truncate">{r.currentJobProcess}</span>
-                    {r.currentJobState ? <Badge value={r.currentJobState} /> : null}
-                  </span>
-                ) : (
-                  <span className="text-muted">-</span>
-                ),
+              sel: (r) => <PekerjaanRobot robot={r} />,
             },
             {
               judul: "Folder",
@@ -169,8 +162,24 @@ function SelSesi({ robot }: { robot: Robot }) {
         </span>
       </span>
       {!siap && keterangan ? <span className="mt-0.5 text-xs text-warn">{keterangan}</span> : null}
+      {robot.resolutionWidth ? (
+        <span className="mt-0.5 text-xs text-muted">
+          {t("Resolusi {0}", `${robot.resolutionWidth}×${robot.resolutionHeight}${robot.resolutionDepth ? ` · ${robot.resolutionDepth}-bit` : ""}`)}
+        </span>
+      ) : null}
     </span>
   );
+}
+
+/** Kedalaman warna sesi RDP; 0 = bawaan klien RDP. */
+const KEDALAMAN_WARNA = [0, 32, 24, 16, 15];
+
+/** Lebar dan tinggi berpasangan: dua-duanya 0 (bawaan), atau dua-duanya 200–8192 — sama dengan server. */
+function periksaResolusi(lebar: string, tinggi: string): boolean {
+  const l = Number(lebar.trim() || "0");
+  const g = Number(tinggi.trim() || "0");
+  const sah = (n: number) => Number.isInteger(n) && n >= 200 && n <= 8192;
+  return (l === 0 && g === 0) || (sah(l) && sah(g));
 }
 
 const TIPE_ROBOT = ["Unattended", "Attended", "NonProduction"];
@@ -186,6 +195,9 @@ function DialogRobot({ robot, onTutup, onSelesai }: { robot: Robot | null; onTut
   const [sandi, setSandi] = useState("");
   const [sandiLokal, setSandiLokal] = useState(robot?.windowsPasswordLocal ?? false);
   const [kebijakan, setKebijakan] = useState<"Logoff" | "KeepLoggedIn">(robot?.sessionPolicy ?? "Logoff");
+  const [lebar, setLebar] = useState(robot?.resolutionWidth ? String(robot.resolutionWidth) : "");
+  const [tinggi, setTinggi] = useState(robot?.resolutionHeight ? String(robot.resolutionHeight) : "");
+  const [kedalaman, setKedalaman] = useState(robot?.resolutionDepth ?? 0);
   const [ket, setKet] = useState(robot?.description ?? "");
   const [galat, setGalat] = useState("");
 
@@ -203,6 +215,9 @@ function DialogRobot({ robot, onTutup, onSelesai }: { robot: Robot | null; onTut
               windowsPassword: sandiLokal ? undefined : sandi || undefined,
               windowsPasswordLocal: sandiLokal,
               sessionPolicy: kebijakan,
+              resolutionWidth: Number(lebar.trim() || "0"),
+              resolutionHeight: Number(tinggi.trim() || "0"),
+              resolutionDepth: kedalaman,
             }
           : {}),
       };
@@ -221,6 +236,9 @@ function DialogRobot({ robot, onTutup, onSelesai }: { robot: Robot | null; onTut
     if (!robot && !nama.trim()) return setGalat(t("Nama robot wajib diisi."));
     if (unattended && namaMesin && akun && !/[\\@]/.test(akun)) {
       return setGalat(t("Tulis akun Windows sebagai DOMAIN\\nama, atau .\\nama untuk akun lokal."));
+    }
+    if (unattended && !periksaResolusi(lebar, tinggi)) {
+      return setGalat(t("Resolusi layar: lebar dan tinggi diisi berpasangan, masing-masing 200 sampai 8192 — atau keduanya 0 untuk bawaan agent (1024x768)."));
     }
     simpan.mutate();
   }
@@ -309,6 +327,58 @@ function DialogRobot({ robot, onTutup, onSelesai }: { robot: Robot | null; onTut
               <option value="KeepLoggedIn">{t("Tetap login — untuk aplikasi yang harus terus terbuka")}</option>
             </select>
           </Isian>
+
+          <fieldset className="mb-3">
+            <legend className="mb-1 text-sm font-medium text-ink">{t("Resolusi layar (unattended)")}</legend>
+            <div className="grid grid-cols-3 gap-3">
+              <label className="block">
+                <span className="mb-1 block text-xs text-muted">{t("Lebar")}</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={8192}
+                  step={1}
+                  value={lebar}
+                  placeholder="0"
+                  onChange={(e) => setLebar(e.target.value)}
+                  className={kelasIsian}
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs text-muted">{t("Tinggi")}</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={8192}
+                  step={1}
+                  value={tinggi}
+                  placeholder="0"
+                  onChange={(e) => setTinggi(e.target.value)}
+                  className={kelasIsian}
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs text-muted">{t("Kedalaman warna")}</span>
+                <select value={kedalaman} onChange={(e) => setKedalaman(Number(e.target.value))} className={kelasIsian}>
+                  {KEDALAMAN_WARNA.map((k) => (
+                    <option key={k} value={k}>
+                      {k === 0 ? t("Bawaan") : `${k}-bit`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <span className="mt-1 block text-xs text-muted">
+              {t("0 = bawaan agent (1024x768). Hanya berlaku untuk robot yang sesinya dibuat agent (sandi Windows disimpan di Orchestrator). Sesi konsol/auto-logon memakai resolusi layar mesin.")}
+            </span>
+            {sandiLokal && (Number(lebar) > 0 || Number(tinggi) > 0) ? (
+              <span className="mt-1 block text-xs text-warn">
+                {t("Sandi robot ini disimpan di mesin robot, jadi sesinya bukan buatan agent dan resolusi ini tidak diterapkan.")}
+              </span>
+            ) : null}
+          </fieldset>
         </>
       ) : null}
 

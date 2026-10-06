@@ -9,6 +9,7 @@ import { dateTimeOf } from "@/lib/utils";
 import { Badge, Card } from "@/components/ui/primitives";
 import { DataTable } from "@/components/DataTable";
 import { BilahAlat, PerluFolder } from "@/components/HalamanFolder";
+import { PekerjaanRobot } from "@/components/PekerjaanRobot";
 
 /**
  * Robot yang ditugaskan ke folder ini, dengan keadaan hidupnya.
@@ -67,17 +68,9 @@ function IsiRobot({ folder }: { folder: FolderNode }) {
             },
             { judul: "Tipe", sel: (r) => r.type, urut: (r) => r.type },
             {
-              // Hanya robot Robot Agent yang melaporkan job-nya sendiri; robot v1 "-".
+              // Job Robot Agent, atau automasi lokal Open Assistant (V14); robot v1 "-".
               judul: "Pekerjaan|satu",
-              sel: (r) =>
-                r.currentJobProcess ? (
-                  <span className="flex items-center gap-2">
-                    <span className="max-w-40 truncate">{r.currentJobProcess}</span>
-                    {r.currentJobState ? <Badge value={r.currentJobState} /> : null}
-                  </span>
-                ) : (
-                  <span className="text-muted">-</span>
-                ),
+              sel: (r) => <PekerjaanRobot robot={r} />,
             },
             { judul: "Lingkungan|satu", sel: (r) => r.environment ?? "-", urut: (r) => r.environment },
             {

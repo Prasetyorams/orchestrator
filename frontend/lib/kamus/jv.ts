@@ -818,4 +818,21 @@ export const JV: Record<string, string> = {
   "{0} robot folder ini": "{0} robot folder iki",
   "Pemeliharaan": "Pangopènan",
   "Keluarkan mesin": "Wetokaké mesin",
+
+  // Resolusi robot, sibuk lokal, pemicu catatan (V13–V14)
+  "0 = bawaan agent (1024x768). Hanya berlaku untuk robot yang sesinya dibuat agent (sandi Windows disimpan di Orchestrator). Sesi konsol/auto-logon memakai resolusi layar mesin.": "0 = bawaan agent (1024x768). Mung ditrapaké kanggo robot sing sesiné digawé agent (sandi Windows disimpen ing Orchestrator). Sesi konsol/auto-logon nganggo resolusi layar mesin.",
+  "Automasi lokal": "Otomasi lokal",
+  "Dijalankan di PC robot, di luar Orchestrator. Robot ini tidak diberi job sampai selesai.": "Mlaku ing PC robot, ing njaba Orchestrator. Robot iki ora diwènèhi job nganti rampung.",
+  "Kedalaman warna": "Jero warna",
+  "Lebar": "Ambané",
+  "Pemicu|jalan": "Pemicu",
+  "Resolusi layar (unattended)": "Resolusi layar (unattended)",
+  "Resolusi layar: lebar dan tinggi diisi berpasangan, masing-masing 200 sampai 8192 — atau keduanya 0 untuk bawaan agent (1024x768).": "Resolusi layar: amba lan dhuwur diisi bebarengan, saben 200 nganti 8192 — utawa loro-loroné 0 kanggo bawaan agent (1024x768).",
+  "Resolusi {0}": "Resolusi {0}",
+  "Sandi robot ini disimpan di mesin robot, jadi sesinya bukan buatan agent dan resolusi ini tidak diterapkan.": "Sandi robot iki disimpen ing mesin robot, dadi sesiné dudu gawéan agent lan resolusi iki ora ditrapaké.",
+  "Sibuk (lokal)": "Sibuk (lokal)",
+  "sejak {0}": "wiwit {0}",
+  "Job": "Job",
+  "Manual": "Manual",
+  "Jadwal lokal": "Jadwal lokal",
 };
