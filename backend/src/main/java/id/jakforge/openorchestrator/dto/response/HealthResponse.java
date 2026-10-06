@@ -28,7 +28,11 @@ public record HealthResponse(String product, String status, String time, int con
             "jobs.kill",           // jawaban denyut membawa KillJob (BERSAMA StopJob) untuk job yang diminta dimatikan paksa
             "agent.triggers",      // GET /api/agent/triggers: jadwal yang bisa jalan di mesin agent
             "assistant.signin",    // Open Assistant masuk lewat dasbor (/assistant/connect + /api/auth/assistant)
-            "folder.machines");    // V12: mesin didaftarkan per folder; hanya mesin terdaftar yang mengambil job folder itu
+            "folder.machines",     // V12: mesin didaftarkan per folder; hanya mesin terdaftar yang mengambil job folder itu
+            "robots.resolution",   // V13: robots[] di login agent membawa resolutionWidth/Height/Depth
+            "heartbeat.busyLocal", // V14: denyut v1/v2 boleh menyebut busyLocal; robot itu tidak diberi job
+            "logs.trigger",        // V14: POST /api/logs menerima trigger per baris (manual, local-schedule)
+            "packages.versionConflict"); // POST /api/packages menolak versi yang sudah ada: 409 PACKAGE_VERSION_EXISTS
 
     static final List<Integer> API_VERSIONS = List.of(1, 2);
 

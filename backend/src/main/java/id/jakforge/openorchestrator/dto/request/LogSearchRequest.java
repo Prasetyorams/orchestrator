@@ -14,6 +14,7 @@ import java.util.Map;
  * @param from    awal rentang custom, ISO-8601; tanpa zona = zona tampilan
  * @param to      akhir rentang custom (tidak termasuk)
  * @param q       potongan teks yang dicari di pesan
+ * @param trigger pemicu jalan (V14): job, manual, atau local-schedule
  */
 public record LogSearchRequest(
         List<String> levels,
@@ -27,13 +28,14 @@ public record LogSearchRequest(
         String time,
         String from,
         String to,
-        String q) {
+        String q,
+        String trigger) {
 
     /** Bentuk lama: tanpa mesin, host identity, waktu, dan teks. */
     public static LogSearchRequest of(List<String> levels, String robot, String process, String jobId,
                                       String folderId, Integer limit) {
         return new LogSearchRequest(levels, robot, process, jobId, folderId, limit, null, null, null, null, null,
-                null);
+                null, null);
     }
 
     /**
@@ -54,7 +56,8 @@ public record LogSearchRequest(
                 first(params, "time"),
                 first(params, "from"),
                 first(params, "to"),
-                first(params, "q"));
+                first(params, "q"),
+                first(params, "trigger"));
     }
 
     private static String first(Map<String, List<String>> params, String name) {

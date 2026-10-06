@@ -7,8 +7,9 @@ import java.util.Map;
 /**
  * Penerbitan paket dari Studio (POST /api/packages), dibaca longgar.
  *
- * @param contentBase64 isi paket (.zip) sebagai base64; boleh kosong untuk
- *                      penerbitan ulang yang hanya memperbarui keterangan
+ * @param version       versi baru; yang sudah pernah terbit ditolak 409 (lihat PackageService#publish)
+ * @param description   keterangan versi ini — catatan rilis dari dialog Publish Studio
+ * @param contentBase64 isi paket (.zip) sebagai base64
  */
 public record PublishPackageRequest(String name, String version, String description, String entryPoint,
                                     String environment, String contentBase64) {

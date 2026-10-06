@@ -15,6 +15,8 @@ import jakarta.validation.constraints.Size;
  * @param windowsUsername      {@code DOMAIN&#92;user}, atau {@code .&#92;user} untuk akun lokal
  * @param windowsPasswordLocal sandinya disimpan di mesin robot, bukan di Orchestrator
  * @param sessionPolicy        sesudah job: {@code Logoff} (bawaan) atau {@code KeepLoggedIn}
+ * @param resolutionWidth      resolusi sesi unattended (V13); null atau 0 = bawaan agent. Lihat
+ *                             {@link id.jakforge.openorchestrator.model.RobotResolution}
  */
 public record CreateRobotRequest(
         @NotNull(message = "Nama robot wajib diisi.")
@@ -30,7 +32,10 @@ public record CreateRobotRequest(
         String windowsPassword,
         Boolean windowsPasswordLocal,
         @Pattern(regexp = "Logoff|KeepLoggedIn", message = "Kebijakan sesi harus Logoff atau KeepLoggedIn.")
-        String sessionPolicy) {
+        String sessionPolicy,
+        Integer resolutionWidth,
+        Integer resolutionHeight,
+        Integer resolutionDepth) {
 
     static final String DEFAULT_TYPE = "Unattended";
     static final String DEFAULT_ENVIRONMENT = "Production";
@@ -51,6 +56,6 @@ public record CreateRobotRequest(
     /** Bentuk lama tanpa setelan unattended. */
     public CreateRobotRequest(String name, String machineName, String username, String type, String environment,
                               String description) {
-        this(name, machineName, username, type, environment, description, null, null, null, null);
+        this(name, machineName, username, type, environment, description, null, null, null, null, null, null, null);
     }
 }

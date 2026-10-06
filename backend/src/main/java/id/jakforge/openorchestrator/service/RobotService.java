@@ -12,6 +12,7 @@ import id.jakforge.openorchestrator.model.JobCommands;
 import id.jakforge.openorchestrator.model.JobState;
 import id.jakforge.openorchestrator.model.LogLevel;
 import id.jakforge.openorchestrator.model.MachineTypes;
+import id.jakforge.openorchestrator.model.RobotResolution;
 import id.jakforge.openorchestrator.model.RobotStatus;
 import id.jakforge.openorchestrator.model.Severity;
 import id.jakforge.openorchestrator.repository.AlertRepository;
@@ -82,11 +83,15 @@ public class RobotService {
     @Transactional
     public HeartbeatResponse recordHeartbeat(OpenOrchestratorPrincipal principal, String name, HeartbeatRequest heartbeat) {
         UUID tenantId = principal.tenantId();
-        String status = RobotStatus.fromHeartbeat(heartbeat.status()).name();
+
+        // Robot yang sedang menjalankan automasi lokal (V14) sibuk, apa pun
+        // status yang ia sebut — dan tidak diberi job sampai selesai.
+        String status = heartbeat.localRun() != null ? RobotStatus.BUSY.name()
+                : RobotStatus.fromHeartbeat(heartbeat.status()).name();
 
         if (robotRepository.existsByName(tenantId, name)) {
             robotRepository.recordHeartbeat(tenantId, name, heartbeat.machineName(), principal.username(),
-                    status, heartbeat.cpuPercent(), heartbeat.memoryMb());
+                    status, heartbeat.cpuPercent(), heartbeat.memoryMb(), heartbeat.localRun());
 
             // Robot lama yang kini berdenyut dari komputer lain: mesin barunya
             // didaftarkan juga (dan masuk folder bawaan, V12). Tanpa baris
@@ -94,7 +99,7 @@ public class RobotService {
             ensureMachineRegistered(tenantId, heartbeat.machineName());
         } else {
             robotRepository.registerFromHeartbeat(tenantId, name, heartbeat.machineName(), principal.username(),
-                    status, heartbeat.cpuPercent(), heartbeat.memoryMb());
+                    status, heartbeat.cpuPercent(), heartbeat.memoryMb(), heartbeat.localRun());
 
             ensureMachineRegistered(tenantId, heartbeat.machineName());
 
@@ -161,7 +166,8 @@ public class RobotService {
 
             if (robot == null) {
                 robotRepository.insert(tenantId, name, machineName, username, ATTENDED, "Production",
-                        "Open Assistant (masuk lewat dasbor).", null, null, null, false, SESSION_POLICY_DEFAULT);
+                        "Open Assistant (masuk lewat dasbor).", null, null, null, false, SESSION_POLICY_DEFAULT,
+                        RobotResolution.DEFAULT);
 
                 ensureMachineRegistered(tenantId, machineName);
 
@@ -189,6 +195,9 @@ public class RobotService {
             throw ApiException.conflict("Robot '" + request.name() + "' sudah ada.");
         }
 
+        RobotResolution resolution = requireValid(RobotResolution.DEFAULT.with(request.resolutionWidth(),
+                request.resolutionHeight(), request.resolutionDepth()));
+
         ensureMachineRegistered(tenantId, request.machineName());
 
         UUID machineId = unattendedMachineId(tenantId, request.type(), request.machineName());
@@ -198,7 +207,7 @@ public class RobotService {
 
         robotRepository.insert(tenantId, request.name(), request.machineName(), request.username(),
                 request.type(), request.environment(), request.description(), machineId,
-                request.windowsUsername(), password, passwordLocal, request.sessionPolicy());
+                request.windowsUsername(), password, passwordLocal, request.sessionPolicy(), resolution);
 
         if (machineId != null) machineRepository.bumpSettingsVersion(machineId);
     }
@@ -240,8 +249,15 @@ public class RobotService {
         String password = passwordLocal || request.windowsPassword() == null ? null
                 : secretBox.protect(request.windowsPassword());
 
+        // Resolusi sesi (V13): yang dikirim di atas yang tersimpan. Mesinnya
+        // dinaikkan versi setelannya di bawah, jadi agent masuk ulang dan
+        // memakai resolusi baru pada job berikutnya.
+        RobotResolution resolution = requireValid(new RobotResolution(intOf(current.get("resolutionWidth")),
+                intOf(current.get("resolutionHeight")), intOf(current.get("resolutionDepth")))
+                .with(request.resolutionWidth(), request.resolutionHeight(), request.resolutionDepth()));
+
         robotRepository.updateConfig(tenantId, robotId, type, environment, description, machineId, machineName,
-                windowsUsername, password, passwordLocal, passwordLocal, sessionPolicy);
+                windowsUsername, password, passwordLocal, passwordLocal, sessionPolicy, resolution);
 
         if (oldMachineId != null) machineRepository.bumpSettingsVersion(oldMachineId);
         if (machineId != null && !Objects.equals(machineId, oldMachineId)) machineRepository.bumpSettingsVersion(machineId);
@@ -285,5 +301,15 @@ public class RobotService {
 
     private static ApiException robotNotFound(String name) {
         return ApiException.notFound("Robot '" + name + "' tidak ada.");
+    }
+
+    private static RobotResolution requireValid(RobotResolution resolution) {
+        String problem = resolution.problem();
+        if (problem != null) throw ApiException.badRequest(problem);
+        return resolution;
+    }
+
+    private static int intOf(Object value) {
+        return value instanceof Number number ? number.intValue() : 0;
     }
 }

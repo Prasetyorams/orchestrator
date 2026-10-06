@@ -133,13 +133,16 @@ public class AgentService {
         Map<UUID, Map<String, Object>> commands = new LinkedHashMap<>();
 
         for (AgentHeartbeatRequest.RobotReport report : request.robots()) {
-            String status = "Busy".equalsIgnoreCase(report.state()) ? RobotStatus.BUSY.name() : RobotStatus.AVAILABLE.name();
+            // Automasi lokal Open Assistant di PC attended (V14) juga membuat
+            // robotnya sibuk, walau agent sendiri sedang tidak memegang job.
+            boolean busy = "Busy".equalsIgnoreCase(report.state()) || report.localRun() != null;
+            String status = busy ? RobotStatus.BUSY.name() : RobotStatus.AVAILABLE.name();
 
             int updated = robotRepository.recordAgentReport(report.robotId(), machineId, status,
                     normalizeWord(report.state()), report.sessionId(), normalizeWord(report.sessionState()),
                     report.sessionReady(), truncate(report.reasonCode(), 60), truncate(report.reasonText(), 400),
                     normalizeWord(report.executorState()), report.executorPid(), request.cpuPercent(),
-                    request.memoryUsedMb());
+                    request.memoryUsedMb(), report.localRun());
 
             // Robot yang bukan milik mesin ini dilewati tanpa galat: bisa saja
             // baru dipindah ke mesin lain lewat dasbor, dan agent belum tahu.
@@ -237,9 +240,10 @@ public class AgentService {
      * Ambil job berikutnya untuk satu robot.
      *
      * <p>Kosong — bukan galat — kalau robot atau mesinnya belum bisa menerima
-     * job: sesinya tidak siap, sedang memegang job lain, akun Windows-nya
-     * gagal login, atau slot mesin penuh. Alasan itu terlihat di dasbor lewat
-     * denyutnya, bukan lewat jawaban klaim yang diulang tiap beberapa detik.
+     * job: sesinya tidak siap, sedang memegang job lain, sedang menjalankan
+     * automasi lokal Open Assistant (V14), akun Windows-nya gagal login, atau
+     * slot mesin penuh. Alasan itu terlihat di dasbor lewat denyutnya, bukan
+     * lewat jawaban klaim yang diulang tiap beberapa detik.
      */
     @Transactional
     public Optional<Map<String, Object>> claim(OpenOrchestratorPrincipal agent, String robotIdText) {
@@ -259,6 +263,7 @@ public class AgentService {
         if (robot.get("needsAttention") != null
                 || "Error".equalsIgnoreCase((String) robot.get("agentState"))
                 || Boolean.FALSE.equals(robot.get("sessionReady"))
+                || robot.get("busyLocalSince") != null
                 || jobRepository.robotHoldsJob(robotId)) {
             return Optional.empty();
         }

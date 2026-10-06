@@ -25,6 +25,15 @@ tetap jalan. **Tidak ada perubahan wajib di sisi robot**; yang baru untuk Studio
 dengan `errorCode` di `POST /api/jobs` (6.3). Diuji ujung-ke-ujung (120 pemeriksaan) dan
 dengan regresi v1.
 
+**Tambahan V13–V14** (`V13__resolusi_robot.sql`, `V14__sibuk_lokal_dan_pemicu_log.sql`), usulan tim
+robot PR #5, #6, dan #7: **resolusi layar robot unattended** per robot (2.2), **"sibuk lokal"** di
+denyut v1 dan v2 — robot yang sedang menjalankan automasi lokal Open Assistant tidak diberi job
+(Bagian 1, 2.3) — **pemicu baris catatan** (`trigger`), dan **versi paket yang sama ditolak
+`409`** seperti UiPath. Juga perbaikan: `/assistant/connect` di alamat API kini dialihkan ke
+dasbor (Bagian 5). Satu-satunya perilaku yang berubah: terbit ulang versi yang sama ditolak.
+Catatan untuk tim robot: Bagian 4 (6 Okt 2026). Diuji ujung-ke-ujung (55 pemeriksaan), dengan
+migrasi salinan data asli V11→V14, dan dengan regresi v1.
+
 Dokumen ini punya dua bagian:
 
 - **v1** — API untuk JakRunner (attended), Studio, activities `Custom.Orchestrator`, dan
@@ -59,13 +68,16 @@ Semua memakai `Authorization: Bearer <token>` dari login akun pengguna.
   "contract": 2,
   "capabilities": ["jobs.next.package", "packages.sha256", "heartbeat.commands", "jobs.state.guard",
                    "jobs.pause", "jobs.kill", "agent.triggers", "assistant.signin",
-                   "folder.machines"],
+                   "folder.machines", "robots.resolution", "heartbeat.busyLocal", "logs.trigger",
+                   "packages.versionConflict"],
   "apiVersions": [1, 2] }
 ```
 
 `contract` + `capabilities` = kemampuan tambahan v1 (lihat di bawah); `apiVersions` berisi 2
 kalau `/api/agent` tersedia. `agent.triggers` = 2.10, `assistant.signin` = Bagian 5,
-`folder.machines` = Bagian 6.
+`folder.machines` = Bagian 6,
+`robots.resolution` = 2.2, `heartbeat.busyLocal` = denyut v1 di bawah dan 2.3, `logs.trigger` dan
+`packages.versionConflict` = di bawah.
 
 ### `POST /api/auth/login`
 
@@ -75,7 +87,8 @@ kalau `/api/agent` tersedia. `agent.triggers` = 2.10, `assistant.signin` = Bagia
 
 ```json
 { "status": "BUSY", "cpuPercent": 3.5, "memoryMb": 210, "machineName": "PC-01",
-  "pausedJobId": "…", "pauseSource": "dashboard" }
+  "pausedJobId": "…", "pauseSource": "dashboard",
+  "busyLocal": true, "busyLocalName": "Rekap Harian", "busyLocalTrigger": "local-schedule" }
 ```
 → `200 {"ok": true, "serverTime": "…", "commands": [{"type": "StopJob", "jobId": "…"}]}`
 
@@ -98,6 +111,13 @@ kalau `/api/agent` tersedia. `agent.triggers` = 2.10, `assistant.signin` = Bagia
     **Dijeda**; job tetap `RUNNING` dan robot tetap `BUSY`. Jeda **lokal** tidak pernah
     dilanjutkan server — yang di depan PC itu yang memutuskan. Stop mengalahkan jeda: job
     `STOPPING` hanya mendapat `StopJob`. Lama jeda dicatat per job.
+- **heartbeat.busyLocal (V14):** `busyLocal: true` = robot sedang menjalankan automasi lokal
+  Open Assistant di PC attended (Play, atau jadwal lokal yang tidak disinkronkan), dengan
+  `busyLocalName` (nama automasinya, opsional, ≤ 200) dan `busyLocalTrigger` (`manual` atau
+  `local-schedule`, opsional). Selama denyut terakhir menyebutnya, `GET /api/jobs/next` menjawab
+  `{"job": null}`, status robot `BUSY`, dan dasbor menampilkan **Sibuk (lokal)** beserta nama
+  automasinya. Kirim di **setiap** denyut selama jalan lokal berlangsung; denyut tanpa
+  `busyLocal` (atau `false`) = tidak sibuk lokal.
 - Robot yang belum ada terdaftar otomatis, dengan akun yang dipakainya masuk sebagai
   pemiliknya (dipakai Start Job untuk "jalankan sebagai diri sendiri"). Robot yang diam lebih
   dari 45 detik tampil `DISCONNECTED`; job `RUNNING`-nya ditandai `FAULTED` sesudah 90 detik,
@@ -122,6 +142,8 @@ kalau `/api/agent` tersedia. `agent.triggers` = 2.10, `assistant.signin` = Bagia
   (lihat 2.9). Robot hanya mengambil job untuk mesinnya sendiri (mesin dari denyutnya), dan
   job bertipe runtime hanya kalau mesinnya punya runtime tipe itu. Job tanpa keduanya —
   dari Studio, pemicu, API lama — diambil seperti sebelumnya.
+- Robot yang denyut terakhirnya menyebut `busyLocal: true` (V14) tidak diberi job sampai
+  denyutnya berhenti menyebutnya.
 
 ### `POST /api/jobs/{id}/state`
 
@@ -137,6 +159,34 @@ kalau `/api/agent` tersedia. `agent.triggers` = 2.10, `assistant.signin` = Bagia
 ### `GET /api/packages`, `GET /api/packages/{nama}/{versi}/content`
 
 **packages.sha256:** daftar paket menyebut `sha256` (heksa kecil) isi paketnya.
+
+### `POST /api/packages` (Studio, Terbitkan)
+
+`{ "name": "Tagihan", "version": "1.0.4", "description": "catatan rilis", "entryPoint": "Main.xaml",
+"contentBase64": "…" }` → `200 {"ok": true, "name": …, "version": …, "sizeBytes": …}`
+
+- **packages.versionConflict:** versi yang sudah ada **ditolak** `409 {"error": "Paket 'Tagihan' versi
+  1.0.3 sudah ada. Naikkan versinya, lalu terbitkan lagi.", "errorCode": "PACKAGE_VERSION_EXISTS"}`
+  — seperti UiPath: isi sebuah versi tidak berubah sesudah terbit, karena job dan sidik SHA-256-nya
+  menunjuk versi itu. Sebelum ini versi yang sama ditimpa (izin `packages.update`). Versi yang
+  lebih rendah tapi belum ada tetap diterima. Izinnya `packages.create`.
+- `description` = keterangan **versi itu** (catatan rilis), tersimpan per versi. Deskripsi proses
+  hanya diisi saat proses pertama kali dibuat dari paket itu, dan tidak berganti di terbit
+  berikutnya.
+- "Versi terbaru" di dasbor dibandingkan per angka (`1.0.10` > `1.0.9`); proses memakai versi
+  yang **terakhir diterbitkan**.
+
+### `POST /api/logs` — pemicu baris (V14)
+
+`{ "lines": [ { "level": "Info", "message": "Mulai menjalankan Rekap Harian", "robotName": "PC-01",
+"trigger": "local-schedule" } ] }`
+
+- **logs.trigger:** `trigger` per baris, opsional: `manual` (Play di Open Assistant) atau
+  `local-schedule` (jadwal lokal); ejaan bebas (`Local_Schedule`) dibakukan, nilai lain
+  diabaikan tanpa menggagalkan kiriman. Baris yang menyebut `jobId` otomatis `job` (yang dikirim
+  robot tidak ditimpa).
+- Dasbor: kolom dan saringan **Pemicu** di halaman Catatan (Job / Manual / Jadwal lokal), juga di
+  ekspor CSV. `GET /api/logs?trigger=manual|local-schedule|job`; baris membawa `trigger`.
 
 ### Endpoint lain
 
@@ -204,6 +254,7 @@ Dasbor: **Tenant › Robots** → *Tambah robot* / ikon ubah (izin `robots.creat
 | Sandi Windows | **Hanya bisa ditulis**, disimpan tersandi (SecretBox). Kosong saat mengubah = tetap |
 | Sandi disimpan di mesin robot | W5: Orchestrator hanya menyimpan nama akun; agent memakai sandi lokalnya |
 | Sesudah job selesai | `Logoff` (bawaan) atau `KeepLoggedIn` |
+| Resolusi layar (V13) | Lebar × Tinggi: dua-duanya 0 (bawaan agent, 1024x768) atau dua-duanya 200..8192; kedalaman warna 0 (bawaan), 15, 16, 24, 32. Pada ubah, yang tidak dikirim tetap; pasangannya diperiksa sesudah digabung (`400` kalau tidak sah). Hanya untuk sesi yang dibuat agent |
 
 Mengubah robot atau mesin menaikkan `settingsVersion` mesin lama dan mesin baru.
 
@@ -220,7 +271,8 @@ Mengubah robot atau mesin menaikkan `settingsVersion` mesin lama dan mesin baru.
   "token": "eyJ…", "expiresAt": "…",
   "machine": { "id": "…", "name": "VM-ROBOT-01", "slots": 1, "leaseSeconds": 180 },
   "robots": [ { "id": "…", "name": "Robot_A", "windowsUsername": ".\\robot",
-                "sessionPolicy": "Logoff", "windowsPasswordLocal": false } ],
+                "sessionPolicy": "Logoff", "windowsPasswordLocal": false,
+                "resolutionWidth": 1920, "resolutionHeight": 1080, "resolutionDepth": 32 } ],
   "settings": { "heartbeatSeconds": 15, "heartbeatBusySeconds": 5, "leaseSeconds": 180,
                 "minAgentVersion": "1.0.0", "settingsVersion": 3, "maxLogLinesPerRequest": 500,
                 "maxAttachmentBytes": 2097152, "maxAttachmentsPerJob": 5, "maxOutputBytes": 1048576 }
@@ -232,6 +284,10 @@ Mengubah robot atau mesin menaikkan `settingsVersion` mesin lama dan mesin baru.
 | `401 InvalidMachineKey` | Kunci salah, dicabut, atau tidak pernah ada. Jangan diulang cepat — jeda 5 menit |
 | `426 AgentTooOld` + `minAgentVersion` | Versi agent di bawah minimum (`OPENORCHESTRATOR_AGENT_MIN_VERSION`) |
 | `400 AgentVersionMissing` | `agentVersion` tidak dikirim |
+
+**robots.resolution (V13):** `resolutionWidth`, `resolutionHeight`, `resolutionDepth` selalu ada
+(0 = bawaan). Mengubahnya di dasbor menaikkan `settingsVersion` mesin, jadi agent login ulang dan
+memakai nilai baru pada job berikutnya.
 
 Token berlaku **1 jam**, hanya di `/api/agent/**` dan untuk unduh paket job-nya. Kalau
 `machineName` berbeda dari nama mesin dan dari komputer terakhir, dasbor mendapat peringatan
@@ -265,6 +321,7 @@ Satu per agent. Jeda `heartbeatSeconds` saat idle, `heartbeatBusySeconds` selama
 | `reason` | Kode + teks singkat, tampil di dasbor (mis. `SessionLocked`, `NoSession`, `LogonFailed`, `RemoteDesktopDisabled`) |
 | `activeJobIds` | **W1.** Job yang belum selesai DILAPORKAN: masih berjalan **atau** laporan akhirnya masih di outbox. `runningJobIds` diterima dengan arti sama. Tanpa medan ini, rekonsiliasi tidak dijalankan |
 | `pausedJobs` | *(V9, opsional)* Job robot ini yang sedang BENAR-BENAR ditahan, dengan `source` `dashboard` (karena `PauseJob`) atau `local` (dijeda di PC robot). Daftar kosong = tidak ada yang ditahan. Agent yang belum mendukung jeda tidak mengirim medan ini — ketiadaannya tidak dibaca sebagai "semua sudah dilanjutkan" |
+| `busyLocal`, `busyLocalName`, `busyLocalTrigger` | *(V14, opsional)* Robot attended sedang menjalankan automasi lokal Open Assistant (Play atau jadwal lokal): nama automasinya dan pemicunya (`manual` atau `local-schedule`). Selama itu klaim robot ini `204`, statusnya `Busy`, dan dasbor menampilkan **Sibuk (lokal)**. Tidak dikirim = tidak sibuk lokal |
 
 → `200`
 ```json
@@ -523,6 +580,11 @@ Sudah ada di Orchestrator:
   percobaan ulang, stop/kill, jeda (`pausedJobs`, PauseJob/ResumeJob), akun Windows per job,
   token executor, log, lampiran.
 - Tipe runtime mesin dan sasaran job (2.9).
+- V13–V14: resolusi layar robot unattended (2.2), sibuk lokal di denyut v1/v2, pemicu baris
+  catatan, versi paket yang sama ditolak `409`, dan `/assistant/connect` di alamat API dialihkan
+  ke dasbor.
+- Jeda/lanjut v2 di sisi robot **lulus uji VM** Windows Server pada 4 Okt (Studio
+  `docs/rencana-klien-v2-fase3f.md`, Fase 3h).
 - V12: mesin per folder (Bagian 6): tab **Mesin** di Setelan folder (tambah satu atau
   beberapa, lihat, hapus dari folder), keadaan mesin Active/Maintenance/Disabled, Start Job
   hanya menawarkan mesin folder prosesnya beserta statusnya.
@@ -536,21 +598,21 @@ Sudah ada di Orchestrator:
   Ulang/log), Start Job (tipe runtime, akun, mesin, jumlah jalan, prioritas), setelan proses
   (batas waktu, jeda stop, ulang, prioritas bawaan).
 
-Diuji: 248 uji unit; uji ujung-ke-ujung 83 (agent) + 103 (Start Job, aksi job, jeda, runtime)
-+ 108 (jadwal agent, masuk lewat dasbor) + 120 (mesin per folder) pemeriksaan melawan
-PostgreSQL; regresi v1 253 panggilan (hanya tambahan medan dan perubahan yang disengaja). Klien v2 tim robot sudah diuji
+Diuji: 268 uji unit; uji ujung-ke-ujung 83 (agent) + 103 (Start Job, aksi job, jeda, runtime)
++ 108 (jadwal agent, masuk lewat dasbor) + 120 (mesin per folder) + 55 (V13–V14) pemeriksaan
+melawan PostgreSQL, ditambah migrasi salinan data asli V11→V14; regresi v1 253 panggilan (hanya
+tambahan medan dan perubahan yang disengaja). Klien v2 tim robot sudah diuji
 melawan Orchestrator ini di VM (Windows 11 Pro dan Windows Server 2022) — lihat
 `UJI-ROBOT-UNATTENDED-VMWARE.md`.
 
 Belum:
 
-1. Jeda/lanjut v2 di sisi robot belum diuji di VM (tim robot, Studio `main` Fase 3h).
-2. Masuk lewat dasbor belum diuji dengan Open Assistant sungguhan (sisi robot di cabang
-   `claude/assistant-machine-key`, belum terkompilasi saat 30 Sep).
-3. Beberapa robot per mesin baru bisa diuji di Windows Server + RDS.
-4. Mesin per folder (V12) belum diuji dengan robot sungguhan di VM — baru dengan agent dan
-   robot v1 tiruan melawan PostgreSQL.
-5. Tidak ada pembatasan laju untuk `/api/agent/login` (kunci 256 bit tidak bisa ditebak, tapi
+1. Masuk lewat dasbor belum diuji dengan Open Assistant sungguhan (sisi robot sudah di Studio
+   `main` sejak 4 Okt).
+2. Beberapa robot per mesin baru bisa diuji di Windows Server + RDS.
+3. Mesin per folder (V12), resolusi sesi, dan sibuk lokal (V13–V14) belum diuji dengan robot
+   sungguhan di VM — baru dengan agent dan robot v1 tiruan melawan PostgreSQL.
+4. Tidak ada pembatasan laju untuk `/api/agent/login` (kunci 256 bit tidak bisa ditebak, tapi
    percobaan berulang tetap memakai sumber daya).
 
 ---
@@ -750,6 +812,78 @@ dan Studio yang sekarang tetap bekerja.
 6. Setelan › Mesin › ⋮ › **Hapus dari Folder** → job baru folder itu tidak diambil lagi; job
    yang sedang berjalan tidak terganggu.
 
+## Usulan PR #5, #6, #7 dan perbaikan masuk lewat dasbor (6 Okt 2026, V13–V14)
+
+Untuk tim Studio/robot. Dibaca dari Studio `main` (`e7f64a2`) dan PR orchestrator #5–#7 per
+6 Okt 2026. Rinciannya di Bagian 1, 2.2, 2.3, dan 5.1.
+
+**Yang WAJIB diubah: tidak ada.** Semuanya menambah; klien yang sekarang tetap jalan. Satu
+perilaku berubah: **terbit ulang versi paket yang sama kini ditolak** (PR #5 di bawah).
+
+**Perbaikan — "Masuk lewat dasbor" dari Open Assistant.** Open Assistant membuka
+`<URL Orchestrator>/assistant/connect` dengan alamat API (mis. `http://localhost:8080`), padahal
+halaman itu ada di dasbor (`:3000`) — peramban mendarat di halaman galat. Sekarang backend
+mengalihkannya ke halaman dasbor dengan parameter yang sama persis; **klien tidak perlu diubah**.
+Dari VM pun benar: `http://192.168.231.1:8080/assistant/connect` → `http://192.168.231.1:3000/…`.
+
+**PR #6 — resolusi layar robot unattended: dikerjakan seperti diminta.**
+
+- Migrasi `V13__resolusi_robot.sql` (nomor V10 sudah terpakai); kolom dan CHECK sama dengan usulan.
+- API robot: `resolutionWidth`, `resolutionHeight`, `resolutionDepth` di `POST /api/robots`,
+  `PUT /api/robots/{name}` (`null` = tidak diubah; pasangan diperiksa sesudah digabung dengan nilai
+  tersimpan), dan `GET`. Nilai tidak sah → `400` dengan pesan yang menyebut aturannya.
+- `robots[]` di jawaban `POST /api/agent/login` selalu membawa ketiganya (0 = bawaan). Mengubahnya
+  menaikkan `settingsVersion` mesin — dipertahankan, seperti diminta.
+- Dasbor: Tenant › Robot › Ubah › **Resolusi layar (unattended)** — Lebar, Tinggi, Kedalaman warna
+  (Bawaan, 32/24/16/15-bit) — dengan teks bantuan dari usulan; kolom Sesi Windows menyebut
+  resolusinya. Kemampuan `robots.resolution`.
+- Klaim job v2 tetap `POST /api/agent/jobs/claim` (usulan menyebut `jobs/next`); tidak berubah.
+
+**PR #5 — Publish OpenStudio: jawaban.**
+
+1. **Versi yang sudah ada: ditolak** `409`, `errorCode: PACKAGE_VERSION_EXISTS`, `error`: "Paket
+   'Tagihan' versi 1.0.3 sudah ada. Naikkan versinya, lalu terbitkan lagi." — seperti UiPath. Dulu
+   ditimpa. Versi lebih rendah yang belum ada tetap diterima. Kemampuan `packages.versionConflict`.
+2. **`releaseNotes` terpisah: tidak perlu.** Di Orchestrator `description` disimpan per versi
+   paket — itulah catatan rilis versi itu — dan deskripsi proses hanya diisi saat proses pertama
+   kali dibuat, tidak berganti di terbit berikutnya. Kirim catatan rilis di `description` seperti
+   sekarang.
+3. **Urutan versi:** dasbor membandingkan per angka (`1.0.10` > `1.0.9`). Proses memakai versi
+   yang terakhir diterbitkan.
+
+**PR #7 — jadwal lokal attended: usulan 1 dan 2 dikerjakan.**
+
+1. **Sibuk lokal** — nama kolomnya, sama di v1 dan v2:
+   - v1 `POST /api/robots/{robot}/heartbeat` dan v2 `POST /api/agent/heartbeat` (di tiap objek
+     `robots[]`): `busyLocal` (boolean), `busyLocalName` (nama automasi, opsional),
+     `busyLocalTrigger` (`manual` | `local-schedule`, opsional).
+   - Selama denyut terakhir menyebut `busyLocal: true`: robot itu **tidak diberi job**
+     (`jobs/next` → `{"job": null}`, `jobs/claim` → `204`), statusnya `BUSY`, dan dasbor
+     (Pemantauan › Robot, Tenant › Robot) menampilkan **Sibuk (lokal)** + nama automasi + pemicu.
+   - Kirim di **setiap** denyut selama jalan lokal berlangsung; denyut tanpa `busyLocal` = selesai.
+     Penolakan "sibuk lokal" di sisi robot tetap berguna untuk jeda antara klaim dan denyut
+     berikutnya. Kemampuan `heartbeat.busyLocal`.
+2. **Pemicu di log v1:** `POST /api/logs` menerima `trigger` per baris — `manual` atau
+   `local-schedule`; nilai lain diabaikan. Baris yang menyebut `jobId` otomatis `job`. Dasbor:
+   kolom dan saringan **Pemicu** di halaman Catatan (Job / Manual / Jadwal lokal), juga di ekspor
+   CSV. Kemampuan `logs.trigger`.
+3. **Penolakan yang bisa diulang:** belum ada kode baru. Yang sudah berlaku: penolakan **sebelum**
+   job RUNNING dengan `SessionPreparationFailed` (jalur sesi terkunci) atau `ExecutorStartFailed`
+   diulang otomatis sesuai "percobaan ulang" proses (bawaan 1), dan robot itu dihindari 60 detik.
+   Dengan `busyLocal`, klaim memang tidak terjadi selama jalan lokal.
+
+**Cara menguji (VM):**
+
+1. Resolusi: Tenant › Robot › ubah robot unattended yang sandinya disimpan di Orchestrator →
+   1920×1080, 32-bit → jalankan job → log agent menyebut resolusi itu. Ganti ke 1366×768 tanpa
+   menyalakan ulang service → job berikutnya memakai resolusi baru.
+2. Sibuk lokal: di PC attended, jalankan automasi dari jadwal lokal; selama berjalan Pemantauan ›
+   Robot menampilkan **Sibuk (lokal)** dan job dari dasbor menunggu; sesudah selesai job diambil.
+3. Pemicu: halaman Catatan › saringan **Pemicu** = Jadwal lokal.
+4. Publish: terbitkan versi yang sama dua kali dari OpenStudio → dialog menampilkan pesan `409`.
+5. Masuk lewat dasbor: Open Assistant › Hubungkan › **Masuk lewat dasbor** dengan URL
+   `http://<IP-host>:8080` → peramban terbuka di halaman persetujuan dasbor.
+
 ---
 
 # Bagian 5 — Open Assistant: masuk lewat dasbor (V11)
@@ -785,6 +919,11 @@ Open Assistant                    Peramban / dasbor                       Orches
 
 - Parameter yang salah → "Tautan sambungan tidak sah"; halaman tidak pernah meneruskan ke mana
   pun.
+- **Di alamat API juga:** `GET <API>/assistant/connect?…` (mis. `http://localhost:8080`) dialihkan
+  `302` ke halaman ini di dasbor dengan parameter yang sama persis — Open Assistant cukup tahu
+  satu alamat. Alamat dasbor = asal pertama `CORS_ORIGINS`; `localhost` di sana berarti
+  "komputer server ini", jadi peramban di VM yang membuka `http://192.168.231.1:8080/assistant/connect`
+  diarahkan ke `http://192.168.231.1:3000/assistant/connect`.
 - Belum masuk → layar masuk dasbor, lalu kembali ke halaman ini dengan parameter yang sama.
 - Sudah masuk → kartu "Sambungkan Open Assistant? Open Assistant di **{machine}** akan
   tersambung … sebagai **{nama}**" dengan **Buka Open Assistant** dan **Batal**, serta "Masuk

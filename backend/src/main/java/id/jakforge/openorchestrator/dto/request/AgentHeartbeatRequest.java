@@ -3,6 +3,7 @@ package id.jakforge.openorchestrator.dto.request;
 import id.jakforge.openorchestrator.common.RequestBodies;
 import id.jakforge.openorchestrator.common.Uuids;
 import id.jakforge.openorchestrator.model.JobCommands;
+import id.jakforge.openorchestrator.model.LocalRun;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -35,18 +36,21 @@ public record AgentHeartbeatRequest(String agentVersion, Double cpuPercent, Doub
      * @param pausedSent    apakah agent mengirim {@code pausedJobs} sama sekali. Agent yang belum
      *                      mengenal jeda tidak mengirimnya, dan ketiadaannya tidak boleh dibaca
      *                      sebagai "semua job sudah dilanjutkan".
+     * @param localRun      automasi lokal Open Assistant yang sedang berjalan di PC attended
+     *                      ({@code busyLocal}, V14); null = tidak ada. Selama ada, robot ini tidak
+     *                      diberi job.
      */
     public record RobotReport(UUID robotId, String state, Integer sessionId, String sessionState, String windowsUser,
                               Boolean sessionReady, String reasonCode, String reasonText, String executorState,
                               Integer executorPid, Set<UUID> activeJobIds, boolean jobIdsSent,
-                              Map<UUID, String> pausedJobs, boolean pausedSent) {
+                              Map<UUID, String> pausedJobs, boolean pausedSent, LocalRun localRun) {
 
         /** Bentuk sebelum jeda ada. */
         public RobotReport(UUID robotId, String state, Integer sessionId, String sessionState, String windowsUser,
                            Boolean sessionReady, String reasonCode, String reasonText, String executorState,
                            Integer executorPid, Set<UUID> activeJobIds, boolean jobIdsSent) {
             this(robotId, state, sessionId, sessionState, windowsUser, sessionReady, reasonCode, reasonText,
-                    executorState, executorPid, activeJobIds, jobIdsSent, Map.of(), false);
+                    executorState, executorPid, activeJobIds, jobIdsSent, Map.of(), false, null);
         }
     }
 
@@ -106,7 +110,9 @@ public record AgentHeartbeatRequest(String agentVersion, Double cpuPercent, Doub
                     jobIds,
                     ids instanceof List<?>,
                     pausedJobs,
-                    pausedItems instanceof List<?>));
+                    pausedItems instanceof List<?>,
+                    LocalRun.of(RequestBodies.optionalBool(robot, "busyLocal"), RequestBodies.text(robot, "busyLocalName"),
+                            RequestBodies.text(robot, "busyLocalTrigger"))));
         }
 
         return new AgentHeartbeatRequest(

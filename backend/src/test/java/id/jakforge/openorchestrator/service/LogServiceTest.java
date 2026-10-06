@@ -256,7 +256,7 @@ class LogServiceTest {
     @DisplayName("saringan mesin, host identity, waktu, dan teks digabung dengan AND; % dan _ dicari apa adanya")
     void newFiltersAreCombined() {
         logService.search(principal, new LogSearchRequest(List.of("error"), null, "Tagihan", null, null, null,
-                "VM-01", "VM-01\\robot", "1h", null, null, " 100%_selesai "));
+                "VM-01", "VM-01\\robot", "1h", null, null, " 100%_selesai ", null));
 
         String sql = database.lastStatement();
         List<Object> args = database.lastArguments();
@@ -272,16 +272,52 @@ class LogServiceTest {
     }
 
     @Test
+    @DisplayName("saringan pemicu (V14): ejaan bebas dibakukan; pemicu tak dikenal ditolak 400 tanpa kueri")
+    void triggerFilter() {
+        logService.search(principal, new LogSearchRequest(null, null, null, null, null, null, null, null, null, null,
+                null, null, " Local_Schedule "));
+
+        assertTrue(database.lastStatement().contains("run_trigger = ?"), database.lastStatement());
+        assertTrue(database.lastArguments().contains("local-schedule"), database.lastArguments().toString());
+
+        int before = database.statements.size();
+        ApiException error = assertThrows(ApiException.class, () -> logService.search(principal,
+                new LogSearchRequest(null, null, null, null, null, null, null, null, null, null, null, null, "cron")));
+
+        assertEquals(HttpStatus.BAD_REQUEST, error.status());
+        assertEquals("Pemicu tidak dikenal: 'cron'. Pilih job, manual, atau local-schedule.", error.getMessage());
+        assertEquals(before, database.statements.size());
+    }
+
+    @Test
+    @DisplayName("baris dari robot membawa trigger (V14): dibakukan; yang tidak dikenal diabaikan, bukan menggagalkan")
+    void writeKeepsTrigger() {
+        logService.write(principal, new LogBatchRequest(List.of(
+                Map.of("message", "Mulai menjalankan Tagihan", "trigger", "LOCAL-SCHEDULE"),
+                Map.of("message", "Play", "trigger", "manual"),
+                Map.of("message", "Aneh", "trigger", "cron"))));
+
+        List<String> inserts = database.statementsContaining("INSERT INTO logs");
+        assertEquals(3, inserts.size(), database.statements.toString());
+
+        List<Object> triggers = database.arguments.stream()
+                .filter(args -> args.length == 10)
+                .map(args -> args[9])
+                .toList();
+        assertEquals(java.util.Arrays.asList("local-schedule", "manual", null), triggers);
+    }
+
+    @Test
     @DisplayName("pilihan saringan hanya dibatasi folder, pekerjaan, dan waktu — bukan tingkat atau mesin")
     void filterOptionsIgnoreValueFilters() {
         logService.filterOptions(principal, new LogSearchRequest(List.of("error"), null, "Tagihan", null, null, null,
-                "VM-01", null, "today", null, null, "gagal"));
+                "VM-01", null, "today", null, null, "gagal", "manual"));
 
         String sql = database.lastStatement();
 
         assertTrue(sql.contains("GROUPING SETS") && sql.contains("logged_at >= ?"), sql);
         assertFalse(sql.contains("level IN") || sql.contains("machine_name = ?") || sql.contains("process_name = ?")
-                || sql.contains("ILIKE"), sql);
+                || sql.contains("ILIKE") || sql.contains("run_trigger"), sql);
     }
 
     @Test
@@ -300,7 +336,7 @@ class LogServiceTest {
     void searchTextTooLong() {
         assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ApiException.class, () -> logService.search(principal,
                 new LogSearchRequest(null, null, null, null, null, null, null, null, null, null, null,
-                        "x".repeat(201)))).status());
+                        "x".repeat(201), null))).status());
         assertTrue(database.statements.isEmpty(), database.statements.toString());
     }
 
@@ -312,7 +348,7 @@ class LogServiceTest {
 
         assertEquals("catatan-20260930-120000.csv", file.fileName());
         assertEquals("text/csv; charset=UTF-8", file.contentType());
-        assertTrue(csv.startsWith("﻿Waktu (Asia/Jakarta),Tingkat,Robot,Mesin,Host Identity,Proses,Pekerjaan,Pesan\r\n"),
+        assertTrue(csv.startsWith("﻿Waktu (Asia/Jakarta),Tingkat,Robot,Mesin,Host Identity,Proses,Pekerjaan,Pemicu,Pesan\r\n"),
                 csv);
         assertTrue(database.lastStatement().contains("LIMIT ?")
                 && database.lastArguments().getLast().equals(LogService.MAX_EXPORT_ROWS), database.lastArguments().toString());

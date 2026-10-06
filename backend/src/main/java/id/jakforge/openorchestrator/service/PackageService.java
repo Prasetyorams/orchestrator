@@ -37,6 +37,8 @@ public class PackageService {
 
     static final String PACKAGE_CONTENT_TYPE = "application/zip";
     static final String PACKAGE_FILE_EXTENSION = ".zip";
+    /** errorCode: versi paket itu sudah pernah terbit. */
+    public static final String PACKAGE_VERSION_EXISTS = "PACKAGE_VERSION_EXISTS";
     private static final String ALERT_SOURCE = "packages";
     private static final String UNKNOWN_PUBLISHER = "?";
 
@@ -55,10 +57,13 @@ public class PackageService {
     }
 
     /**
-     * Terbitkan paket dari Studio.
+     * Terbitkan paket dari Studio (packages.create).
      *
-     * <p>packages.create untuk versi baru, packages.update untuk menerbitkan
-     * ulang versi yang sudah ada.
+     * <p>Versi yang SUDAH ADA ditolak {@code 409 PACKAGE_VERSION_EXISTS},
+     * seperti di UiPath: isi sebuah versi tidak pernah berubah sesudah terbit.
+     * Job yang sudah menyebut versi itu — beserta sidik SHA-256-nya, yang
+     * diperiksa robot — harus mendapat isi yang sama; perubahan diterbitkan
+     * sebagai versi baru.
      */
     @Transactional
     public PublishPackageResponse publish(OpenOrchestratorPrincipal principal, PublishPackageRequest request) {
@@ -67,8 +72,12 @@ public class PackageService {
         UUID tenantId = principal.tenantId();
         String publisher = principal.username();
 
-        boolean alreadyExists = packageRepository.exists(tenantId, request.name(), request.version());
-        permissionChecker.requireSave(principal, Permissions.PACKAGES, alreadyExists);
+        permissionChecker.requireSave(principal, Permissions.PACKAGES, false);
+
+        if (packageRepository.exists(tenantId, request.name(), request.version())) {
+            throw ApiException.conflict("Paket '" + request.name() + "' versi " + request.version()
+                    + " sudah ada. Naikkan versinya, lalu terbitkan lagi.").withCode(PACKAGE_VERSION_EXISTS);
+        }
 
         byte[] content = decodeContent(request.contentBase64());
         long sizeBytes = content == null ? 0 : content.length;
@@ -77,13 +86,8 @@ public class PackageService {
         // menjalankan apa pun dari dalamnya.
         String sha256 = content == null ? null : Hashes.sha256Hex(content);
 
-        if (alreadyExists) {
-            packageRepository.update(tenantId, request.name(), request.version(), request.description(),
-                    request.entryPoint(), publisher, sizeBytes, content, sha256);
-        } else {
-            packageRepository.insert(tenantId, request.name(), request.version(), request.description(),
-                    request.entryPoint(), publisher, sizeBytes, content, sha256);
-        }
+        packageRepository.insert(tenantId, request.name(), request.version(), request.description(),
+                request.entryPoint(), publisher, sizeBytes, content, sha256);
 
         // Menerbitkan paket hampir selalu berarti ingin proses dengan nama yang
         // sama tersedia untuk dijalankan. Membuatnya di sini menghemat satu

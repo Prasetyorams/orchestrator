@@ -153,6 +153,10 @@ public class JobRepository {
      * Mesin robot v1 menurut barisnya: mesin Robot Agent kalau terikat, selain
      * itu nama mesin dari denyutnya. Dipakai klaim v1 untuk mencocokkan mesin
      * dan runtime yang diminta job.
+     *
+     * <p>Robot yang sedang menjalankan automasi lokal Open Assistant (V14)
+     * tidak ada di sini — klaimnya kosong sampai denyutnya berhenti menyebut
+     * {@code busyLocal}.
      */
     private static final String V1_ROBOT_CTE = """
             WITH robot AS (
@@ -161,7 +165,7 @@ public class JobRepository {
                   FROM robots r
                   LEFT JOIN machines bound ON bound.id = r.machine_id
                   LEFT JOIN machines named ON named.tenant_id = r.tenant_id AND named.name = r.machine_name
-                 WHERE r.tenant_id = ? AND r.name = ?
+                 WHERE r.tenant_id = ? AND r.name = ? AND r.busy_local_since IS NULL
             )
             """;
 
@@ -207,6 +211,7 @@ public class JobRepository {
                        SELECT j.id FROM jobs j
                         WHERE j.tenant_id = ?
                           AND j.state = 'PENDING'
+                          AND EXISTS (SELECT 1 FROM robot)
                           AND (j.robot_name = ?
                                OR ((j.robot_name IS NULL OR j.robot_name = '')
                                    AND EXISTS (SELECT 1 FROM folder_robots fr

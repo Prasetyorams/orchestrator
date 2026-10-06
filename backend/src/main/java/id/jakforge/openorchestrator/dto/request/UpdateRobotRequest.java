@@ -11,6 +11,10 @@ import jakarta.validation.constraints.Size;
  * kosong melepas robot dari mesinnya. Sandi Windows yang kosong berarti "tetap
  * yang lama"; sandi tidak pernah dikirim balik ke dasbor, jadi formulir tidak
  * bisa mengisinya kembali.
+ *
+ * <p>Resolusi sesi unattended (V13): yang tidak dikirim tidak diubah; hasilnya
+ * — yang baru di atas yang lama — harus sah sebagai pasangan, lihat
+ * {@link id.jakforge.openorchestrator.model.RobotResolution}.
  */
 public record UpdateRobotRequest(
         String type,
@@ -23,7 +27,10 @@ public record UpdateRobotRequest(
         String windowsPassword,
         Boolean windowsPasswordLocal,
         @Pattern(regexp = "Logoff|KeepLoggedIn", message = "Kebijakan sesi harus Logoff atau KeepLoggedIn.")
-        String sessionPolicy) {
+        String sessionPolicy,
+        Integer resolutionWidth,
+        Integer resolutionHeight,
+        Integer resolutionDepth) {
 
     public UpdateRobotRequest {
         type = Strings.emptyToNull(type);

@@ -30,7 +30,7 @@ public class SecurityConfig {
 
     /** Satu-satunya jalur yang boleh dicapai tanpa token. Sama dengan PermissionInterceptor.PUBLIC. */
     private static final String[] PUBLIC_PATHS =
-            { "/", "/actuator/health", "/api/health", "/api/auth/login", "/api/agent/login",
+            { "/", "/assistant/connect", "/actuator/health", "/api/health", "/api/auth/login", "/api/agent/login",
               "/api/auth/assistant/token", "/api/auth/assistant/refresh", "/api/auth/assistant/logout" };
 
     private static final List<String> ALLOWED_METHODS = List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");

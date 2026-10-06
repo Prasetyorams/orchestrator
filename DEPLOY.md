@@ -160,6 +160,11 @@ Simpan: Ctrl+O, Enter, Ctrl+X.
   dasbor meneruskannya ke backend di dalam jaringan Docker. Isi hanya kalau
   peramban harus memanggil `https://api.orchestrator.domainmu.com` langsung —
   nilainya "dibakar" saat build, jadi mengubahnya berarti build ulang dasbor.
+- **Asal pertama `CORS_ORIGINS` adalah alamat dasbor.** Backend memakainya untuk
+  mengalihkan `https://api.orchestrator.domainmu.com/` dan
+  `…/assistant/connect` (Open Assistant › Masuk lewat dasbor) ke dasbor. Nilai
+  `localhost` berarti "server ini": dibuka dari PC lain lewat IP, peramban
+  diarahkan ke IP yang sama di port 3000.
 
 ```bash
 chmod 600 .env

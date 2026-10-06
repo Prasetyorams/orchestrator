@@ -50,22 +50,6 @@ public class PackageRepository {
                 """, tenantId, name, version);
     }
 
-    /**
-     * COALESCE pada content: penerbitan ulang yang hanya memperbarui keterangan
-     * tidak boleh MENGHAPUS isi paket yang sudah ada.
-     */
-    public void update(UUID tenantId, String name, String version, String description,
-                       String entryPoint, String publishedBy, long sizeBytes, byte[] content, String sha256) {
-        database.update("""
-                UPDATE packages
-                   SET description = ?, entry_point = ?, published_by = ?,
-                       published_at = now(), size_bytes = ?,
-                       content = COALESCE(?, content),
-                       sha256 = COALESCE(?, sha256)
-                 WHERE tenant_id = ? AND name = ? AND version = ?
-                """, description, entryPoint, publishedBy, sizeBytes, content, sha256, tenantId, name, version);
-    }
-
     /** @param sha256 sidik isi paket (heksa kecil), dicocokkan robot sebelum menjalankannya */
     public void insert(UUID tenantId, String name, String version, String description,
                        String entryPoint, String publishedBy, long sizeBytes, byte[] content, String sha256) {

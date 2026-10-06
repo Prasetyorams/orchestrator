@@ -39,13 +39,15 @@ public class LogRepository {
      * @param from         batas bawah waktu, termasuk
      * @param to           batas atas waktu, tidak termasuk
      * @param text         potongan teks yang harus ada di pesan, tanpa membedakan huruf besar
+     * @param trigger      pemicu jalan, bentuk baku ({@code RunTriggers}); null = semua
      */
     public record Filter(Collection<String> levels, String robotName, String processName, UUID jobId, UUID folderId,
-                         String machineName, String hostIdentity, Instant from, Instant to, String text) {
+                         String machineName, String hostIdentity, Instant from, Instant to, String text,
+                         String trigger) {
 
         /** Hanya tempat dan waktu — cakupan daftar pilihan saringan. */
         public Filter scope() {
-            return new Filter(null, null, null, jobId, folderId, null, null, from, to, null);
+            return new Filter(null, null, null, jobId, folderId, null, null, from, to, null, null);
         }
     }
 
@@ -62,7 +64,8 @@ public class LogRepository {
         args.add(limit);
 
         return database.queryRows("""
-                SELECT id, level, message, robot_name, machine_name, host_identity, process_name, job_id, logged_at
+                SELECT id, level, message, robot_name, machine_name, host_identity, process_name, job_id, logged_at,
+                       run_trigger AS "trigger"
                   FROM logs
                  WHERE %s
                  ORDER BY id DESC
@@ -74,7 +77,7 @@ public class LogRepository {
     public List<Map<String, Object>> search(UUID tenantId, Collection<String> levels, String robotName,
                                             String processName, UUID jobId, UUID folderId, int limit) {
         return search(tenantId, new Filter(levels, robotName, processName, jobId, folderId, null, null, null, null,
-                null), limit);
+                null, null), limit);
     }
 
     /**
@@ -177,6 +180,11 @@ public class LogRepository {
             args.add(filter.hostIdentity());
         }
 
+        if (filter.trigger() != null) {
+            conditions.add("run_trigger = ?");
+            args.add(filter.trigger());
+        }
+
         if (filter.from() != null) {
             conditions.add("logged_at >= ?");
             args.add(OffsetDateTime.ofInstant(filter.from(), ZoneOffset.UTC));
@@ -221,12 +229,21 @@ public class LogRepository {
      */
     public void insert(UUID tenantId, LogLevel level, String message, String robotName, String machineName,
                        String processName, UUID jobId, String loggedAt, String hostIdentity) {
+        insert(tenantId, level, message, robotName, machineName, processName, jobId, loggedAt, hostIdentity, null);
+    }
+
+    /**
+     * @param trigger pemicu jalannya, bentuk baku ({@code RunTriggers}), kalau robotnya menyebut;
+     *                yang kosong diisi 'job' oleh basis data untuk baris yang menyebut pekerjaan (V14)
+     */
+    public void insert(UUID tenantId, LogLevel level, String message, String robotName, String machineName,
+                       String processName, UUID jobId, String loggedAt, String hostIdentity, String trigger) {
         database.update("""
                 INSERT INTO logs (tenant_id, level, message, robot_name, machine_name,
-                                  process_name, job_id, logged_at, host_identity)
-                VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?::timestamptz, now()), ?)
+                                  process_name, job_id, logged_at, host_identity, run_trigger)
+                VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?::timestamptz, now()), ?, ?)
                 """, tenantId, level.name(), message, robotName, machineName, processName, jobId, loggedAt,
-                hostIdentity);
+                hostIdentity, trigger);
     }
 
     /**

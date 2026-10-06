@@ -3,6 +3,7 @@ package id.jakforge.openorchestrator.dto.request;
 import id.jakforge.openorchestrator.common.RequestBodies;
 import id.jakforge.openorchestrator.common.Uuids;
 import id.jakforge.openorchestrator.model.JobCommands;
+import id.jakforge.openorchestrator.model.LocalRun;
 import id.jakforge.openorchestrator.model.RobotStatus;
 
 import java.util.Locale;
@@ -22,13 +23,15 @@ import java.util.UUID;
  * @param pauseSource siapa yang menjedanya: "dashboard" (karena PauseJob) atau "local" (tombol
  *                    Jeda di PC robot). Dibakukan; yang tidak dikenal dianggap "local", karena
  *                    jeda lokal tidak pernah dilanjutkan server.
+ * @param localRun    automasi lokal Open Assistant yang sedang berjalan ({@code busyLocal}, V14);
+ *                    null = tidak ada. Selama ada, robot ini tidak diberi job.
  */
 public record HeartbeatRequest(String status, double cpuPercent, double memoryMb, String machineName,
-                               UUID pausedJobId, String pauseSource) {
+                               UUID pausedJobId, String pauseSource, LocalRun localRun) {
 
     /** Bentuk lama, tanpa jeda. */
     public HeartbeatRequest(String status, double cpuPercent, double memoryMb, String machineName) {
-        this(status, cpuPercent, memoryMb, machineName, null, null);
+        this(status, cpuPercent, memoryMb, machineName, null, null, null);
     }
 
     public static HeartbeatRequest fromBody(Map<String, Object> body) {
@@ -40,6 +43,8 @@ public record HeartbeatRequest(String status, double cpuPercent, double memoryMb
                 RequestBodies.decimal(body, "memoryMb", 0),
                 RequestBodies.text(body, "machineName"),
                 pausedJobId,
-                pausedJobId == null ? null : JobCommands.normalizeSource(RequestBodies.text(body, "pauseSource")));
+                pausedJobId == null ? null : JobCommands.normalizeSource(RequestBodies.text(body, "pauseSource")),
+                LocalRun.of(RequestBodies.optionalBool(body, "busyLocal"), RequestBodies.text(body, "busyLocalName"),
+                        RequestBodies.text(body, "busyLocalTrigger")));
     }
 }

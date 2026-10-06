@@ -11,6 +11,7 @@ import id.jakforge.openorchestrator.dto.response.DeletedCountResponse;
 import id.jakforge.openorchestrator.dto.response.LogWriteResponse;
 import id.jakforge.openorchestrator.model.FileContent;
 import id.jakforge.openorchestrator.model.LogLevel;
+import id.jakforge.openorchestrator.model.RunTriggers;
 import id.jakforge.openorchestrator.model.Severity;
 import id.jakforge.openorchestrator.repository.AlertRepository;
 import id.jakforge.openorchestrator.repository.LogRepository;
@@ -155,7 +156,7 @@ public class LogService {
         StringBuilder csv = new StringBuilder("﻿");
 
         csvRow(csv, "Waktu (" + zone.getId() + ")", "Tingkat", "Robot", "Mesin", "Host Identity", "Proses",
-                "Pekerjaan", "Pesan");
+                "Pekerjaan", "Pemicu", "Pesan");
 
         for (Map<String, Object> row : rows) {
             Object loggedAt = row.get("loggedAt");
@@ -164,7 +165,7 @@ public class LogService {
                     loggedAt == null ? "" : CSV_TIME.format(Instant.parse(loggedAt.toString()).atZone(zone)),
                     text(row.get("level")), text(row.get("robotName")), text(row.get("machineName")),
                     text(row.get("hostIdentity")), text(row.get("processName")), text(row.get("jobId")),
-                    text(row.get("message")));
+                    triggerLabel(row.get("trigger")), text(row.get("message")));
         }
 
         String fileName = "catatan-" + EXPORT_FILE_TIME.format(LocalDateTime.now(clock)) + ".csv";
@@ -214,9 +215,34 @@ public class LogService {
             throw ApiException.badRequest("Teks pencarian paling panjang " + MAX_SEARCH_LENGTH + " karakter.");
         }
 
+        // Pemicu jalan (V14): job, manual, atau jadwal lokal. Yang salah eja
+        // ditolak — dasbor hanya mengirim yang dikenal.
+        String trigger = null;
+
+        if (request.trigger() != null && !request.trigger().isBlank()) {
+            trigger = RunTriggers.normalize(request.trigger());
+
+            if (trigger == null) {
+                throw ApiException.badRequest("Pemicu tidak dikenal: '" + request.trigger().trim()
+                        + "'. Pilih job, manual, atau local-schedule.");
+            }
+        }
+
         return Optional.of(new LogRepository.Filter(storedSpellings, request.robot(), request.process(), job, folder,
                 Strings.trimToNull(request.machine()), Strings.trimToNull(request.host()), range.from(), range.to(),
-                text));
+                text, trigger));
+    }
+
+    /** Pemicu untuk ekspor CSV, dalam bahasa yang dibaca orang. */
+    static String triggerLabel(Object trigger) {
+        if (trigger == null) return "";
+
+        return switch (trigger.toString()) {
+            case RunTriggers.JOB -> "Job";
+            case RunTriggers.MANUAL -> "Manual";
+            case RunTriggers.LOCAL_SCHEDULE -> "Jadwal lokal";
+            default -> trigger.toString();
+        };
     }
 
     /** Batas waktu saringan; null = tidak dibatasi di sisi itu. {@code to} tidak termasuk. */
@@ -387,10 +413,16 @@ public class LogService {
             String hostIdentity = Strings.trimToNull(RequestBodies.text(line, "hostIdentity"));
             if (hostIdentity != null && hostIdentity.length() > MAX_HOST_IDENTITY_LENGTH) hostIdentity = null;
 
+            // trigger (V14): "manual" atau "local-schedule" untuk jalan lokal Open
+            // Assistant, supaya halaman Catatan bisa membedakannya dari job. Yang
+            // tidak dikenal diabaikan; baris yang menyebut pekerjaan diisi 'job'
+            // oleh basis data.
+            String trigger = RunTriggers.normalize(RequestBodies.text(line, "trigger"));
+
             logRepository.insert(tenantId, level, message,
                     RequestBodies.text(line, "robotName"), RequestBodies.text(line, "machineName"),
                     RequestBodies.text(line, "processName"), Uuids.parseOrNull(RequestBodies.text(line, "jobId")),
-                    RequestBodies.text(line, "loggedAt"), hostIdentity);
+                    RequestBodies.text(line, "loggedAt"), hostIdentity, trigger);
 
             written++;
 

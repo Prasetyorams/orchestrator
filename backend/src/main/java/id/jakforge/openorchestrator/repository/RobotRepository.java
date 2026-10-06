@@ -2,6 +2,8 @@ package id.jakforge.openorchestrator.repository;
 
 import id.jakforge.openorchestrator.common.Uuids;
 import id.jakforge.openorchestrator.config.OpenOrchestratorProperties;
+import id.jakforge.openorchestrator.model.LocalRun;
+import id.jakforge.openorchestrator.model.RobotResolution;
 import org.springframework.stereotype.Repository;
 
 import java.util.ArrayList;
@@ -66,6 +68,8 @@ public class RobotRepository {
                 machine_id, windows_username, windows_password IS NOT NULL AS has_windows_password,
                 windows_password_local, session_policy, agent_state, session_id, session_state, session_ready,
                 reason_code, reason_text, executor_state, executor_pid, needs_attention,
+                resolution_width, resolution_height, resolution_depth,
+                busy_local_since, busy_local_name, busy_local_trigger,
                 (SELECT j.id FROM jobs j WHERE j.robot_id = robots.id AND j.contract_version = 2
                     AND j.state IN %s ORDER BY j.started_at DESC LIMIT 1) AS current_job_id,
                 (SELECT j.process_name FROM jobs j WHERE j.robot_id = robots.id AND j.contract_version = 2
@@ -160,14 +164,17 @@ public class RobotRepository {
      *                 sebagai diri sendiri"
      */
     public void registerFromHeartbeat(UUID tenantId, String name, String machineName, String username,
-                                      String status, double cpuPercent, double memoryMb) {
+                                      String status, double cpuPercent, double memoryMb, LocalRun localRun) {
         database.update("""
                 INSERT INTO robots
                     (id, tenant_id, name, machine_name, username, type, environment, description,
-                     status, cpu_percent, memory_mb, last_heartbeat_at, created_at)
+                     status, cpu_percent, memory_mb, last_heartbeat_at, created_at,
+                     busy_local_since, busy_local_name, busy_local_trigger)
                 VALUES (?, ?, ?, ?, ?, 'Attended', 'Production',
-                        'Terdaftar sendiri saat denyut pertama.', ?, ?, ?, now(), now())
-                """, UUID.randomUUID(), tenantId, name, machineName, username, status, cpuPercent, memoryMb);
+                        'Terdaftar sendiri saat denyut pertama.', ?, ?, ?, now(), now(),
+                        CASE WHEN ? THEN now() END, ?, ?)
+                """, UUID.randomUUID(), tenantId, name, machineName, username, status, cpuPercent, memoryMb,
+                localRun != null, localRunName(localRun), localRunTrigger(localRun));
     }
 
     /**
@@ -176,15 +183,35 @@ public class RobotRepository {
      * kalau belum ada — yang sudah diatur tidak ditimpa denyut.
      */
     public void recordHeartbeat(UUID tenantId, String name, String machineName, String username,
-                                String status, double cpuPercent, double memoryMb) {
+                                String status, double cpuPercent, double memoryMb, LocalRun localRun) {
         database.update("""
                 UPDATE robots
                    SET status = ?, cpu_percent = ?, memory_mb = ?,
                        last_heartbeat_at = now(),
                        machine_name = COALESCE(?, machine_name),
-                       username = COALESCE(username, ?)
+                       username = COALESCE(username, ?),
+                       %s
                  WHERE tenant_id = ? AND name = ?
-                """, status, cpuPercent, memoryMb, machineName, username, tenantId, name);
+                """.formatted(LOCAL_RUN_ASSIGNMENTS), status, cpuPercent, memoryMb, machineName, username,
+                localRun != null, localRunName(localRun), localRunTrigger(localRun), tenantId, name);
+    }
+
+    /**
+     * "Sibuk lokal" dari denyut (V14): dimulai, diperbarui, atau dihapus —
+     * denyut tanpa {@code busyLocal} berarti tidak sibuk lokal. Waktu mulainya
+     * dipertahankan selama robot tetap sibuk lokal. Argumennya: sibuk
+     * (boolean), nama, pemicu.
+     */
+    private static final String LOCAL_RUN_ASSIGNMENTS = """
+            busy_local_since = CASE WHEN ? THEN COALESCE(busy_local_since, now()) END,
+                                   busy_local_name = ?, busy_local_trigger = ?""";
+
+    private static String localRunName(LocalRun localRun) {
+        return localRun == null ? null : localRun.name();
+    }
+
+    private static String localRunTrigger(LocalRun localRun) {
+        return localRun == null ? null : localRun.trigger();
     }
 
     /**
@@ -217,22 +244,25 @@ public class RobotRepository {
      */
     public void insert(UUID tenantId, String name, String machineName, String username, String type,
                        String environment, String description, UUID machineId, String windowsUsername,
-                       String windowsPassword, boolean windowsPasswordLocal, String sessionPolicy) {
+                       String windowsPassword, boolean windowsPasswordLocal, String sessionPolicy,
+                       RobotResolution resolution) {
         database.update("""
                 INSERT INTO robots
                     (id, tenant_id, name, machine_name, username, type, environment, description,
                      status, cpu_percent, memory_mb, last_heartbeat_at, created_at,
-                     machine_id, windows_username, windows_password, windows_password_local, session_policy)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DISCONNECTED', 0, 0, NULL, now(), ?, ?, ?, ?, ?)
+                     machine_id, windows_username, windows_password, windows_password_local, session_policy,
+                     resolution_width, resolution_height, resolution_depth)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DISCONNECTED', 0, 0, NULL, now(), ?, ?, ?, ?, ?, ?, ?, ?)
                 """, UUID.randomUUID(), tenantId, name, machineName, username, type, environment, description,
-                machineId, windowsUsername, windowsPassword, windowsPasswordLocal, sessionPolicy);
+                machineId, windowsUsername, windowsPassword, windowsPasswordLocal, sessionPolicy,
+                resolution.width(), resolution.height(), resolution.depth());
     }
 
     /** Baris lengkap untuk pengubahan, termasuk mesin lamanya. Tanpa sandinya. */
     public Optional<Map<String, Object>> findForUpdate(UUID tenantId, String name) {
         return database.queryRow("""
                 SELECT id, name, machine_id, machine_name, type, environment, description, windows_username,
-                       windows_password_local, session_policy
+                       windows_password_local, session_policy, resolution_width, resolution_height, resolution_depth
                   FROM robots WHERE tenant_id = ? AND name = ?
                 """, tenantId, name);
     }
@@ -246,7 +276,8 @@ public class RobotRepository {
      */
     public void updateConfig(UUID tenantId, UUID robotId, String type, String environment, String description,
                              UUID machineId, String machineName, String windowsUsername, String windowsPassword,
-                             boolean clearPassword, boolean windowsPasswordLocal, String sessionPolicy) {
+                             boolean clearPassword, boolean windowsPasswordLocal, String sessionPolicy,
+                             RobotResolution resolution) {
         database.update("""
                 UPDATE robots
                    SET type = ?, environment = ?, description = ?, machine_id = ?, machine_name = ?,
@@ -254,11 +285,12 @@ public class RobotRepository {
                        windows_password = CASE WHEN ? THEN NULL ELSE COALESCE(?, windows_password) END,
                        windows_password_local = ?,
                        session_policy = ?,
+                       resolution_width = ?, resolution_height = ?, resolution_depth = ?,
                        needs_attention = CASE WHEN ? THEN NULL ELSE needs_attention END
                  WHERE tenant_id = ? AND id = ?
                 """, type, environment, description, machineId, machineName, windowsUsername, clearPassword,
-                windowsPassword, windowsPasswordLocal, sessionPolicy, windowsPassword != null || clearPassword,
-                tenantId, robotId);
+                windowsPassword, windowsPasswordLocal, sessionPolicy, resolution.width(), resolution.height(),
+                resolution.depth(), windowsPassword != null || clearPassword, tenantId, robotId);
     }
 
     public int deleteByName(UUID tenantId, String name) {
@@ -301,10 +333,14 @@ public class RobotRepository {
     // Robot Agent
     // -----------------------------------------------------------------
 
-    /** Robot yang dilayani agent mesin ini: yang diikat ke mesinnya lewat dasbor. */
+    /**
+     * Robot yang dilayani agent mesin ini: yang diikat ke mesinnya lewat dasbor.
+     * Resolusi sesinya (V13) ikut — agent membacanya dari jawaban login.
+     */
     public List<Map<String, Object>> findForMachine(UUID machineId) {
         return database.queryRows("""
-                SELECT id, name, windows_username, session_policy, windows_password_local
+                SELECT id, name, windows_username, session_policy, windows_password_local,
+                       resolution_width, resolution_height, resolution_depth
                   FROM robots WHERE machine_id = ?
                  ORDER BY name
                 """, machineId);
@@ -317,7 +353,7 @@ public class RobotRepository {
     public Optional<Map<String, Object>> lockForMachine(UUID robotId, UUID machineId) {
         return database.queryRow("""
                 SELECT id, tenant_id, name, agent_state, session_ready, windows_username, session_policy,
-                       windows_password_local, needs_attention
+                       windows_password_local, needs_attention, busy_local_since
                   FROM robots WHERE id = ? AND machine_id = ?
                  FOR UPDATE
                 """, robotId, machineId);
@@ -331,16 +367,19 @@ public class RobotRepository {
     /** Keadaan satu robot dari denyut agent. Menghitung sebagai denyut robot itu sendiri. */
     public int recordAgentReport(UUID robotId, UUID machineId, String status, String agentState, Integer sessionId,
                                  String sessionState, Boolean sessionReady, String reasonCode, String reasonText,
-                                 String executorState, Integer executorPid, Double cpuPercent, Double memoryMb) {
+                                 String executorState, Integer executorPid, Double cpuPercent, Double memoryMb,
+                                 LocalRun localRun) {
         return database.update("""
                 UPDATE robots
                    SET status = ?, agent_state = ?, session_id = ?, session_state = ?, session_ready = ?,
                        reason_code = ?, reason_text = ?, executor_state = ?, executor_pid = ?,
                        cpu_percent = COALESCE(?, cpu_percent), memory_mb = COALESCE(?, memory_mb),
-                       last_heartbeat_at = now()
+                       last_heartbeat_at = now(),
+                       %s
                  WHERE id = ? AND machine_id = ?
-                """, status, agentState, sessionId, sessionState, sessionReady, reasonCode, reasonText, executorState,
-                executorPid, cpuPercent, memoryMb, robotId, machineId);
+                """.formatted(LOCAL_RUN_ASSIGNMENTS), status, agentState, sessionId, sessionState, sessionReady,
+                reasonCode, reasonText, executorState, executorPid, cpuPercent, memoryMb,
+                localRun != null, localRunName(localRun), localRunTrigger(localRun), robotId, machineId);
     }
 
     /** Akun Windows robot, termasuk sandinya yang MASIH TERSANDI. Hanya untuk jawaban windows-credential. */
