@@ -126,6 +126,10 @@ const badgeTone: Record<string, string> = {
   BUSY: "bg-blue-50 text-info ring-blue-200",
   DISCONNECTED: "bg-slate-100 text-slate-600 ring-slate-200",
   OFFLINE: "bg-slate-100 text-slate-600 ring-slate-200",
+  // Status mesin (V12).
+  ONLINE: "bg-emerald-50 text-ok ring-emerald-200",
+  MAINTENANCE: "bg-amber-50 text-warn ring-amber-200",
+  DISABLED: "bg-red-50 text-danger ring-red-200",
   NEW: "bg-blue-50 text-info ring-blue-200",
   IN_PROGRESS: "bg-amber-50 text-warn ring-amber-200",
   FAILED: "bg-red-50 text-danger ring-red-200",
@@ -156,6 +160,10 @@ const LABEL_KEADAAN: Record<string, string> = {
   AVAILABLE: "Tersedia",
   BUSY: "Sibuk",
   DISCONNECTED: "Terputus",
+  ONLINE: "Online",
+  OFFLINE: "Offline",
+  MAINTENANCE: "Pemeliharaan",
+  DISABLED: "Nonaktif",
   NEW: "Baru",
   IN_PROGRESS: "Diproses",
   FAILED: "Gagal",
@@ -165,6 +173,11 @@ const LABEL_KEADAAN: Record<string, string> = {
 /** Nama keadaan pekerjaan, robot, atau butir antrean — belum diterjemahkan. */
 export function labelKeadaan(value: string): string {
   return LABEL_KEADAAN[value?.toUpperCase()] ?? value;
+}
+
+/** Keadaan mesin yang diatur di halaman Mesin (Active, Maintenance, Disabled) — belum diterjemahkan. */
+export function labelKeadaanMesin(keadaan: string | null | undefined): string {
+  return ({ Active: "Aktif", Maintenance: "Pemeliharaan", Disabled: "Nonaktif" } as Record<string, string>)[keadaan ?? ""] ?? keadaan ?? "-";
 }
 
 export function Badge({ value, label }: { value: string; label?: string }) {

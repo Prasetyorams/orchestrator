@@ -3,11 +3,11 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, KeyRound, Pencil, Plus, Trash2 } from "lucide-react";
-import { OpenOrchestratorApi, TIPE_RUNTIME, errorText, type Machine } from "@/lib/api";
+import { KEADAAN_MESIN, OpenOrchestratorApi, TIPE_RUNTIME, errorText, type KeadaanMesin, type Machine } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
 import { cn, dateTimeOf } from "@/lib/utils";
-import { Badge, Button, Card, Galat, IconButton } from "@/components/ui/primitives";
+import { Badge, Button, Card, Galat, IconButton, labelKeadaanMesin } from "@/components/ui/primitives";
 import { DataTable } from "@/components/DataTable";
 import { BilahAlat } from "@/components/HalamanFolder";
 import { Dialog, Isian, kelasIsian } from "@/components/Dialog";
@@ -93,14 +93,61 @@ export default function Mesin() {
           kunci={(m) => m.name}
           kosong={mesin.isLoading ? "Memuat..." : "Belum ada data."}
           kolom={[
-            { judul: "Nama", sel: (m) => <span className="font-medium">{m.name}</span>, urut: (m) => m.name },
+            {
+              judul: "Nama",
+              sel: (m) => (
+                <div className="min-w-0">
+                  <span className="font-medium">{m.name}</span>
+                  {/* Nama komputer yang dilaporkan Robot Agent saat masuk, kalau
+                      berbeda: kunci mesin ini mungkin terpasang di komputer lain. */}
+                  {m.agentHostName && m.agentHostName.toLowerCase() !== m.name.toLowerCase() ? (
+                    <span
+                      className="block text-xs text-warn"
+                      title={t("Robot Agent terakhir masuk dari komputer bernama {0}, bukan {1}.", m.agentHostName, m.name)}
+                    >
+                      {t("komputer: {0}", m.agentHostName)}
+                    </span>
+                  ) : null}
+                </div>
+              ),
+              urut: (m) => m.name,
+            },
+            {
+              // Status V12: keadaan yang diatur di sini (Pemeliharaan,
+              // Nonaktif) mengalahkan denyutnya.
+              judul: "Status|mesin",
+              sel: (m) => <Badge value={m.status ?? "OFFLINE"} />,
+              urut: (m) => m.status,
+            },
+            {
+              judul: "Folder",
+              sel: (m) =>
+                m.folders?.length ? (
+                  <span className="text-muted" title={m.folders.join(", ")}>
+                    {m.folders.length > 2 ? t("{0} dan {1} lainnya", m.folders.slice(0, 2).join(", "), m.folders.length - 2) : m.folders.join(", ")}
+                  </span>
+                ) : (
+                  <span className="text-muted">-</span>
+                ),
+              urut: (m) => m.folders?.length ?? 0,
+            },
             {
               judul: "Robot Agent",
               sel: (m) =>
                 m.agentVersion ? (
-                  <span className="flex items-center gap-2" title={[m.agentOs, m.agentHostName].filter(Boolean).join(" · ")}>
+                  <span className="flex flex-wrap items-center gap-2" title={[m.agentOs, m.agentHostName].filter(Boolean).join(" · ")}>
                     <Badge value={m.agentOnline ? "AVAILABLE" : "OFFLINE"} label={t(m.agentOnline ? "Online" : "Offline")} />
                     <span className="text-xs text-muted">v{m.agentVersion}</span>
+                    {/* Agent tersambung tapi tidak melayani robot mana pun: tidak
+                        akan pernah mendapat job. Langkah berikutnya untuk admin. */}
+                    {m.agentOnline && (m.unattendedRobotCount ?? 0) === 0 ? (
+                      <span
+                        className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-warn"
+                        title={t("Agent mesin ini online, tapi belum ada robot unattended yang diikat ke mesin ini, jadi ia tidak akan mendapat job. Buat robot unattended dan pilih mesin ini.")}
+                      >
+                        {t("Belum ada robot")}
+                      </span>
+                    ) : null}
                   </span>
                 ) : (
                   <span className="text-muted">-</span>
@@ -353,6 +400,7 @@ function DialogUbahMesin({
   const [ket, setKet] = useState(mesin.description ?? "");
   const [runtime, setRuntime] = useState(isianAwal(mesin));
   const [lease, setLease] = useState(String(mesin.leaseSeconds ?? 180));
+  const [keadaan, setKeadaan] = useState<KeadaanMesin>(mesin.state ?? "Active");
   const [galat, setGalat] = useState("");
 
   const simpan = useMutation({
@@ -361,6 +409,7 @@ function DialogUbahMesin({
         description: ket,
         runtimes: runtimeDariIsian(runtime) ?? undefined,
         leaseSeconds: Number(lease),
+        state: keadaan,
       }),
     onSuccess: () => {
       onSelesai();
@@ -394,6 +443,18 @@ function DialogUbahMesin({
         </>
       }
     >
+      <Isian
+        label={t("Keadaan")}
+        petunjuk={t("Mesin dalam pemeliharaan atau nonaktif tidak mengambil job baru; job yang sedang berjalan dibiarkan selesai. Mesin nonaktif juga tidak bisa didaftarkan ke folder.")}
+      >
+        <select value={keadaan} onChange={(e) => setKeadaan(e.target.value as KeadaanMesin)} className={cn(kelasIsian, "w-56")}>
+          {KEADAAN_MESIN.map((k) => (
+            <option key={k} value={k}>
+              {t(labelKeadaanMesin(k))}
+            </option>
+          ))}
+        </select>
+      </Isian>
       <IsianRuntime nilai={runtime} onUbah={setRuntime} />
       <Isian label={t("Lease penyiapan (detik)")} petunjuk={t("Batas waktu menyiapkan sesi Windows tanpa kabar dari agent.")}>
         <input

@@ -76,11 +76,34 @@ api.interceptors.response.use(
     // hanya menghasilkan rentetan 401 di setiap panel yang menarik data.
     if (error.response?.status === 401 && typeof window !== "undefined") {
       setToken(null);
-      if (window.location.pathname !== "/login") window.location.href = "/login";
+      if (window.location.pathname !== "/login") window.location.href = alamatMasuk();
     }
     return Promise.reject(error);
   },
 );
+
+/**
+ * Layar masuk yang membawa alamat halaman ini, supaya sesudah masuk orangnya
+ * kembali ke sana — termasuk ke /assistant/connect dengan parameter Open
+ * Assistant yang masih utuh.
+ */
+export function alamatMasuk(): string {
+  if (typeof window === "undefined") return "/login";
+
+  const sekarang = window.location.pathname + window.location.search;
+  return sekarang === "/" ? "/login" : `/login?next=${encodeURIComponent(sekarang)}`;
+}
+
+/**
+ * Alamat ?next= yang boleh dituju sesudah masuk: hanya jalur di dasbor ini
+ * sendiri. "//situs-lain" dan "https://..." ditolak — tanpa itu tautan masuk
+ * bisa dipakai untuk melempar orang ke situs lain sesudah ia memasukkan sandi.
+ */
+export function jalurKembaliAman(next: string | null): string {
+  if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return "/";
+  if (next === "/login" || next.startsWith("/login?")) return "/";
+  return next;
+}
 
 /**
  * Pesan galat dari server, atau pesan bawaan kalau bentuknya tidak dikenal —
@@ -190,12 +213,51 @@ export const TIPE_RUNTIME = ["Production", "Testing", "Development"] as const;
 /** Prioritas job. Inherited = ikut prioritas bawaan prosesnya. */
 export const PRIORITAS_JOB = ["Inherited", "Low", "Normal", "High"] as const;
 
+/**
+ * Status mesin (V12), dihitung server: DISABLED dan MAINTENANCE dari keadaan
+ * yang diatur orang; ONLINE kalau agent atau robot v1-nya baru berdenyut;
+ * DISCONNECTED kalau pernah tersambung; selebihnya OFFLINE.
+ */
+export type StatusMesin = "ONLINE" | "OFFLINE" | "DISCONNECTED" | "MAINTENANCE" | "DISABLED";
+
+/** Keadaan mesin yang diatur di halaman Mesin. Hanya Active yang mengambil job baru. */
+export type KeadaanMesin = "Active" | "Maintenance" | "Disabled";
+
+export const KEADAAN_MESIN: KeadaanMesin[] = ["Active", "Maintenance", "Disabled"];
+
+/** Mesin yang terdaftar di sebuah folder (GET /api/folders/{id}/machines). */
+export type MesinFolder = {
+  id: string;
+  name: string;
+  /** Nama komputer menurut Robot Agent; null kalau belum pernah tersambung. */
+  hostname: string | null;
+  type: string;
+  state: KeadaanMesin;
+  status: StatusMesin;
+  slots: number;
+  /** Robot FOLDER INI yang bekerja di mesin itu. */
+  folderRobots: number;
+  /** Tipe runtime → jumlah. */
+  runtimes: Record<string, number>;
+  assignedAt?: string;
+  assignedBy?: string | null;
+};
+
+/** Mesin Start Job untuk satu proses: yang terdaftar di folder PROSESNYA. */
+export type MesinProses = {
+  processId: string;
+  processName: string;
+  folderId: string;
+  /** available: bisa dipilih — ONLINE dan punya runtime. Yang lain tampil mati. */
+  machines: (MesinFolder & { available: boolean })[];
+};
+
 /** Pilihan Execution settings Start Job untuk satu folder (GET /api/jobs/start-options). */
 export type PilihanMulai = {
   /** Katalog tipe runtime, urutan tampil. */
   runtimeTypes: string[];
-  /** Mesin folder ini yang punya runtime. */
-  machines: { name: string; type: string; online: boolean; runtimes: Record<string, number> }[];
+  /** Mesin yang terdaftar di folder ini dan punya runtime. */
+  machines: { id: string; name: string; type: string; online: boolean; status: StatusMesin; runtimes: Record<string, number> }[];
   /** Robot folder ini yang bisa mengambil job di salah satu mesin itu. */
   robots: {
     name: string;
@@ -284,6 +346,10 @@ export type Machine = {
   activeJobs?: number;
   /** Tipe runtime → jumlah. Jumlahnya adalah slot mesin: job yang boleh berjalan bersamaan. */
   runtimes?: Record<string, number>;
+  state?: KeadaanMesin;
+  status?: StatusMesin;
+  /** Folder bersama tempat mesin ini terdaftar. */
+  folders?: string[] | null;
 };
 
 /** Setelan robot yang bisa diubah dari dasbor (POST/PUT /api/robots). */
@@ -523,6 +589,19 @@ export type Role = {
 export type SumberIzin = { resource: string; actions: string[] };
 
 /** Orang yang sedang masuk, beserta izin perannya. */
+/** Open Assistant yang tersambung atas nama pengguna ini (masuk lewat dasbor). */
+export type SambunganAssistant = {
+  id: string;
+  machineName: string;
+  robotName: string;
+  clientVersion?: string | null;
+  createdAt: string;
+  lastUsedAt: string;
+  expiresAt: string;
+  /** Sambungan yang sedang dipakai memanggil API ini. */
+  current?: boolean;
+};
+
 export type Profil = User & {
   tenantName: string;
   tenantDisplayName?: string | null;
@@ -600,9 +679,21 @@ export type FolderKelola = FolderNode & {
 export type FolderAnggota = {
   folder: FolderNode;
   users: { id: string; username: string; displayName: string; role: string; isActive: boolean; assignedAt: string }[];
-  robots: { id: string; name: string; machineName: string | null; type: string; assignedAt: string }[];
+  robots: {
+    id: string;
+    name: string;
+    machineName: string | null;
+    type: string;
+    assignedAt: string;
+    /** Mesin tempat robot itu bekerja; null kalau mesinnya belum dikenal. */
+    machineId?: string | null;
+    /** Mesin robot itu terdaftar di folder ini; kalau tidak, robotnya tidak mengambil job folder ini. */
+    machineRegistered?: boolean;
+  }[];
   canManageUsers: boolean;
   canManageRobots: boolean;
+  /** Boleh mendaftarkan dan mengeluarkan mesin folder ini. */
+  canManageMachines: boolean;
 };
 
 // ---------------------------------------------------------------------
@@ -741,6 +832,19 @@ export const OpenOrchestratorApi = {
   changePassword: (currentPassword: string, newPassword: string) =>
     post<{ status: string }>("/api/auth/password", { currentPassword, newPassword }),
 
+  // --- Open Assistant: masuk lewat dasbor ---
+  /** Persetujuan di /assistant/connect: kode sekali pakai, sudah berbentuk tautan openassistant://. */
+  assistantCode: (body: {
+    client: string;
+    redirectUri: string;
+    codeChallenge: string;
+    codeChallengeMethod: string;
+    state: string;
+    machine?: string | null;
+  }) => post<{ redirectUrl: string; expiresAt: string }>("/api/auth/assistant/code", body),
+  assistantSessions: () => get<SambunganAssistant[]>("/api/auth/assistant/sessions"),
+  revokeAssistantSession: (id: string) => del<{ ok: boolean }>(`/api/auth/assistant/sessions/${seg(id)}`),
+
   // --- folder ---
   folders: () => get<FolderTree>("/api/folders"),
   foldersManage: () => get<FolderKelola[]>("/api/folders/manage"),
@@ -759,6 +863,16 @@ export const OpenOrchestratorApi = {
     post<{ ok: boolean }>(`/api/folders/${seg(id)}/robots`, { robotName }),
   unassignRobot: (id: string, robotName: string) =>
     del<{ ok: boolean }>(`/api/folders/${seg(id)}/robots/${seg(robotName)}`),
+  /** Mesin yang terdaftar di folder itu — hanya mesin ini yang menjalankan job folder itu. */
+  folderMachines: (id: string) => get<MesinFolder[]>(`/api/folders/${seg(id)}/machines`),
+  /** Mesin yang bisa didaftarkan: belum terdaftar, dan tidak dinonaktifkan. */
+  availableFolderMachines: (id: string) => get<MesinFolder[]>(`/api/folders/${seg(id)}/available-machines`),
+  /** Satu transaksi: satu mesin yang ditolak menggagalkan semuanya. */
+  addFolderMachines: (id: string, machineIds: string[]) =>
+    post<{ added: number; skipped: number }>(`/api/folders/${seg(id)}/machines/bulk`, { machineIds }),
+  /** Mesinnya tetap ada; ia hanya tidak lagi menjalankan job folder ini. */
+  removeFolderMachine: (id: string, machineId: string) =>
+    del<{ ok: boolean }>(`/api/folders/${seg(id)}/machines/${seg(machineId)}`),
 
   // --- dasbor ---
   dashboard: (folderId?: string | null) => get<Dashboard>("/api/dashboard", dalam(folderId)),
@@ -776,10 +890,14 @@ export const OpenOrchestratorApi = {
   startJob: (body: {
     processName: string;
     folderId?: string;
+    /** Bila ada: proses dan foldernya ditentukan dari id ini. */
+    processId?: string;
     /** Akun: robot yang diminta; kosong = robot mana pun di folder. */
     robotName?: string;
     /** Mesin yang diminta; kosong = mesin mana pun. */
     machineName?: string;
+    /** Sama dengan machineName, lewat id. Harus terdaftar di folder proses dan ONLINE. */
+    machineId?: string;
     runtimeType?: string;
     /** Low, Normal, High, atau Inherited (ikut prioritas proses). */
     priority?: string;
@@ -790,6 +908,9 @@ export const OpenOrchestratorApi = {
   }) => post<{ ok: boolean; id: string; ids: string[] }>("/api/jobs", body),
   /** Pilihan tipe runtime, akun, dan mesin Start Job untuk satu folder. */
   startOptions: (folderId: string) => get<PilihanMulai>("/api/jobs/start-options", { folderId }),
+  /** Mesin Start Job: yang terdaftar di folder proses itu, beserta statusnya. */
+  processMachines: (processId: string, runtimeType?: string) =>
+    get<MesinProses>(`/api/processes/${seg(processId)}/available-machines`, { runtimeType: runtimeType || undefined }),
   stopJob: (id: string) => post<{ ok: boolean }>(`/api/jobs/${seg(id)}/stop`),
   /** Matikan paksa: robot menerima KillJob tanpa menunggu jeda berhenti rapi. */
   killJob: (id: string) => post<{ ok: boolean }>(`/api/jobs/${seg(id)}/kill`),
@@ -819,7 +940,7 @@ export const OpenOrchestratorApi = {
   deleteMachine: (name: string) => del<{ ok: boolean }>(`/api/machines/${seg(name)}`),
   updateMachine: (
     name: string,
-    body: { description?: string; leaseSeconds?: number; runtimes?: Record<string, number> },
+    body: { description?: string; leaseSeconds?: number; runtimes?: Record<string, number>; state?: KeadaanMesin },
   ) =>
     put<{ ok: boolean }>(`/api/machines/${seg(name)}`, body),
   /** Kuncinya hanya terlihat SEKALI di jawaban ini. */

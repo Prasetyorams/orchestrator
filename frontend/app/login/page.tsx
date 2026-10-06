@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { OpenOrchestratorApi, setToken } from "@/lib/api";
+import { OpenOrchestratorApi, jalurKembaliAman, setToken } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { Logo } from "@/components/Logo";
 import { Button, Card, CardBody } from "@/components/ui/primitives";
@@ -24,7 +24,10 @@ export default function LoginPage() {
     try {
       const result = await OpenOrchestratorApi.login(username, password);
       setToken(result.token);
-      router.push("/");
+      // Kembali ke halaman yang tadi meminta masuk — mis. persetujuan Open
+      // Assistant — bukan selalu ke Beranda. Dibaca lewat window, sama seperti
+      // halaman lain di dasbor ini.
+      router.push(jalurKembaliAman(new URLSearchParams(window.location.search).get("next")));
     } catch {
       // Pesannya sengaja tidak membedakan "pengguna tidak ada" dari "sandi
       // salah" — sama seperti di backend, dan karena alasan yang sama.

@@ -28,10 +28,12 @@ import { useNotifikasi } from "@/components/Notifikasi";
  * Start Job: pilih proses, lalu DI MANA dan SEBAGAI SIAPA ia dijalankan —
  * tipe runtime, akun, mesin — berapa kali, dan dengan prioritas apa.
  *
- * Pilihan akun dan mesin datang dari server (GET /api/jobs/start-options) dan
- * saling menyaring: runtime menyaring mesin dan akun, akun menyaring mesin,
- * mesin menyaring akun. Server memeriksa kombinasi yang sama saat job dibuat,
- * jadi yang bisa dipilih di sini adalah yang akan diterima di sana.
+ * Pilihan runtime dan akun datang dari server (GET /api/jobs/start-options),
+ * mesinnya dari folder PROSES yang dipilih (GET /api/processes/{id}/available-machines):
+ * hanya mesin yang terdaftar di sana. Pilihan-pilihan itu saling menyaring:
+ * runtime menyaring mesin dan akun, akun menyaring mesin, mesin menyaring
+ * akun. Server memeriksa kombinasi yang sama saat job dibuat, jadi yang bisa
+ * dipilih di sini adalah yang akan diterima di sana.
  */
 
 /** Sama dengan JobService.MAX_JOBS_PER_REQUEST. */
@@ -79,10 +81,12 @@ export function MulaiJob({
 
   const data = pilihan.data;
 
-  // Tipe runtime yang dimiliki mesin folder ini, beserta jumlahnya.
+  // Tipe runtime yang dimiliki mesin folder ini, beserta jumlahnya. Mesin
+  // yang dinonaktifkan tidak dihitung — sama dengan pemeriksaan server.
   const runtimeTersedia = useMemo(() => {
     const total = new Map<string, number>();
     for (const m of data?.machines ?? []) {
+      if (m.status === "DISABLED") continue;
       for (const [tipe, n] of Object.entries(m.runtimes)) total.set(tipe, (total.get(tipe) ?? 0) + n);
     }
     return (data?.runtimeTypes ?? []).filter((tipe) => total.has(tipe)).map((tipe) => ({ tipe, jumlah: total.get(tipe)! }));
@@ -93,16 +97,29 @@ export function MulaiJob({
   const runtimeDipilih = runtimeTersedia.some((r) => r.tipe === runtime) ? runtime : (runtimeTersedia[0]?.tipe ?? "");
   const mesinDari = (nama: string) => data?.machines.find((m) => m.name === nama);
 
+  const prosesDipilih = (proses.data ?? []).find((p) => p.name === namaProses);
+
+  // Mesin dari folder PROSESNYA, bukan semua mesin penyewa (V12). Yang tidak
+  // online tetap datang — tampil tidak aktif beserta statusnya.
+  const mesinProses = useQuery({
+    queryKey: ["process-machines", prosesDipilih?.id ?? "", runtimeDipilih],
+    queryFn: () => OpenOrchestratorApi.processMachines(prosesDipilih!.id, runtimeDipilih),
+    enabled: !!prosesDipilih && !!runtimeDipilih,
+    refetchInterval: 15_000,
+  });
+
   const robotCocok = (data?.robots ?? []).filter(
     (r) => (mesinDari(r.machineName)?.runtimes[runtimeDipilih] ?? 0) > 0 && (!mesin || r.machineName === mesin),
   );
   const akunDipilih = robotCocok.some((r) => r.name === akun) ? akun : "";
   const robotAkun = robotCocok.find((r) => r.name === akunDipilih);
 
-  const mesinCocok = (data?.machines ?? []).filter(
+  const mesinCocok = (mesinProses.data?.machines ?? []).filter(
     (m) => (m.runtimes[runtimeDipilih] ?? 0) > 0 && (!robotAkun || robotAkun.machineName === m.name),
   );
-  const mesinDipilih = mesinCocok.some((m) => m.name === mesin) ? mesin : "";
+  // Hanya mesin yang bisa dipilih (ONLINE): yang lain dikirim pun ditolak server.
+  const mesinTerpilih = mesinCocok.find((m) => m.name === mesin && m.available);
+  const mesinDipilih = mesinTerpilih ? mesin : "";
 
   // Akun pengguna: robot attended — robot di PC seseorang, termasuk milik
   // yang sedang membuka dasbor ("jalankan sebagai diri sendiri"), di atas.
@@ -112,7 +129,6 @@ export function MulaiJob({
     .sort((a, b) => Number(b.self) - Number(a.self) || a.name.localeCompare(b.name));
   const akunRobot = robotCocok.filter((r) => r.type !== "Attended");
 
-  const prosesDipilih = (proses.data ?? []).find((p) => p.name === namaProses);
   const prioritasProses = prosesDipilih?.priority ?? "Normal";
   const prioritasEfektif = prioritas === "Inherited" ? prioritasProses : prioritas;
 
@@ -128,10 +144,11 @@ export function MulaiJob({
     mutationFn: () =>
       OpenOrchestratorApi.startJob({
         processName: namaProses,
+        processId: prosesDipilih?.id,
         folderId: folder.id,
         runtimeType: runtimeDipilih,
         robotName: akunDipilih || undefined,
-        machineName: mesinDipilih || undefined,
+        machineId: mesinTerpilih?.id,
         count: Number(jumlah),
         priority: prioritas,
         inputJson: masukan.trim() || undefined,
@@ -144,8 +161,14 @@ export function MulaiJob({
       beritahu(hasil.ids.length > 1 ? t("{0} job berhasil dijalankan.", hasil.ids.length) : t("Job berhasil dijalankan."));
       onTutup();
     },
-    // Laci TIDAK ditutup: yang sudah diisi tetap ada untuk dibetulkan.
-    onError: (e) => setGalat(errorText(e)),
+    // Laci TIDAK ditutup: yang sudah diisi tetap ada untuk dibetulkan. Mesin
+    // yang baru saja offline atau dikeluarkan dari folder ditolak server
+    // (409) — daftarnya disegarkan supaya statusnya yang baru terlihat.
+    onError: (e) => {
+      setGalat(errorText(e));
+      klien.invalidateQueries({ queryKey: ["process-machines"] });
+      klien.invalidateQueries({ queryKey: ["start-options", folder.id] });
+    },
     onSettled: () => {
       sedangMengirim.current = false;
     },
@@ -169,7 +192,7 @@ export function MulaiJob({
     setGalat("");
 
     if (!namaProses) return setGalat(t("Pilih prosesnya dulu."));
-    if (!runtimeDipilih) return setGalat(t("Tidak ada runtime yang tersedia. Untuk menjalankan job, tambahkan runtime ke mesin di folder ini."));
+    if (!runtimeDipilih) return setGalat(t("Tidak ada runtime yang tersedia. Untuk menjalankan job, daftarkan mesin ke folder ini dan pastikan mesinnya punya runtime."));
     if (galatJumlah) return setBukaSetelan(true);
 
     // JSON diperiksa DI SINI. Dikirim apa adanya, yang gagal justru robotnya
@@ -260,7 +283,10 @@ export function MulaiJob({
             <p id="mulai-runtime-galat" className="mt-1.5 flex items-start gap-1.5 text-xs text-danger">
               <CircleAlert size={14} className="mt-px shrink-0" />
               <span>
-                {t("Tidak ada runtime yang tersedia. Untuk menjalankan job, tambahkan runtime ke mesin di folder ini.")}
+                {t("Tidak ada runtime yang tersedia. Untuk menjalankan job, daftarkan mesin ke folder ini dan pastikan mesinnya punya runtime.")}{" "}
+                <Link href="/folder-settings?tab=mesin" className="font-medium underline underline-offset-2">
+                  {t("Atur mesin folder")}
+                </Link>
                 {boleh("machines.update") ? (
                   <>
                     {" "}
@@ -322,7 +348,11 @@ export function MulaiJob({
         <Medan
           label={t("Mesin|satu")}
           idMedan="mulai-mesin"
-          petunjuk={t("Cari mesin atau templat mesin yang sudah dikonfigurasi.")}
+          petunjuk={
+            prosesDipilih
+              ? t("Hanya mesin yang terdaftar di folder proses ini. Mesin yang tidak online tampil, tapi tidak bisa dipilih.")
+              : t("Pilih proses dulu untuk melihat mesin folder prosesnya.")
+          }
           tombol={
             boleh("machines.read") ? (
               <TombolSamping
@@ -340,16 +370,17 @@ export function MulaiJob({
             id="mulai-mesin"
             value={mesinDipilih}
             onChange={(e) => setMesin(e.target.value)}
-            disabled={!pilihan.isSuccess || tanpaRuntime}
+            disabled={!pilihan.isSuccess || tanpaRuntime || !prosesDipilih}
             className={kelasIsian}
           >
             <option value="">{t("Mesin mana pun")}</option>
             {mesinCocok.map((m) => (
-              <option key={m.name} value={m.name}>
-                {`${m.name}${m.type && m.type !== "Standard" ? ` · ${m.type}` : ""} — ${t(m.online ? "Online" : "Offline")}`}
+              <option key={m.id} value={m.name} disabled={!m.available}>
+                {`${m.available ? "✓" : "○"} ${m.name}${m.type && m.type !== "Standard" ? ` · ${m.type}` : ""} — ${t(labelKeadaan(m.status))}`}
               </option>
             ))}
           </select>
+          {mesinProses.isError ? <p className="mt-1.5 text-xs text-danger">{errorText(mesinProses.error)}</p> : null}
         </Medan>
 
         {/* D. Berapa kali */}
@@ -572,7 +603,7 @@ function DialogTugaskanRobot({
       ) : (
         <Isian
           label={t("Robot|satu")}
-          petunjuk={t("Robot yang ditugaskan ke folder ini bisa mengambil job prosesnya.")}
+          petunjuk={t("Robot yang ditugaskan ke folder ini bisa mengambil job prosesnya, selama mesinnya juga terdaftar di folder ini.")}
         >
           <select value={nama} onChange={(e) => setNama(e.target.value)} className={kelasIsian} disabled={!bolehAtur}>
             <option value="">—</option>

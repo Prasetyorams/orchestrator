@@ -30,7 +30,10 @@ import { TanpaIzin } from "@/components/HalamanFolder";
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
 
-  if (path === "/login") {
+  // Layar masuk dan persetujuan Open Assistant berdiri sendiri, tanpa bilah
+  // dan folder: yang kedua hanya meminta satu keputusan, dan tidak boleh
+  // tertutup menu atau beranda yang sedang dimuat.
+  if (path === "/login" || path === "/assistant/connect") {
     return <main className="min-h-screen">{children}</main>;
   }
 

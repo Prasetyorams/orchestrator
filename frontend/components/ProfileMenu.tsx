@@ -2,10 +2,10 @@
 
 import { useCallback, useState, type ComponentType, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, KeyRound, LogOut, UserCog } from "lucide-react";
+import { ChevronDown, KeyRound, Laptop, LogOut, UserCog } from "lucide-react";
 import { OpenOrchestratorApi, errorText, setToken, type Profil } from "@/lib/api";
 import { useT } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
+import { cn, dateTimeOf } from "@/lib/utils";
 import { Button } from "@/components/ui/primitives";
 import { Dialog, Isian, kelasIsian } from "@/components/Dialog";
 
@@ -28,7 +28,7 @@ export function ProfileMenu({
 }) {
   const { t } = useT();
   const me = useQuery({ queryKey: ["me"], queryFn: OpenOrchestratorApi.me });
-  const [dialog, setDialog] = useState<"profil" | "sandi" | null>(null);
+  const [dialog, setDialog] = useState<"profil" | "sandi" | "assistant" | null>(null);
 
   // Stabil, bukan fungsi baru tiap render. Dialog menjalankan ulang efek
   // fokusnya setiap kali onTutup berganti, dan TopNav dirender ulang tiap
@@ -38,7 +38,7 @@ export function ProfileMenu({
 
   const nama = me.data?.displayName || me.data?.username || "...";
 
-  function buka(d: "profil" | "sandi") {
+  function buka(d: "profil" | "sandi" | "assistant") {
     onTutup();
     setDialog(d);
   }
@@ -87,6 +87,9 @@ export function ProfileMenu({
           <ItemMenu ikon={KeyRound} onClick={() => buka("sandi")}>
             {t("Ubah kata sandi")}
           </ItemMenu>
+          <ItemMenu ikon={Laptop} onClick={() => buka("assistant")}>
+            {t("Open Assistant tersambung")}
+          </ItemMenu>
 
           <div className="my-1 border-t border-line" />
 
@@ -101,6 +104,7 @@ export function ProfileMenu({
           waktu dialog terakhir ditutup. */}
       {dialog === "profil" && me.data ? <DialogProfil awal={me.data} onTutup={tutupDialog} /> : null}
       {dialog === "sandi" ? <DialogSandi onTutup={tutupDialog} /> : null}
+      {dialog === "assistant" ? <DialogAssistant onTutup={tutupDialog} /> : null}
     </div>
   );
 }
@@ -293,6 +297,9 @@ function DialogSandi({ onTutup }: { onTutup: () => void }) {
         }
       >
         <p className="text-sm text-ink">{t("Kata sandi berhasil diganti.")}</p>
+        <p className="mt-2 text-sm text-muted">
+          {t("Open Assistant yang tersambung atas nama Anda ikut terputus dan perlu disambungkan lagi.")}
+        </p>
       </Dialog>
     );
   }
@@ -351,6 +358,83 @@ function DialogSandi({ onTutup }: { onTutup: () => void }) {
 
         <button type="submit" className="sr-only" tabIndex={-1} aria-hidden="true" />
       </form>
+    </Dialog>
+  );
+}
+
+/**
+ * Open Assistant yang tersambung atas nama orang ini ("masuk lewat dasbor"),
+ * dengan tombol Cabut: token di PC itu berhenti saat itu juga, bukan saat
+ * kedaluwarsa satu jam lagi.
+ */
+function DialogAssistant({ onTutup }: { onTutup: () => void }) {
+  const { t } = useT();
+  const klien = useQueryClient();
+  const [galat, setGalat] = useState("");
+
+  const daftar = useQuery({ queryKey: ["assistant-sessions"], queryFn: OpenOrchestratorApi.assistantSessions });
+
+  const cabut = useMutation({
+    mutationFn: OpenOrchestratorApi.revokeAssistantSession,
+    onSuccess: () => klien.invalidateQueries({ queryKey: ["assistant-sessions"] }),
+    onError: (e) => setGalat(errorText(e)),
+  });
+
+  return (
+    <Dialog
+      judul={t("Open Assistant tersambung")}
+      terbuka
+      onTutup={onTutup}
+      lebar="max-w-xl"
+      aksi={
+        <Button variant="primary" onClick={onTutup}>
+          {t("Tutup")}
+        </Button>
+      }
+    >
+      <p className="mb-3 text-sm text-muted">
+        {t("Open Assistant yang masuk lewat dasbor atas nama Anda. Mencabut sambungan langsung menghentikannya; Open Assistant itu perlu disambungkan lagi.")}
+      </p>
+
+      {daftar.isLoading ? <p className="text-sm text-muted">{t("Memuat...")}</p> : null}
+
+      {daftar.isSuccess && daftar.data.length === 0 ? (
+        <p className="rounded-lg bg-canvas px-3 py-4 text-center text-sm text-muted">
+          {t("Belum ada Open Assistant yang tersambung.")}
+        </p>
+      ) : null}
+
+      <ul className="divide-y divide-line">
+        {(daftar.data ?? []).map((s) => (
+          <li key={s.id} className="flex items-center gap-3 py-3">
+            <Laptop className="h-5 w-5 shrink-0 text-muted" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-ink">{s.machineName}</p>
+              <p className="truncate text-xs text-muted">
+                {t("Robot {0} · terakhir aktif {1}", s.robotName, dateTimeOf(s.lastUsedAt))}
+              </p>
+              <p className="truncate text-xs text-muted">
+                {t("Tersambung sejak {0}", dateTimeOf(s.createdAt))}
+                {s.clientVersion ? ` · v${s.clientVersion}` : ""}
+              </p>
+            </div>
+            <Button
+              className="text-danger"
+              disabled={cabut.isPending}
+              onClick={() => {
+                if (window.confirm(t("Putuskan Open Assistant di {0}? Ia perlu disambungkan lagi.", s.machineName))) {
+                  setGalat("");
+                  cabut.mutate(s.id);
+                }
+              }}
+            >
+              {t("Cabut")}
+            </Button>
+          </li>
+        ))}
+      </ul>
+
+      {galat ? <p className="mt-2 text-sm text-danger">{galat}</p> : null}
     </Dialog>
   );
 }

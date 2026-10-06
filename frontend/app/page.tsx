@@ -150,7 +150,7 @@ function IsiBeranda({ folder }: { folder: FolderNode }) {
           label={t("Machines")}
           value={pustaka.machines}
           icon={Laptop}
-          href="/monitoring/robots"
+          href="/folder-settings?tab=mesin"
           hint={t("Robot: {0}", pustaka.robots)}
         />
       </section>
