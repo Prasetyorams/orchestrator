@@ -2,6 +2,7 @@ package id.jakforge.openorchestrator.dto.request;
 
 import id.jakforge.openorchestrator.common.RequestBodies;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -25,5 +26,16 @@ public record PublishPackageRequest(String name, String version, String descript
                 RequestBodies.text(body, "entryPoint"),
                 RequestBodies.text(body, "environment", DEFAULT_ENVIRONMENT),
                 RequestBodies.text(body, "contentBase64"));
+    }
+
+    /**
+     * Medan multipart/form-data (packages.upload.binary): nama medan sama
+     * dengan badan JSON, isinya berkas terpisah (bagian {@code file}).
+     */
+    public static PublishPackageRequest fromForm(Map<String, String> fields) {
+        Map<String, Object> body = new HashMap<>(fields == null ? Map.of() : fields);
+        // contentBase64 tidak berlaku di multipart; isinya hanya dari bagian berkas.
+        body.remove("contentBase64");
+        return fromBody(body);
     }
 }

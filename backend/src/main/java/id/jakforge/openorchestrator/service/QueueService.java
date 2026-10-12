@@ -3,6 +3,7 @@ package id.jakforge.openorchestrator.service;
 import id.jakforge.openorchestrator.common.ApiException;
 import id.jakforge.openorchestrator.common.PageLimits;
 import id.jakforge.openorchestrator.common.Uuids;
+import id.jakforge.openorchestrator.config.OpenOrchestratorProperties;
 import id.jakforge.openorchestrator.dto.request.AddQueueItemRequest;
 import id.jakforge.openorchestrator.dto.request.CreateQueueRequest;
 import id.jakforge.openorchestrator.dto.request.MoveToFolderRequest;
@@ -15,6 +16,7 @@ import id.jakforge.openorchestrator.model.QueueItemStatus;
 import id.jakforge.openorchestrator.model.Severity;
 import id.jakforge.openorchestrator.repository.AlertRepository;
 import id.jakforge.openorchestrator.repository.QueueRepository;
+import id.jakforge.openorchestrator.repository.QueueRepository.AbandonedItem;
 import id.jakforge.openorchestrator.repository.QueueRepository.QueueItemSummary;
 import id.jakforge.openorchestrator.repository.QueueRepository.QueueSettings;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
@@ -22,8 +24,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeSet;
 import java.util.UUID;
 
 /**
@@ -39,12 +45,18 @@ public class QueueService {
     static final int DEFAULT_ITEM_PAGE_SIZE = 200;
     static final int MAX_ITEM_PAGE_SIZE = 2000;
 
+    /** errorCode: hasil dilaporkan untuk butir yang tidak sedang IN_PROGRESS. */
+    public static final String ITEM_NOT_IN_PROGRESS = "QUEUE_ITEM_NOT_IN_PROGRESS";
+    /** errorCode: Executor melaporkan butir yang dipegang job lain. */
+    public static final String ITEM_HELD_BY_OTHER_JOB = "QUEUE_ITEM_HELD_BY_OTHER_JOB";
+
     private static final String ITEM_NOT_FOUND = "Butir antrean tidak ada.";
     private static final String ALERT_SOURCE = "queues";
 
     private final QueueRepository queueRepository;
     private final AlertRepository alertRepository;
     private final FolderAccessService folderAccessService;
+    private final OpenOrchestratorProperties properties;
 
     /** Tanpa {@code folderId}: antrean seluruh penyewa. */
     public List<Map<String, Object>> findAll(OpenOrchestratorPrincipal principal, String folderId) {
@@ -121,11 +133,18 @@ public class QueueService {
         return CreatedResponse.of(itemId);
     }
 
+    /**
+     * Ambil butir berikutnya. Dengan token Executor (job Robot Agent) butirnya
+     * dicatat milik job itu: kalau job-nya berakhir tanpa melaporkan hasil,
+     * butirnya dilepas (JobOutcomeService), bukan tertahan selamanya.
+     */
     @Transactional
     public NextQueueItemResponse claimNextItem(OpenOrchestratorPrincipal principal, String queueName,
                                                NextQueueItemRequest request) {
+        UUID jobId = principal.isExecutor() ? principal.jobId() : null;
+
         return new NextQueueItemResponse(
-                queueRepository.claimNextItem(principal.tenantId(), queueName, request.robotName()).orElse(null));
+                queueRepository.claimNextItem(principal.tenantId(), queueName, request.robotName(), jobId).orElse(null));
     }
 
     /**
@@ -150,6 +169,20 @@ public class QueueService {
         QueueItemSummary item = queueRepository.findItemSummary(tenantId, itemId)
                 .orElseThrow(() -> ApiException.notFound(ITEM_NOT_FOUND));
 
+        // Hanya butir yang sedang diproses yang menerima hasil. Butir yang
+        // sudah dilepas karena job-nya berakhir (atau ditinggalkan penyapu)
+        // mungkin sedang dipegang pengambil lain; laporan terlambat tidak
+        // boleh menimpa hasil mereka.
+        if (!QueueItemStatus.IN_PROGRESS.name().equals(item.status())) {
+            throw ApiException.conflict("Butir ini tidak sedang diproses (statusnya "
+                    + item.status() + "); hasilnya tidak dicatat.").withCode(ITEM_NOT_IN_PROGRESS);
+        }
+
+        if (principal.isExecutor() && item.jobId() != null && !item.jobId().equals(principal.jobId())) {
+            throw ApiException.conflict("Butir ini sedang dipegang job lain; hasilnya tidak dicatat.")
+                    .withCode(ITEM_HELD_BY_OTHER_JOB);
+        }
+
         if (status == QueueItemStatus.FAILED) {
             long maxRetries = queueRepository.findSettings(tenantId, item.queueName())
                     .map(QueueSettings::maxRetries)
@@ -170,6 +203,39 @@ public class QueueService {
         queueRepository.completeItem(tenantId, itemId, status, request.output(), request.exception());
 
         return QueueItemResultResponse.completed();
+    }
+
+    /**
+     * Penyapu: butir yang IN_PROGRESS lebih lama dari
+     * {@code openorchestrator.queues.abandon-after} (bawaan 24 jam) menjadi
+     * ABANDONED. Menolong butir yang tidak dipegang job Robot Agent — diambil
+     * robot v1 atau pengguna — dan butir yang job-nya berhasil tanpa
+     * melaporkan hasil. Satu peringatan per penyewa per putaran.
+     *
+     * @return jumlah butir yang ditinggalkan
+     */
+    @Transactional
+    public int abandonStaleItems() {
+        Duration after = properties.queues().abandonAfter();
+        List<AbandonedItem> items = queueRepository.abandonStale(after.toSeconds(),
+                "Lebih dari " + describe(after) + " berstatus IN_PROGRESS tanpa hasil; ditinggalkan otomatis.");
+
+        Map<UUID, List<AbandonedItem>> byTenant = new LinkedHashMap<>();
+        for (AbandonedItem item : items) byTenant.computeIfAbsent(item.tenantId(), id -> new ArrayList<>()).add(item);
+
+        byTenant.forEach((tenantId, abandoned) -> {
+            String queues = String.join(", ", new TreeSet<>(abandoned.stream().map(AbandonedItem::queueName).toList()));
+            alertRepository.insert(tenantId, Severity.Warning, "Butir antrean ditinggalkan",
+                    abandoned.size() + " butir di antrean " + queues + " lebih dari " + describe(after)
+                            + " berstatus Diproses tanpa hasil, dan ditandai Abandoned.", ALERT_SOURCE);
+        });
+
+        return items.size();
+    }
+
+    static String describe(Duration duration) {
+        if (duration.toMinutes() % 60 == 0 && duration.toHours() > 0) return duration.toHours() + " jam";
+        return duration.toMinutes() + " menit";
     }
 
     public void deleteItem(OpenOrchestratorPrincipal principal, String itemId) {

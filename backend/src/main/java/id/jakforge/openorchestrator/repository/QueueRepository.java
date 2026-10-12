@@ -20,8 +20,20 @@ public class QueueRepository {
     public record QueueSettings(boolean acceptDuplicates, int maxRetries) {
     }
 
-    /** Yang perlu diketahui tentang satu butir saat hasilnya dilaporkan. */
-    public record QueueItemSummary(String queueName, long retries, String reference) {
+    /**
+     * Yang perlu diketahui tentang satu butir saat hasilnya dilaporkan.
+     *
+     * @param jobId job yang memegangnya (V15); null kalau diambil pengguna atau robot v1
+     */
+    public record QueueItemSummary(String queueName, long retries, String reference, String status, UUID jobId) {
+    }
+
+    /** Butir yang masih dipegang job yang baru berakhir, dengan jatah percobaan antreannya. */
+    public record HeldItem(UUID id, String queueName, String reference, long retries, int maxRetries) {
+    }
+
+    /** Butir yang ditinggalkan penyapu. */
+    public record AbandonedItem(UUID tenantId, String queueName, String reference) {
     }
 
     private final Database database;
@@ -175,9 +187,11 @@ public class QueueRepository {
 
     public Optional<QueueItemSummary> findItemSummary(UUID tenantId, UUID itemId) {
         return database.query("""
-                SELECT queue_name, retries, reference FROM queue_items
+                SELECT queue_name, retries, reference, status, job_id FROM queue_items
                  WHERE tenant_id = ? AND id = ?
-                """, (rs, rowNumber) -> new QueueItemSummary(rs.getString(1), rs.getLong(2), rs.getString(3)),
+                   FOR UPDATE
+                """, (rs, rowNumber) -> new QueueItemSummary(rs.getString(1), rs.getLong(2), rs.getString(3),
+                        rs.getString(4), rs.getObject(5, UUID.class)),
                 tenantId, itemId).stream().findFirst();
     }
 
@@ -198,11 +212,15 @@ public class QueueRepository {
                 """, itemId, tenantId, queueName, reference, priority, content);
     }
 
-    /** Sama seperti pengambilan pekerjaan: RETURNING + SKIP LOCKED, satu langkah. */
-    public Optional<Map<String, Object>> claimNextItem(UUID tenantId, String queueName, String robotName) {
+    /**
+     * Sama seperti pengambilan pekerjaan: RETURNING + SKIP LOCKED, satu langkah.
+     *
+     * @param jobId job Robot Agent yang mengambilnya (token Executor); null untuk pengguna dan robot v1
+     */
+    public Optional<Map<String, Object>> claimNextItem(UUID tenantId, String queueName, String robotName, UUID jobId) {
         return database.queryRows("""
                 UPDATE queue_items
-                   SET status = 'IN_PROGRESS', robot_name = ?, started_at = now()
+                   SET status = 'IN_PROGRESS', robot_name = ?, started_at = now(), job_id = ?
                  WHERE id = (
                        SELECT id FROM queue_items
                         WHERE tenant_id = ? AND queue_name = ? AND status = 'NEW'
@@ -215,17 +233,51 @@ public class QueueRepository {
                         LIMIT 1
                         FOR UPDATE SKIP LOCKED)
              RETURNING id, reference, priority, status, content, retries, created_at, started_at
-                """, robotName, tenantId, queueName).stream().findFirst();
+                """, robotName, jobId, tenantId, queueName).stream().findFirst();
     }
 
-    /** Kembalikan ke antrean untuk dicoba lagi; robot_name dikosongkan supaya siapa pun boleh mengambilnya. */
+    /**
+     * Kembalikan ke antrean untuk dicoba lagi; robot_name dan job_id
+     * dikosongkan supaya siapa pun boleh mengambilnya — dan supaya laporan
+     * terlambat dari job lama tidak dianggap milik pengambil berikutnya.
+     */
     public void requeueForRetry(UUID tenantId, UUID itemId, String exception) {
         database.update("""
                 UPDATE queue_items
                    SET status = 'NEW', retries = retries + 1, exception = ?,
-                       started_at = NULL, robot_name = NULL
+                       started_at = NULL, robot_name = NULL, job_id = NULL
                  WHERE tenant_id = ? AND id = ?
                 """, exception, tenantId, itemId);
+    }
+
+    /** Butir yang masih IN_PROGRESS atas nama job ini, dikunci untuk dilepas. */
+    public List<HeldItem> findHeldByJob(UUID tenantId, UUID jobId) {
+        return database.query("""
+                SELECT i.id, i.queue_name, i.reference, i.retries, coalesce(q.max_retries, 0)
+                  FROM queue_items i
+                  LEFT JOIN queues q ON q.tenant_id = i.tenant_id AND q.name = i.queue_name
+                 WHERE i.tenant_id = ? AND i.job_id = ? AND i.status = 'IN_PROGRESS'
+                 ORDER BY i.started_at
+                   FOR UPDATE OF i
+                """, (rs, rowNumber) -> new HeldItem(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3),
+                        rs.getLong(4), rs.getInt(5)),
+                tenantId, jobId);
+    }
+
+    /**
+     * Penyapu: butir yang IN_PROGRESS lebih lama dari {@code olderThanSeconds}
+     * menjadi ABANDONED — seperti UiPath sesudah 24 jam. Untuk semua penyewa
+     * sekaligus; pemanggil mengelompokkan hasilnya untuk peringatan.
+     */
+    public List<AbandonedItem> abandonStale(long olderThanSeconds, String exception) {
+        return database.query("""
+                UPDATE queue_items
+                   SET status = 'ABANDONED', exception = ?, ended_at = now()
+                 WHERE status = 'IN_PROGRESS'
+                   AND started_at < now() - (? * interval '1 second')
+             RETURNING tenant_id, queue_name, reference
+                """, (rs, rowNumber) -> new AbandonedItem(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3)),
+                exception, olderThanSeconds);
     }
 
     public void completeItem(UUID tenantId, UUID itemId, QueueItemStatus status, String output, String exception) {

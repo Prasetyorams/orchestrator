@@ -6,6 +6,7 @@ import id.jakforge.openorchestrator.dto.response.PublishPackageResponse;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
 import id.jakforge.openorchestrator.service.PackageService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -15,7 +16,9 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.Map;
@@ -40,6 +43,19 @@ public class PackageController {
     public PublishPackageResponse publish(@AuthenticationPrincipal OpenOrchestratorPrincipal principal,
                                           @RequestBody(required = false) Map<String, Object> body) {
         return packageService.publish(principal, PublishPackageRequest.fromBody(body));
+    }
+
+    /**
+     * Terbitkan paket sebagai berkas biner (packages.upload.binary): bagian
+     * {@code file} berisi .zip/.nupkg, medan lain sama dengan badan JSON
+     * (name, version, description, entryPoint, environment). Jawabannya sama
+     * dengan jalur JSON.
+     */
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public PublishPackageResponse publishFile(@AuthenticationPrincipal OpenOrchestratorPrincipal principal,
+                                              @RequestPart(value = "file", required = false) MultipartFile file,
+                                              @RequestParam Map<String, String> fields) {
+        return packageService.publishFile(principal, PublishPackageRequest.fromForm(fields), file);
     }
 
     /** Unduh isi paket (.zip). */

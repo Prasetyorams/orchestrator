@@ -3,16 +3,20 @@ package id.jakforge.openorchestrator.service;
 import id.jakforge.openorchestrator.common.Uuids;
 import id.jakforge.openorchestrator.model.AgentErrorCodes;
 import id.jakforge.openorchestrator.model.LogLevel;
+import id.jakforge.openorchestrator.model.QueueItemStatus;
 import id.jakforge.openorchestrator.model.RetryPolicy;
 import id.jakforge.openorchestrator.model.Severity;
 import id.jakforge.openorchestrator.repository.AlertRepository;
 import id.jakforge.openorchestrator.repository.JobRepository;
 import id.jakforge.openorchestrator.repository.LogRepository;
+import id.jakforge.openorchestrator.repository.QueueRepository;
+import id.jakforge.openorchestrator.repository.QueueRepository.HeldItem;
 import id.jakforge.openorchestrator.repository.RobotRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -38,6 +42,7 @@ public class JobOutcomeService {
     private final RobotRepository robotRepository;
     private final AlertRepository alertRepository;
     private final LogRepository logRepository;
+    private final QueueRepository queueRepository;
 
     /** @param job baris job SESUDAH berubah menjadi selesai (kolom camelCase) */
     public void afterFinished(Map<String, Object> job) {
@@ -67,7 +72,48 @@ public class JobOutcomeService {
             robotRepository.markIdleIfFree(robotId);
         }
 
+        releaseQueueItems(job, tenantId, state, processName);
         retryIfAllowed(job, tenantId, state, errorCode, processName);
+    }
+
+    /**
+     * Butir antrean yang masih dipegang job FAULTED/STOPPED dilepas (V15):
+     * dikembalikan ke antrean selama jatah percobaan antreannya masih ada,
+     * selebihnya ABANDONED. Satu peringatan per job, bukan satu per butir.
+     *
+     * <p>Job yang BERHASIL tidak disentuh di sini: butir yang ditinggalnya
+     * tanpa hasil mungkin sudah diproses, dan mengulangnya bisa berarti
+     * memproses dua kali. Butir itu diserahkan ke penyapu (QueueService).
+     */
+    private void releaseQueueItems(Map<String, Object> job, UUID tenantId, String state, String processName) {
+        if (!"FAULTED".equals(state) && !"STOPPED".equals(state)) return;
+
+        UUID jobId = Uuids.parseOrNull((String) job.get("id"));
+        if (jobId == null) return;
+
+        List<HeldItem> held = queueRepository.findHeldByJob(tenantId, jobId);
+        if (held.isEmpty()) return;
+
+        String reason = "Job " + jobId + " berakhir " + state + " sebelum butir ini dilaporkan.";
+        int requeued = 0;
+        int abandoned = 0;
+
+        for (HeldItem item : held) {
+            if (item.retries() < item.maxRetries()) {
+                queueRepository.requeueForRetry(tenantId, item.id(), reason);
+                requeued++;
+            } else {
+                queueRepository.completeItem(tenantId, item.id(), QueueItemStatus.ABANDONED, null, reason);
+                abandoned++;
+            }
+        }
+
+        String summary = processName + " berakhir " + state + " sambil memegang " + held.size()
+                + " butir antrean: " + requeued + " dikembalikan ke antrean, " + abandoned
+                + " ditinggalkan (jatah percobaan habis).";
+
+        alertRepository.insert(tenantId, Severity.Warning, "Butir antrean dilepas", summary, ALERT_SOURCE);
+        logRepository.insertJobEntry(tenantId, LogLevel.WARN, summary, (String) job.get("robotName"), processName, jobId);
     }
 
     private void retryIfAllowed(Map<String, Object> job, UUID tenantId, String state, String errorCode,

@@ -38,7 +38,8 @@ public record OpenOrchestratorProperties(
         @Valid @NotNull Scheduler scheduler,
         @Valid @NotNull Limits limits,
         @Valid @NotNull Bootstrap bootstrap,
-        @Valid @NotNull Agent agent) {
+        @Valid @NotNull Agent agent,
+        @Valid @NotNull Queues queues) {
 
     /**
      * Zona tampilan untuk batas "hari ini" di dasbor; UTC kalau namanya tidak
@@ -98,6 +99,15 @@ public record OpenOrchestratorProperties(
     }
 
     public record Limits(@NotNull DataSize maxPackageSize, @NotNull DataSize maxBucketFileSize) {
+    }
+
+    /**
+     * Penyapu butir antrean (V15).
+     *
+     * @param abandonAfter  butir IN_PROGRESS selama ini tanpa hasil menjadi ABANDONED
+     * @param sweepInterval selang putaran penyapu
+     */
+    public record Queues(@NotNull Duration abandonAfter, @NotNull Duration sweepInterval) {
     }
 
     /**

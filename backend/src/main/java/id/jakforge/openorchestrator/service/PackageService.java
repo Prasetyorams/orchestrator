@@ -18,7 +18,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.unit.DataSize;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -67,19 +69,51 @@ public class PackageService {
      */
     @Transactional
     public PublishPackageResponse publish(OpenOrchestratorPrincipal principal, PublishPackageRequest request) {
-        if (request.name() == null) throw ApiException.badRequest("Nama paket wajib diisi.");
+        checkPublishable(principal, request);
 
-        UUID tenantId = principal.tenantId();
-        String publisher = principal.username();
+        return store(principal, request, decodeContent(request.contentBase64()));
+    }
+
+    /**
+     * Terbitkan paket yang diunggah sebagai berkas biner (multipart/form-data,
+     * kemampuan {@code packages.upload.binary}). Aturannya sama dengan
+     * {@link #publish}; bedanya isi tidak melewati base64 di dalam JSON, jadi
+     * memori puncaknya kira-kira sebesar paketnya, bukan 2,3 kali.
+     *
+     * <p>Pemeriksaan izin dan versi DULU, baru isinya dibaca: unggahan yang
+     * pasti ditolak tidak perlu dimuat ke memori.
+     */
+    @Transactional
+    public PublishPackageResponse publishFile(OpenOrchestratorPrincipal principal, PublishPackageRequest request,
+                                              MultipartFile file) {
+        checkPublishable(principal, request);
+
+        if (file == null || file.isEmpty()) throw ApiException.badRequest("Berkas paket (file) wajib diisi.");
+        checkSize(file.getSize());
+
+        try {
+            return store(principal, request, file.getBytes());
+        } catch (IOException e) {
+            throw ApiException.badRequest("Berkas paket tidak bisa dibaca: " + e.getMessage());
+        }
+    }
+
+    private void checkPublishable(OpenOrchestratorPrincipal principal, PublishPackageRequest request) {
+        if (request.name() == null) throw ApiException.badRequest("Nama paket wajib diisi.");
 
         permissionChecker.requireSave(principal, Permissions.PACKAGES, false);
 
-        if (packageRepository.exists(tenantId, request.name(), request.version())) {
+        if (packageRepository.exists(principal.tenantId(), request.name(), request.version())) {
             throw ApiException.conflict("Paket '" + request.name() + "' versi " + request.version()
                     + " sudah ada. Naikkan versinya, lalu terbitkan lagi.").withCode(PACKAGE_VERSION_EXISTS);
         }
+    }
 
-        byte[] content = decodeContent(request.contentBase64());
+    private PublishPackageResponse store(OpenOrchestratorPrincipal principal, PublishPackageRequest request,
+                                         byte[] content) {
+        UUID tenantId = principal.tenantId();
+        String publisher = principal.username();
+
         long sizeBytes = content == null ? 0 : content.length;
 
         // Sidik isinya: robot memeriksa unduhannya terhadap nilai ini sebelum
@@ -143,12 +177,16 @@ public class PackageService {
             throw ApiException.badRequest("contentBase64 bukan base64 yang sah.");
         }
 
-        DataSize maxSize = properties.limits().maxPackageSize();
-
-        if (content.length > maxSize.toBytes()) {
-            throw ApiException.badRequest("Paket terlalu besar. Batasnya " + maxSize.toMegabytes() + " MB.");
-        }
+        checkSize(content.length);
 
         return content;
+    }
+
+    private void checkSize(long sizeBytes) {
+        DataSize maxSize = properties.limits().maxPackageSize();
+
+        if (sizeBytes > maxSize.toBytes()) {
+            throw ApiException.badRequest("Paket terlalu besar. Batasnya " + maxSize.toMegabytes() + " MB.");
+        }
     }
 }

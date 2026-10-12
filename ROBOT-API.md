@@ -69,15 +69,15 @@ Semua memakai `Authorization: Bearer <token>` dari login akun pengguna.
   "capabilities": ["jobs.next.package", "packages.sha256", "heartbeat.commands", "jobs.state.guard",
                    "jobs.pause", "jobs.kill", "agent.triggers", "assistant.signin",
                    "folder.machines", "robots.resolution", "heartbeat.busyLocal", "logs.trigger",
-                   "packages.versionConflict"],
+                   "packages.versionConflict", "queues.jobRelease", "packages.upload.binary"],
   "apiVersions": [1, 2] }
 ```
 
 `contract` + `capabilities` = kemampuan tambahan v1 (lihat di bawah); `apiVersions` berisi 2
 kalau `/api/agent` tersedia. `agent.triggers` = 2.10, `assistant.signin` = Bagian 5,
 `folder.machines` = Bagian 6,
-`robots.resolution` = 2.2, `heartbeat.busyLocal` = denyut v1 di bawah dan 2.3, `logs.trigger` dan
-`packages.versionConflict` = di bawah.
+`robots.resolution` = 2.2, `heartbeat.busyLocal` = denyut v1 di bawah dan 2.3, `logs.trigger`,
+`packages.versionConflict`, `packages.upload.binary`, dan `queues.jobRelease` = di bawah.
 
 ### `POST /api/auth/login`
 
@@ -175,6 +175,12 @@ kalau `/api/agent` tersedia. `agent.triggers` = 2.10, `assistant.signin` = Bagia
   berikutnya.
 - "Versi terbaru" di dasbor dibandingkan per angka (`1.0.10` > `1.0.9`); proses memakai versi
   yang **terakhir diterbitkan**.
+- **packages.upload.binary (V15):** endpoint yang sama juga menerima `multipart/form-data`:
+  bagian `file` berisi .zip/.nupkg apa adanya, medan lain sama dengan JSON (`name`, `version`,
+  `description`, `entryPoint`, `environment`). Jawaban, 409, izin, dan SHA-256 sama dengan jalur
+  JSON. Memori server kira-kira sebesar paketnya (JSON base64: sekitar 2,3×). Batas tetap 64 MB
+  (`400 "Paket terlalu besar. Batasnya 64 MB."`); tanpa `file` → `400`. Jalur JSON base64
+  tetap ada untuk Studio lama.
 
 ### `POST /api/logs` — pemicu baris (V14)
 
@@ -187,6 +193,26 @@ kalau `/api/agent` tersedia. `agent.triggers` = 2.10, `assistant.signin` = Bagia
   robot tidak ditimpa).
 - Dasbor: kolom dan saringan **Pemicu** di halaman Catatan (Job / Manual / Jadwal lokal), juga di
   ekspor CSV. `GET /api/logs?trigger=manual|local-schedule|job`; baris membawa `trigger`.
+
+### Antrean — butir dipegang job (V15)
+
+`POST /api/queues/{q}/next` dan `POST /api/queues/items/{id}/result` — badannya tidak berubah.
+
+- **queues.jobRelease:** butir yang diambil dengan **token Executor** (2.6) dicatat milik job itu.
+  Kalau job-nya berakhir **FAULTED** atau **STOPPED** (laporan agent, agent hilang, lease habis)
+  sementara butirnya masih IN_PROGRESS, butir itu **dilepas**: kembali `NEW` dengan `retries + 1`
+  selama jatah `maxRetries` antreannya masih ada, selebihnya `ABANDONED`. Keterangannya "Job <id>
+  berakhir <state> sebelum butir ini dilaporkan."; satu peringatan dan satu baris log WARN per job.
+- Job **SUCCESSFUL** tidak melepas butirnya (bisa jadi sudah diproses; mengulang = memproses dua kali).
+- **Penyapu:** butir yang IN_PROGRESS lebih dari 24 jam (`openorchestrator.queues.abandon-after`)
+  menjadi `ABANDONED` — termasuk yang diambil dengan token pengguna/robot v1 (tidak tercatat
+  job-nya) dan yang ditinggal job berhasil. Seperti UiPath.
+- **Hasil hanya untuk butir yang sedang diproses:** `result` untuk butir yang tidak IN_PROGRESS →
+  `409 QUEUE_ITEM_NOT_IN_PROGRESS` (sudah dilepas, ditinggalkan, atau dilaporkan dua kali). Dengan
+  token Executor, butir yang dipegang job lain → `409 QUEUE_ITEM_HELD_BY_OTHER_JOB`. Tidak ada yang
+  ditulis pada kedua penolakan itu.
+- Butir `NEW` hasil pelepasan tetap dihitung "menunggu" untuk penolakan kembar; sesudah
+  `ABANDONED`, referensinya boleh ditambahkan lagi.
 
 ### Endpoint lain
 
@@ -476,7 +502,10 @@ argumen atau variabel lingkungan). Dipakai activities untuk endpoint v1 atas nam
 - izin: `assets.read`, `queues.read`, `queues.update`, `buckets.read`, `buckets.update`,
   `jobs.read`, `jobs.create`, `processes.read`, `logs.create` — tidak lebih;
 - folder: folder tempat robotnya ditugaskan, ditambah folder job-nya;
-- **berhenti berlaku begitu job selesai** (`401 ExecutorTokenExpired`, paling lambat 5 detik).
+- **berhenti berlaku begitu job selesai** (`401 ExecutorTokenExpired`, paling lambat 5 detik);
+- butir antrean yang diambilnya tercatat milik job itu dan dilepas kalau job berakhir FAULTED/STOPPED
+  (V15, Bagian 1 "Antrean"). Laporan hasil dalam 5 detik terakhir itu ditolak `409` kalau butirnya
+  sudah dilepas.
 
 ## 2.7 Log dan lampiran
 
@@ -883,6 +912,54 @@ Dari VM pun benar: `http://192.168.231.1:8080/assistant/connect` → `http://192
 4. Publish: terbitkan versi yang sama dua kali dari OpenStudio → dialog menampilkan pesan `409`.
 5. Masuk lewat dasbor: Open Assistant › Hubungkan › **Masuk lewat dasbor** dengan URL
    `http://<IP-host>:8080` → peramban terbuka di halaman persetujuan dasbor.
+
+## Catatan antrean tertahan dan unggah paket (12 Okt 2026, V15)
+
+Jawaban `CATATAN-ANTREAN-DAN-UNGGAH-PAKET.md` (cabang `jakforge/catatan-antrean-dan-unggah-paket`).
+Kedua temuan benar dan **dikerjakan**. Rinciannya di Bagian 1 ("POST /api/packages", "Antrean").
+
+**Yang WAJIB diubah: tidak ada.** Satu perilaku berubah: `result` untuk butir yang tidak sedang
+IN_PROGRESS kini `409` (dulu diterima dan menimpa). Set Queue Item Status selalu memakai butir dari
+Get Queue Item, jadi alur normal tidak terkena; yang terkena memang laporan terlambat.
+
+**1. Butir IN_PROGRESS tertahan — dikerjakan seperti diusulkan, dengan dua tambahan.**
+
+- Migrasi `V15__antrean_dipegang_job.sql`: `queue_items.job_id UUID NULL` (tanpa foreign key),
+  indeks `(tenant_id, job_id) WHERE status = 'IN_PROGRESS'` dan indeks `started_at` untuk penyapu.
+- `next` mengisi `job_id` dari token Executor; pengguna/v1 → NULL.
+- `JobOutcomeService.afterFinished`, FAULTED/STOPPED: `requeueForRetry` selama jatah ada (juga
+  mengosongkan `job_id`), selebihnya `ABANDONED`. Satu peringatan "Butir antrean dilepas" + satu
+  log WARN per job.
+- Penyapu `QueueMonitor` (tiap 5 menit): IN_PROGRESS > 24 jam → `ABANDONED`, satu peringatan per
+  penyewa. **Tambahan:** berlaku untuk **semua** butir IN_PROGRESS, bukan hanya yang `job_id`-nya
+  NULL — butir yang ditinggal job **berhasil** juga perlu jalan keluar, dan job berhasil sengaja
+  tidak melepas butirnya (bisa sudah diproses).
+- **Tambahan:** laporan dari Executor untuk butir yang dipegang job lain → `409
+  QUEUE_ITEM_HELD_BY_OTHER_JOB`. Ini menutup celah 5 detik cache token Executor (2.6): job lama yang
+  baru berakhir tidak bisa menimpa hasil pengambil berikutnya.
+- Dasbor: status butir `ABANDONED` tampil **Ditinggalkan**.
+
+**2. Unggah paket biner — dikerjakan: multipart/form-data.** Bagian `file` + medan yang sama dengan
+JSON. Kemampuan `packages.upload.binary`; jalur base64 tetap. Pemeriksaan izin dan versi (409)
+**sebelum** berkasnya dibaca. Feed NuGet: setuju dibahas terpisah.
+
+**Teruji** melawan PostgreSQL (58 pemeriksaan): A dan B diambil Executor J1 → J1 FAULTED → keduanya
+NEW, `retries` 1, satu peringatan; laporan terlambat J1 → 409, lalu `401 ExecutorTokenExpired`
+sesudah 5 detik; J2 mengambil A (jatah habis) → STOPPED → ABANDONED, referensinya boleh ditambah lagi;
+butir milik job lain → 409; job berhasil tidak melepas butirnya, penyapu menangkapnya bersama butir
+v1; unggah biner 5 MB byte-per-byte sama dengan unduhannya; 65 MB → 400; JSON base64 tetap jalan.
+
+**Untuk sisi robot (saran, tidak wajib):**
+
+1. Studio Publish: pakai multipart bila `packages.upload.binary` ada di `/api/health`.
+2. Set Queue Item Status: `409 QUEUE_ITEM_NOT_IN_PROGRESS` / `QUEUE_ITEM_HELD_BY_OTHER_JOB` berarti
+   butirnya sudah bukan milik workflow ini — tampilkan pesannya; jangan dicoba ulang.
+3. Robot v1 / Open Assistant (token pengguna): butirnya tidak tercatat milik job, jadi hanya penyapu
+   24 jam yang menolong. Kalau perlu lebih cepat, laporkan `FAILED` sendiri di blok Catch.
+
+**Cara menguji (VM):** antrean dengan Max Retries 1 → workflow Get Queue Item lalu Throw → job Faulted
+→ Antrean › butirnya kembali **Baru** dengan percobaan 1, peringatan "Butir antrean dilepas" muncul.
+Jalankan sekali lagi → butirnya **Ditinggalkan**.
 
 ---
 
