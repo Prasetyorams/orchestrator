@@ -338,6 +338,7 @@ export const JV: Record<string, string> = {
   Sibuk: "Sibuk",
   Terputus: "Pedhot",
   "Dicoba ulang": "Dicoba manèh",
+  Ditinggalkan: "Ditinggal",
   Nonaktif: "Mati",
 
   // proses

@@ -132,6 +132,8 @@ const badgeTone: Record<string, string> = {
   DISABLED: "bg-red-50 text-danger ring-red-200",
   NEW: "bg-blue-50 text-info ring-blue-200",
   IN_PROGRESS: "bg-amber-50 text-warn ring-amber-200",
+  // V15: butir yang tertahan lalu ditinggalkan (job berakhir tanpa hasil, atau terlalu lama diproses).
+  ABANDONED: "bg-slate-100 text-slate-600 ring-slate-200",
   FAILED: "bg-red-50 text-danger ring-red-200",
   FATAL: "bg-red-100 text-danger ring-red-300",
   ERROR: "bg-red-50 text-danger ring-red-200",
@@ -168,6 +170,7 @@ const LABEL_KEADAAN: Record<string, string> = {
   IN_PROGRESS: "Diproses",
   FAILED: "Gagal",
   RETRIED: "Dicoba ulang",
+  ABANDONED: "Ditinggalkan",
 };
 
 /** Nama keadaan pekerjaan, robot, atau butir antrean — belum diterjemahkan. */

@@ -340,6 +340,7 @@ export const EN: Record<string, string> = {
   Sibuk: "Busy",
   Terputus: "Disconnected",
   "Dicoba ulang": "Retried",
+  Ditinggalkan: "Abandoned",
   Nonaktif: "Disabled",
 
   // proses
@@ -935,6 +936,8 @@ export const PESAN_EN: Record<string, string> = {
   "Paket diterbitkan": "Package published",
   "Robot baru terdaftar": "New robot registered",
   "Butir antrean gagal permanen": "Queue item failed permanently",
+  "Butir antrean dilepas": "Queue items released",
+  "Butir antrean ditinggalkan": "Queue items abandoned",
   "Pemicu dimatikan": "Trigger disabled",
   "Pekerjaan gagal": "Job failed",
   "Pekerjaan terputus": "Job interrupted",
@@ -947,6 +950,10 @@ export const PESAN_EN: Record<string, string> = {
   "Robot '{0}' menyambung untuk pertama kali.": "Robot '{0}' connected for the first time.",
   "Butir '{0}' di antrean {1} gagal setelah {2} percobaan ulang.":
     "Item '{0}' in queue {1} failed after {2} retries.",
+  "{0} berakhir {1} sambil memegang {2} butir antrean: {3} dikembalikan ke antrean, {4} ditinggalkan (jatah percobaan habis).":
+    "{0} ended {1} while holding {2} queue items: {3} returned to the queue, {4} abandoned (retries used up).",
+  "{0} butir di antrean {1} lebih dari {2} berstatus Diproses tanpa hasil, dan ditandai Abandoned.":
+    "{0} items in queue {1} were In progress for more than {2} without a result, and were marked Abandoned.",
   "Pemicu '{0}' menunjuk proses '{1}' yang sudah tidak ada.":
     "Trigger '{0}' points to process '{1}', which no longer exists.",
   "Pemicu '{0}' memakai ekspresi cron yang tidak pernah cocok: {1}":
@@ -1194,4 +1201,11 @@ export const PESAN_EN: Record<string, string> = {
   "Kedalaman warna harus 0 (bawaan), 15, 16, 24, atau 32.": "Color depth must be 0 (default), 15, 16, 24, or 32.",
   "Paket '{0}' versi {1} sudah ada. Naikkan versinya, lalu terbitkan lagi.": "Package '{0}' version {1} already exists. Bump the version, then publish again.",
   "Pemicu tidak dikenal: '{0}'. Pilih job, manual, atau local-schedule.": "Unknown trigger: '{0}'. Choose job, manual, or local-schedule.",
+
+  // --- galat: butir antrean dan unggah paket biner (V15) ---
+  "Butir ini tidak sedang diproses (statusnya {0}); hasilnya tidak dicatat.":
+    "This item isn't being processed (its status is {0}); the result wasn't recorded.",
+  "Butir ini sedang dipegang job lain; hasilnya tidak dicatat.": "This item is held by another job; the result wasn't recorded.",
+  "Berkas paket (file) wajib diisi.": "The package file (file) is required.",
+  "Berkas paket tidak bisa dibaca: {0}": "The package file couldn't be read: {0}",
 };
