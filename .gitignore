@@ -25,3 +25,6 @@ backend/bin/
 *.user
 .idea/
 *.log
+
+# Paket server Windows dari tools/windows-server/susun-paket.mjs.
+/dist/
