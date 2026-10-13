@@ -146,6 +146,37 @@ Backend dan dasbor lalu hanya menerima dari server itu sendiri (127.0.0.1).
 - Nama DNS-nya terdaftar di DNS kantor, mengarah ke server.
 - Firewall: buka **TCP 8443** masuk (cukup itu saja; 3000 dan 8080 tidak perlu lagi).
 
+**Atau CA milik sendiri, tanpa IT** — `tools/windows-server/sertifikat.ps1`, di
+laptop (Windows PowerShell 5.1, `New-SelfSignedCertificate`):
+
+```
+cd tools\windows-server
+powershell -ExecutionPolicy Bypass -File .\sertifikat.ps1 ca-baru -Rentang 10.114.0.0/16,10.119.0.0/16 [-Dns intra.bank]
+powershell -ExecutionPolicy Bypass -File .\sertifikat.ps1 server -Nama oo-bjkt -Ip 10.114.40.108
+powershell -ExecutionPolicy Bypass -File .\sertifikat.ps1 daftar
+```
+
+- `ca-baru` (sekali): root CA 10 tahun, **dibatasi** (name constraints) ke
+  rentang IP `-Rentang` dan, bila diisi, nama di bawah `-Dns`. Kalau kunci
+  root bocor, ia tetap tidak bisa dipakai memalsukan situs lain — Windows (juga
+  klien .NET robot) dan OpenSSL/Node menolak sertifikat di luar batas itu.
+  Kunci root tinggal di `Cert:\CurrentUser\My` laptop; cadangannya
+  `%USERPROFILE%\oo-ca\root-cadangan.pfx` bersandi — pindahkan ke media offline.
+- Klien mengimpor `%USERPROFILE%\oo-ca\klien\root.cer` ke *Trusted Root*
+  **sekali** (`pasang-root.cmd` sebagai Administrator, atau GPO). Sesudah itu
+  server baru — IP lain di dalam rentang — cukup `server -Nama … -Ip …` lalu
+  `oo https`; klien tidak diubah.
+- `server`: sertifikat 2 tahun (`-Hari`), SAN dari `-Ip`/`-Dns`, EKU server,
+  root ikut di `.pfx`. IP/nama di luar batas root ditolak sebelum diterbitkan.
+  Kunci server hanya ada di `.pfx`, tidak ditinggal di laptop.
+- **Tentukan akhiran DNS sekarang bila bisa** (mis. domain AD kantor): root
+  tanpa `-Dns` tidak sah untuk nama DNS apa pun, dan menambahkannya nanti
+  berarti root baru (impor ulang sekali di klien). Begitu juga rentang IP:
+  server di luar `-Rentang` butuh root baru — pilih rentang yang cukup lebar
+  untuk server mendatang, tetapi tidak lebih lebar dari perlu.
+- Memasang root sendiri di *Trusted Root* PC bank tetap keputusan keamanan:
+  minta persetujuan tim keamanan.
+
 **Memasang** (Command Prompt → Run as administrator, setelah `oo pasang`):
 
 ```
