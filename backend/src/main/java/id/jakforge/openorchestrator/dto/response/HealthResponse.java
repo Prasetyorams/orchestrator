@@ -33,7 +33,8 @@ public record HealthResponse(String product, String status, String time, int con
             "heartbeat.busyLocal", // V14: denyut v1/v2 boleh menyebut busyLocal; robot itu tidak diberi job
             "logs.trigger",        // V14: POST /api/logs menerima trigger per baris (manual, local-schedule)
             "packages.versionConflict", // POST /api/packages menolak versi yang sudah ada: 409 PACKAGE_VERSION_EXISTS
-            "queues.jobRelease",   // V15: butir yang diambil Executor dilepas saat job-nya FAULTED/STOPPED; hasil untuk butir yang tak lagi IN_PROGRESS ditolak 409
+            // NONAKTIF-SEMENTARA (antrean): API /api/queues dimatikan, jadi kemampuannya tidak diumumkan.
+            // "queues.jobRelease",   // V15: butir yang diambil Executor dilepas saat job-nya FAULTED/STOPPED; hasil untuk butir yang tak lagi IN_PROGRESS ditolak 409
             "packages.upload.binary"); // POST /api/packages menerima multipart/form-data (bagian file + medan yang sama)
 
     static final List<Integer> API_VERSIONS = List.of(1, 2);

@@ -168,15 +168,16 @@ public class PermissionInterceptor implements HandlerInterceptor {
             requires(DELETE, "/api/triggers/{name}", "triggers.delete"),
 
             // --- antrean: menambah, mengambil, dan melaporkan butir mengubah isi antreannya ---
-            requires(GET, "/api/queues", "queues.read"),
-            requires(POST, "/api/queues", "queues.create"),
-            requires(PUT, "/api/queues/{name}/folder", "queues.update"),
-            requires(DELETE, "/api/queues/{name}", "queues.delete"),
-            requires(GET, "/api/queues/{name}/items", "queues.read"),
-            requires(POST, "/api/queues/{name}/items", "queues.update"),
-            requires(POST, "/api/queues/{name}/next", "queues.update"),
-            requires(POST, "/api/queues/items/{id}/result", "queues.update"),
-            requires(DELETE, "/api/queues/items/{id}", "queues.delete"),
+            // NONAKTIF-SEMENTARA (antrean): QueueController dimatikan; buka komentar bersamanya.
+            // requires(GET, "/api/queues", "queues.read"),
+            // requires(POST, "/api/queues", "queues.create"),
+            // requires(PUT, "/api/queues/{name}/folder", "queues.update"),
+            // requires(DELETE, "/api/queues/{name}", "queues.delete"),
+            // requires(GET, "/api/queues/{name}/items", "queues.read"),
+            // requires(POST, "/api/queues/{name}/items", "queues.update"),
+            // requires(POST, "/api/queues/{name}/next", "queues.update"),
+            // requires(POST, "/api/queues/items/{id}/result", "queues.update"),
+            // requires(DELETE, "/api/queues/items/{id}", "queues.delete"),
 
             // --- aset, termasuk kredensial ---
             requires(GET, "/api/assets", "assets.read"),
@@ -190,14 +191,15 @@ public class PermissionInterceptor implements HandlerInterceptor {
             requires(DELETE, "/api/credentials/{name}", "assets.delete"),
 
             // --- ember penyimpanan ---
-            requires(GET, "/api/buckets", "buckets.read"),
-            requires(POST, "/api/buckets", "buckets.create"),
-            requires(PUT, "/api/buckets/{name}/folder", "buckets.update"),
-            requires(DELETE, "/api/buckets/{name}", "buckets.delete"),
-            requires(GET, "/api/buckets/{name}/files", "buckets.read"),
-            requires(POST, "/api/buckets/{name}/files", "buckets.update"),
-            requires(GET, "/api/buckets/{name}/files/{id}/content", "buckets.read"),
-            requires(DELETE, "/api/buckets/{name}/files/{id}", "buckets.delete"),
+            // NONAKTIF-SEMENTARA (ember): BucketController dimatikan; buka komentar bersamanya.
+            // requires(GET, "/api/buckets", "buckets.read"),
+            // requires(POST, "/api/buckets", "buckets.create"),
+            // requires(PUT, "/api/buckets/{name}/folder", "buckets.update"),
+            // requires(DELETE, "/api/buckets/{name}", "buckets.delete"),
+            // requires(GET, "/api/buckets/{name}/files", "buckets.read"),
+            // requires(POST, "/api/buckets/{name}/files", "buckets.update"),
+            // requires(GET, "/api/buckets/{name}/files/{id}/content", "buckets.read"),
+            // requires(DELETE, "/api/buckets/{name}/files/{id}", "buckets.delete"),
 
             // --- robot, mesin, lingkungan ---
             //

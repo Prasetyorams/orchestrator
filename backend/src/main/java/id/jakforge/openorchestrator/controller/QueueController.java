@@ -33,8 +33,12 @@ import java.util.Map;
  * <p>Menambah, mengambil, dan melaporkan butir dipanggil activity Orchestrator
  * di Studio, jadi badannya dibaca longgar.
  */
-@RestController
-@RequestMapping("/api/queues")
+// NONAKTIF-SEMENTARA (antrean): API /api/queues dimatikan dan disembunyikan dari
+// dasbor sampai fitur antrean dipakai lagi. Mengaktifkan: buka komentar dua
+// anotasi di bawah, lalu cari "NONAKTIF-SEMENTARA" di backend dan frontend.
+// Activity antrean di Studio/robot (Add/Get/Set Queue Item) mendapat 404 selama itu.
+// @RestController
+// @RequestMapping("/api/queues")
 @RequiredArgsConstructor
 public class QueueController {
 

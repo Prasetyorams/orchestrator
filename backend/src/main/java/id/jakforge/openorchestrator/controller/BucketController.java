@@ -25,8 +25,11 @@ import java.util.List;
 import java.util.Map;
 
 /** Ember penyimpanan (gudang berkas). */
-@RestController
-@RequestMapping("/api/buckets")
+// NONAKTIF-SEMENTARA (ember): API /api/buckets dimatikan dan disembunyikan dari
+// dasbor sampai fitur ember penyimpanan dipakai lagi. Mengaktifkan: buka
+// komentar dua anotasi di bawah, lalu cari "NONAKTIF-SEMENTARA" di backend dan frontend.
+// @RestController
+// @RequestMapping("/api/buckets")
 @RequiredArgsConstructor
 public class BucketController {
 

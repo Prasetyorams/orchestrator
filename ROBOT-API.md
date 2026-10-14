@@ -69,7 +69,7 @@ Semua memakai `Authorization: Bearer <token>` dari login akun pengguna.
   "capabilities": ["jobs.next.package", "packages.sha256", "heartbeat.commands", "jobs.state.guard",
                    "jobs.pause", "jobs.kill", "agent.triggers", "assistant.signin",
                    "folder.machines", "robots.resolution", "heartbeat.busyLocal", "logs.trigger",
-                   "packages.versionConflict", "queues.jobRelease", "packages.upload.binary"],
+                   "packages.versionConflict", "packages.upload.binary"],
   "apiVersions": [1, 2] }
 ```
 
@@ -77,7 +77,8 @@ Semua memakai `Authorization: Bearer <token>` dari login akun pengguna.
 kalau `/api/agent` tersedia. `agent.triggers` = 2.10, `assistant.signin` = Bagian 5,
 `folder.machines` = Bagian 6,
 `robots.resolution` = 2.2, `heartbeat.busyLocal` = denyut v1 di bawah dan 2.3, `logs.trigger`,
-`packages.versionConflict`, `packages.upload.binary`, dan `queues.jobRelease` = di bawah.
+`packages.versionConflict` dan `packages.upload.binary` = di bawah. `queues.jobRelease` tidak diumumkan
+selama antrean dinonaktifkan (lihat "Antrean" di bawah).
 
 ### `POST /api/auth/login`
 
@@ -196,6 +197,10 @@ kalau `/api/agent` tersedia. `agent.triggers` = 2.10, `assistant.signin` = Bagia
 
 ### Antrean — butir dipegang job (V15)
 
+> **NONAKTIF SEMENTARA sejak 14 Okt 2026.** Seluruh `/api/queues/*` dan `/api/buckets/*` menjawab
+> `404` (bukan 403), dan `queues.jobRelease` tidak ada di `/api/health`. Kontrak di bawah tetap berlaku
+> begitu diaktifkan lagi. Lihat Bagian 4, "Antrean dan ember penyimpanan dinonaktifkan sementara".
+
 `POST /api/queues/{q}/next` dan `POST /api/queues/items/{id}/result` — badannya tidak berubah.
 
 - **queues.jobRelease:** butir yang diambil dengan **token Executor** (2.6) dicatat milik job itu.
@@ -222,7 +227,7 @@ kalau `/api/agent` tersedia. `agent.triggers` = 2.10, `assistant.signin` = Bagia
 | `POST /api/packages`, `GET /api/processes`, `POST /api/jobs` | Studio (Terbitkan, Start Job) |
 | `GET /api/jobs/{id}`, `GET /api/jobs?state=` | Activity Start Job, rekonsiliasi agent v1 |
 | `GET /api/assets/{nama}/value`, `GET /api/credentials/{nama}/value` | Activity Get Asset / Credential |
-| `POST /api/queues/{q}/items`, `…/next`, `POST /api/queues/items/{id}/result` | Activity antrean |
+| `POST /api/queues/{q}/items`, `…/next`, `POST /api/queues/items/{id}/result` | Activity antrean — **nonaktif sementara (404)** |
 
 ### Izin akun robot v1
 
@@ -960,6 +965,41 @@ v1; unggah biner 5 MB byte-per-byte sama dengan unduhannya; 65 MB → 400; JSON 
 **Cara menguji (VM):** antrean dengan Max Retries 1 → workflow Get Queue Item lalu Throw → job Faulted
 → Antrean › butirnya kembali **Baru** dengan percobaan 1, peringatan "Butir antrean dilepas" muncul.
 Jalankan sekali lagi → butirnya **Ditinggalkan**.
+
+## Antrean dan ember penyimpanan dinonaktifkan sementara (14 Okt 2026)
+
+Keputusan tim Orchestrator: fitur **Queues** dan **Storage Buckets** disembunyikan dan API-nya
+dimatikan dulu, sampai dipakai lagi. Sudah di-deploy (produksi, migrasi V15 ikut terpasang).
+
+**Yang berubah di server:**
+
+- `/api/queues/*` dan `/api/buckets/*` menjawab **`404`** — rutenya tidak ada lagi, bukan ditolak
+  karena izin (`403`). Tanpa token tetap `401` dulu, seperti semua endpoint lain.
+- `/api/health`: `queues.jobRelease` **tidak diumumkan** (14 kemampuan). Kemampuan lain tidak berubah.
+- Dasbor: menu Queues dan Ember Penyimpanan, kartu antrean di Beranda, kolom Antrean di Tenant › Folder,
+  dan izin antrean/ember di editor Peran disembunyikan; `/queues` dan `/buckets` dialihkan ke Beranda.
+  Pencarian tidak lagi menampilkan antrean dan ember.
+- **Data tidak dihapus:** antrean, butir, ember, dan berkasnya tetap di basis data.
+
+**Akibat di sisi robot/Studio:**
+
+1. Activity **Add Queue Item**, **Get Queue Item**, dan **Set Queue Item Status** akan gagal dengan
+   `404`. Workflow yang memakai antrean (termasuk template REFramework Antrean) tidak bisa jalan selama
+   ini. Activity aset/kredensial, Start Job, log, dan seluruh `/api/agent/*` tidak terpengaruh.
+2. Activity ember (belum ada di Studio) tidak terpengaruh.
+
+**Saran (tidak wajib):**
+
+- Activity antrean: `404` dari `/api/queues/...` tampilkan sebagai pesan jelas, mis. "Fitur antrean
+  dinonaktifkan di Orchestrator", bukan galat jaringan umum; jangan dicoba ulang.
+- Toolbox/template Studio: pertimbangkan menyembunyikan activity antrean dan template REFramework
+  Antrean selama ini, supaya pengembang tidak membangun workflow yang pasti gagal. Deteksinya: `GET
+  /api/queues` dengan token pengguna menjawab `404`. (`queues.jobRelease` yang hilang bukan penanda
+  yang andal — server sebelum V15 juga tidak mengumumkannya padahal antreannya ada.)
+
+**Mengaktifkan lagi** (di repo orchestrator): cari `NONAKTIF-SEMENTARA` di `backend` dan `frontend`,
+buka komentarnya, lalu deploy. Kontrak antrean di Bagian 1 dan catatan V15 di atas berlaku lagi tanpa
+perubahan; tidak perlu migrasi.
 
 ---
 

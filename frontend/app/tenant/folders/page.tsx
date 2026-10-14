@@ -128,7 +128,8 @@ export default function KelolaFolder() {
               ),
             },
             { judul: "Proses", sel: (f) => <span className="tabular-nums">{f.processCount}</span> },
-            { judul: "Antrean", sel: (f) => <span className="tabular-nums">{f.queueCount}</span> },
+            // NONAKTIF-SEMENTARA (antrean): buka komentar untuk menampilkan lagi.
+            // { judul: "Antrean", sel: (f) => <span className="tabular-nums">{f.queueCount}</span> },
             { judul: "Aset", sel: (f) => <span className="tabular-nums">{f.assetCount}</span> },
             { judul: "Pengguna", sel: (f) => <span className="tabular-nums">{f.userCount}</span> },
             { judul: "Robot", sel: (f) => <span className="tabular-nums">{f.robotCount}</span> },

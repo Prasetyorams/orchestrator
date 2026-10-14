@@ -98,9 +98,11 @@ export const TAB_FOLDER: Tab[] = [
     izin: izinSub(SUBTAB.monitoring),
     sub: SUBTAB.monitoring,
   },
-  { label: "Queues", href: "/queues", ikon: CopyPlus, awalan: "/queues", izin: ["queues.read"] },
+  // NONAKTIF-SEMENTARA (antrean): buka komentar untuk menampilkan lagi.
+  // { label: "Queues", href: "/queues", ikon: CopyPlus, awalan: "/queues", izin: ["queues.read"] },
   { label: "Assets", href: "/assets", ikon: AppWindow, awalan: "/assets", izin: ["assets.read"] },
-  { label: "Ember Penyimpanan", href: "/buckets", ikon: List, awalan: "/buckets", izin: ["buckets.read"] },
+  // NONAKTIF-SEMENTARA (ember): buka komentar untuk menampilkan lagi.
+  // { label: "Ember Penyimpanan", href: "/buckets", ikon: List, awalan: "/buckets", izin: ["buckets.read"] },
   { label: "Setelan", href: "/folder-settings", ikon: Settings, awalan: "/folder-settings" },
 ];
 

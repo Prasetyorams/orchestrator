@@ -56,6 +56,9 @@ public class SearchService {
                 .stream()
                 .filter(hit -> isInAccessibleFolder(hit, access))
                 .filter(hit -> isReadable(hit, principal))
+                // NONAKTIF-SEMENTARA (antrean, ember): halamannya disembunyikan dari
+                // dasbor, jadi hasilnya juga tidak ditawarkan. Hapus baris ini saat diaktifkan lagi.
+                .filter(hit -> !"queues".equals(hit.get(PAGE_COLUMN)) && !"buckets".equals(hit.get(PAGE_COLUMN)))
                 .toList();
     }
 

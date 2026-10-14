@@ -22,6 +22,11 @@ const nextConfig = {
       { source: "/robots/credentials", destination: "/assets?tipe=Credential", permanent: false },
       { source: "/tenants", destination: "/tenant/users", permanent: false },
       { source: "/settings", destination: "/tenant/settings", permanent: false },
+      // NONAKTIF-SEMENTARA (antrean, ember): halamannya disembunyikan dan API-nya
+      // dimatikan, jadi alamat langsungnya diarahkan ke Beranda. Hapus dua baris
+      // ini saat diaktifkan lagi.
+      { source: "/queues", destination: "/", permanent: false },
+      { source: "/buckets", destination: "/", permanent: false },
     ];
   },
 };

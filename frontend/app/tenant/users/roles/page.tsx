@@ -66,7 +66,9 @@ const CATATAN: Record<string, string> = {
 const KELOMPOK: { judul: string; sumber: string[] }[] = [
   {
     judul: "Automasi",
-    sumber: ["processes", "jobs", "triggers", "packages", "queues", "assets", "buckets", "robots", "logs"],
+    // NONAKTIF-SEMENTARA (antrean, ember): kembalikan "queues" sesudah "packages" dan
+    // "buckets" sesudah "assets" untuk menampilkan izinnya lagi.
+    sumber: ["processes", "jobs", "triggers", "packages", "assets", "robots", "logs"],
   },
   {
     judul: "Pengelolaan penyewa",

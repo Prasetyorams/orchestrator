@@ -157,10 +157,11 @@ class PermissionInterceptorTest {
             "POST /api/jobs",
             "POST /api/logs",
             "GET /api/assets/{name}/value",
-            "GET /api/credentials/{name}/value",
-            "POST /api/queues/{name}/items",
-            "POST /api/queues/{name}/next",
-            "POST /api/queues/items/{id}/result");
+            "GET /api/credentials/{name}/value");
+            // NONAKTIF-SEMENTARA (antrean): kembalikan tiga rute ini bersama QueueController.
+            // "POST /api/queues/{name}/items",
+            // "POST /api/queues/{name}/next",
+            // "POST /api/queues/items/{id}/result");
 
     /** Isi peran bawaan sesudah V6 — lihat V6__peran_kustom.sql. */
     private static final List<List<String>> ROBOT_CAPABLE_ROLES = List.of(
@@ -194,9 +195,10 @@ class PermissionInterceptorTest {
     private static final List<String> ACTIVITY_ENDPOINTS = List.of(
             "GET /api/assets/{name}/value",
             "GET /api/credentials/{name}/value",
-            "POST /api/queues/{name}/items",
-            "POST /api/queues/{name}/next",
-            "POST /api/queues/items/{id}/result",
+            // NONAKTIF-SEMENTARA (antrean): kembalikan tiga rute ini bersama QueueController.
+            // "POST /api/queues/{name}/items",
+            // "POST /api/queues/{name}/next",
+            // "POST /api/queues/items/{id}/result",
             "POST /api/jobs",
             "GET /api/jobs/{id}");
 

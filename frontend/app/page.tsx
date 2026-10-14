@@ -137,7 +137,8 @@ function IsiBeranda({ folder }: { folder: FolderNode }) {
       <section className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 xl:grid-cols-6">
         <KpiCard label={t("Processes")} value={pustaka.processes} icon={Network} href="/automation/processes" />
         <KpiCard label={t("Assets")} value={pustaka.assets} icon={AppWindow} href="/assets" />
-        <KpiCard label={t("Queues")} value={pustaka.queues} icon={CopyPlus} href="/queues" />
+        {/* NONAKTIF-SEMENTARA (antrean): buka komentar untuk menampilkan lagi.
+        <KpiCard label={t("Queues")} value={pustaka.queues} icon={CopyPlus} href="/queues" /> */}
         <KpiCard
           label={t("Triggers")}
           value={pustaka.triggers}
@@ -269,6 +270,7 @@ function IsiBeranda({ folder }: { folder: FolderNode }) {
       </section>
 
       <section className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+        {/* NONAKTIF-SEMENTARA (antrean): buka komentar untuk menampilkan lagi.
         <Card>
           <CardHeader title={t("Ringkasan Antrean")} />
           <DataTable
@@ -293,6 +295,7 @@ function IsiBeranda({ folder }: { folder: FolderNode }) {
             ]}
           />
         </Card>
+        */}
 
         <Card>
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-3">
