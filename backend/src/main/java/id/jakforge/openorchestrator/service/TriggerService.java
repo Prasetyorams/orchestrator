@@ -2,9 +2,11 @@ package id.jakforge.openorchestrator.service;
 
 import id.jakforge.openorchestrator.common.ApiException;
 import id.jakforge.openorchestrator.common.Cron;
+import id.jakforge.openorchestrator.common.Uuids;
 import id.jakforge.openorchestrator.dto.request.SaveTriggerRequest;
 import id.jakforge.openorchestrator.dto.response.TriggerSaveResponse;
 import id.jakforge.openorchestrator.dto.response.TriggerToggleResponse;
+import id.jakforge.openorchestrator.repository.CalendarRepository;
 import id.jakforge.openorchestrator.repository.TriggerRepository;
 import id.jakforge.openorchestrator.repository.TriggerRepository.TriggerSchedule;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
@@ -34,6 +36,7 @@ public class TriggerService {
     private static final String TRIGGER_NOT_FOUND = "Pemicu tidak ada.";
 
     private final TriggerRepository triggerRepository;
+    private final CalendarRepository calendarRepository;
     private final ProcessService processService;
     private final NextRunCalculator nextRunCalculator;
     private final FolderAccessService folderAccessService;
@@ -90,16 +93,18 @@ public class TriggerService {
                     : "Proses '" + request.processName() + "' tidak ada di folder ini.");
         }
 
+        UUID calendarId = resolveCalendar(tenantId, request.calendarId());
+
         OffsetDateTime nextRunAt = nextRunCalculator.nextRun(request.cron(), request.intervalMinutes(),
-                Cron.zoneOrUtc(request.timezone()));
+                Cron.zoneOrUtc(request.timezone()), calendarRepository.findDates(calendarId));
 
         boolean alreadyExists = triggerRepository.existsInFolder(tenantId, folder, request.name());
         permissionChecker.requireSave(principal, Permissions.TRIGGERS, alreadyExists);
 
         if (alreadyExists) {
-            triggerRepository.update(tenantId, folder, request.toDefinition(), nextRunAt);
+            triggerRepository.update(tenantId, folder, request.toDefinition(calendarId), nextRunAt);
         } else {
-            triggerRepository.insert(tenantId, folder, request.toDefinition(), nextRunAt);
+            triggerRepository.insert(tenantId, folder, request.toDefinition(calendarId), nextRunAt);
         }
 
         return new TriggerSaveResponse(true, String.valueOf(nextRunAt));
@@ -125,7 +130,7 @@ public class TriggerService {
 
         OffsetDateTime nextRunAt = enable
                 ? nextRunCalculator.nextRun(schedule.cron(), schedule.intervalMinutes(),
-                        Cron.zoneOrUtc(schedule.timezone()))
+                        Cron.zoneOrUtc(schedule.timezone()), calendarRepository.findDates(schedule.calendarId()))
                 : null;
 
         triggerRepository.setEnabled(tenantId, folder, name, enable, nextRunAt);
@@ -140,6 +145,22 @@ public class TriggerService {
         if (triggerRepository.delete(tenantId, folder, name) == 0) {
             throw ApiException.notFound(TRIGGER_NOT_FOUND);
         }
+    }
+
+    /**
+     * Kalender hari non-kerja yang dipilih (V16), atau null. Id yang tidak
+     * dikenal ditolak di sini: pemicu yang diam-diam tanpa kalender akan
+     * berjalan di hari libur.
+     */
+    private UUID resolveCalendar(UUID tenantId, String calendarId) {
+        if (calendarId == null) return null;
+
+        UUID id = Uuids.parseOrNull(calendarId);
+        if (id == null || !calendarRepository.exists(tenantId, id)) {
+            throw ApiException.badRequest("Kalender hari non-kerja tidak ada: '" + calendarId + "'.");
+        }
+
+        return id;
     }
 
     /** Folder pemicu yang dimaksud; aturannya sama dengan proses ({@link FolderLocations#resolve}). */

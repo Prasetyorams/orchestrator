@@ -27,6 +27,7 @@ import static id.jakforge.openorchestrator.security.Permissions.READ;
 import static id.jakforge.openorchestrator.security.Permissions.ROBOTS;
 import static id.jakforge.openorchestrator.security.Permissions.ROLES;
 import static id.jakforge.openorchestrator.security.Permissions.SETTINGS;
+import static id.jakforge.openorchestrator.security.Permissions.CALENDARS;
 import static id.jakforge.openorchestrator.security.Permissions.TRIGGERS;
 import static id.jakforge.openorchestrator.security.Permissions.UPDATE;
 import static id.jakforge.openorchestrator.security.Permissions.USERS;
@@ -87,7 +88,8 @@ public final class PermissionCatalog {
             new Resource(ROLES, CRUD),
             new Resource(ALERTS, List.of(READ, UPDATE)),
             new Resource(AUDIT, List.of(READ)),
-            new Resource(SETTINGS, List.of(READ)));
+            new Resource(SETTINGS, List.of(READ)),
+            new Resource(CALENDARS, CRUD));
 
     private PermissionCatalog() {
     }

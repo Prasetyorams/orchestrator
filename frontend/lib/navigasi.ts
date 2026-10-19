@@ -75,6 +75,11 @@ export const SUBTAB: Record<string, SubTab[]> = {
     { label: "Mesin", href: "/tenant/robots/machines", izin: "machines.read" },
     { label: "Lingkungan", href: "/tenant/robots/environments", izin: "environments.read" },
   ],
+  // Seperti Settings di Orchestrator, dengan Non-Working Days sebagai tabnya (V16).
+  tenantSetelan: [
+    { label: "Umum", href: "/tenant/settings", izin: "settings.read" },
+    { label: "Hari Non-Kerja", href: "/tenant/settings/calendars", izin: "calendars.read" },
+  ],
 };
 
 /** Izin yang membuka salah satu sub-tab. */
@@ -127,7 +132,14 @@ export const TAB_TENANT: Tab[] = [
   { label: "Paket", href: "/tenant/packages", ikon: Package, awalan: "/tenant/packages", izin: ["packages.read"] },
   { label: "Peringatan", href: "/tenant/alerts", ikon: Bell, awalan: "/tenant/alerts", izin: ["alerts.read"] },
   { label: "Audit", href: "/tenant/audit", ikon: History, awalan: "/tenant/audit", izin: ["audit.read"] },
-  { label: "Setelan", href: "/tenant/settings", ikon: Settings, awalan: "/tenant/settings", izin: ["settings.read"] },
+  {
+    label: "Setelan",
+    href: "/tenant/settings",
+    ikon: Settings,
+    awalan: "/tenant/settings",
+    izin: izinSub(SUBTAB.tenantSetelan),
+    sub: SUBTAB.tenantSetelan,
+  },
 ];
 
 /**

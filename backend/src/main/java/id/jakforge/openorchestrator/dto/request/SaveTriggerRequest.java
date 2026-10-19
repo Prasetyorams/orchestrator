@@ -4,6 +4,8 @@ import id.jakforge.openorchestrator.common.Strings;
 import id.jakforge.openorchestrator.model.TriggerDefinition;
 import jakarta.validation.constraints.NotNull;
 
+import java.util.UUID;
+
 /**
  * Membuat atau menyunting pemicu (POST /api/triggers).
  *
@@ -16,8 +18,9 @@ import jakarta.validation.constraints.NotNull;
  * memutuskan, dan hanya di satu tempat ini. Bentuk cron, selang, dan zona
  * waktunya diperiksa layanan.
  *
- * @param folderId folder yang sedang dibuka; kosong berarti proses bernama itu
- *                 di mana pun ia berada
+ * @param folderId   folder yang sedang dibuka; kosong berarti proses bernama itu
+ *                   di mana pun ia berada
+ * @param calendarId kalender hari non-kerja (V16); kosong berarti tanpa kalender
  */
 public record SaveTriggerRequest(
         @NotNull(message = "Nama pemicu wajib diisi.")
@@ -34,7 +37,8 @@ public record SaveTriggerRequest(
         String timezone,
         String runtimeType,
         Boolean enabled,
-        String folderId) {
+        String folderId,
+        String calendarId) {
 
     static final String CRON_TYPE = "Cron";
     static final String INTERVAL_TYPE = "Time";
@@ -55,15 +59,16 @@ public record SaveTriggerRequest(
         runtimeType = Strings.defaultIfEmpty(runtimeType, DEFAULT_RUNTIME_TYPE);
         enabled = enabled == null || enabled;
         folderId = Strings.emptyToNull(folderId);
+        calendarId = Strings.trimToNull(calendarId);
     }
 
     public boolean usesCron() {
         return cron != null && !cron.isBlank();
     }
 
-    /** Isi pemicu yang disimpan, tanpa folder (folder diputuskan layanan). */
-    public TriggerDefinition toDefinition() {
+    /** Isi pemicu yang disimpan, tanpa folder (folder diputuskan layanan); kalender sudah diperiksa layanan. */
+    public TriggerDefinition toDefinition(UUID resolvedCalendarId) {
         return new TriggerDefinition(name, processName, robotName, type, cron, intervalMinutes, enabled,
-                priority, timezone, runtimeType);
+                priority, timezone, runtimeType, resolvedCalendarId);
     }
 }

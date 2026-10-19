@@ -22,17 +22,24 @@ public class TriggerRepository {
 
     private static final String COLUMNS = """
             id, name, process_name, robot_name, type, cron, interval_minutes,
-            priority, timezone, runtime_type, enabled, next_run_at, last_run_at, created_at, folder_id
+            priority, timezone, runtime_type, enabled, next_run_at, last_run_at, created_at, folder_id,
+            calendar_id, (SELECT c.name FROM calendars c WHERE c.id = triggers.calendar_id) AS calendar_name
             """;
 
     /** Jadwal sebuah pemicu: cukup untuk menghitung waktu jalan berikutnya. */
-    public record TriggerSchedule(boolean enabled, String cron, int intervalMinutes, String timezone) {
+    public record TriggerSchedule(boolean enabled, String cron, int intervalMinutes, String timezone,
+                                  UUID calendarId) {
+    }
+
+    /** Pemicu aktif yang memakai sebuah kalender, untuk dihitung ulang saat kalendernya berubah. */
+    public record CalendarTrigger(UUID id, String cron, int intervalMinutes, String timezone,
+                                  OffsetDateTime nextRunAt) {
     }
 
     /** Pemicu yang sudah waktunya jalan, beserta yang dibutuhkan untuk menjadwalkan pekerjaannya. */
     public record DueTrigger(UUID id, UUID tenantId, UUID folderId, String name, String processName,
                              String robotName, int intervalMinutes, String cron, String priority,
-                             String timezone) {
+                             String timezone, UUID calendarId, OffsetDateTime nextRunAt) {
     }
 
     private final Database database;
@@ -68,7 +75,8 @@ public class TriggerRepository {
 
         return database.queryRows("""
                 SELECT name, process_name, type, interval_minutes, cron, timezone,
-                       enabled, next_run_at, last_run_at
+                       enabled, next_run_at, last_run_at,
+                       (SELECT c.name FROM calendars c WHERE c.id = triggers.calendar_id) AS calendar_name
                   FROM triggers
                  WHERE tenant_id = ? AND enabled%s
                  ORDER BY next_run_at
@@ -90,9 +98,10 @@ public class TriggerRepository {
                 SELECT t.id, t.name, t.folder_id, f.name AS folder_name, t.process_name,
                        r.id AS robot_id, NULLIF(t.robot_name, '') AS robot_name,
                        t.type, t.cron, t.interval_minutes, t.timezone, t.priority,
-                       t.enabled, t.next_run_at, t.last_run_at
+                       t.enabled, t.next_run_at, t.last_run_at, t.calendar_id, c.name AS calendar_name
                   FROM triggers t
                   JOIN folders f ON f.id = t.folder_id
+                  LEFT JOIN calendars c ON c.id = t.calendar_id
                   LEFT JOIN robots r ON r.tenant_id = t.tenant_id AND r.name = t.robot_name
                  WHERE t.tenant_id = ?
                    AND ((NULLIF(t.robot_name, '') IS NOT NULL AND r.machine_id = ?)
@@ -109,10 +118,10 @@ public class TriggerRepository {
 
     public Optional<TriggerSchedule> findSchedule(UUID tenantId, UUID folderId, String name) {
         return database.query("""
-                SELECT enabled, cron, interval_minutes, timezone
+                SELECT enabled, cron, interval_minutes, timezone, calendar_id
                   FROM triggers WHERE tenant_id = ? AND folder_id = ? AND name = ?
                 """, (rs, rowNumber) -> new TriggerSchedule(rs.getBoolean(1), rs.getString(2), rs.getInt(3),
-                        rs.getString(4)),
+                        rs.getString(4), rs.getObject(5, UUID.class)),
                 tenantId, folderId, name).stream().findFirst();
     }
 
@@ -143,11 +152,12 @@ public class TriggerRepository {
                 UPDATE triggers
                    SET process_name = ?, robot_name = ?, type = ?, cron = ?,
                        interval_minutes = ?, enabled = ?, next_run_at = ?,
-                       priority = ?, timezone = ?, runtime_type = ?
+                       priority = ?, timezone = ?, runtime_type = ?, calendar_id = ?
                  WHERE tenant_id = ? AND folder_id = ? AND name = ?
                 """, trigger.processName(), trigger.robotName(), trigger.type(), trigger.cron(),
                 trigger.intervalMinutes(), trigger.enabled(), nextRunAt,
-                trigger.priority(), trigger.timezone(), trigger.runtimeType(), tenantId, folderId, trigger.name());
+                trigger.priority(), trigger.timezone(), trigger.runtimeType(), trigger.calendarId(),
+                tenantId, folderId, trigger.name());
     }
 
     public void insert(UUID tenantId, UUID folderId, TriggerDefinition trigger, OffsetDateTime nextRunAt) {
@@ -155,11 +165,11 @@ public class TriggerRepository {
                 INSERT INTO triggers
                     (id, tenant_id, folder_id, name, process_name, robot_name, type, cron,
                      interval_minutes, enabled, next_run_at, created_at,
-                     priority, timezone, runtime_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?, ?, ?)
+                     priority, timezone, runtime_type, calendar_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?, ?, ?, ?)
                 """, UUID.randomUUID(), tenantId, folderId, trigger.name(), trigger.processName(),
                 trigger.robotName(), trigger.type(), trigger.cron(), trigger.intervalMinutes(), trigger.enabled(),
-                nextRunAt, trigger.priority(), trigger.timezone(), trigger.runtimeType());
+                nextRunAt, trigger.priority(), trigger.timezone(), trigger.runtimeType(), trigger.calendarId());
     }
 
     public void setEnabled(UUID tenantId, UUID folderId, String name, boolean enabled, OffsetDateTime nextRunAt) {
@@ -203,7 +213,7 @@ public class TriggerRepository {
     public Optional<DueTrigger> lockIfDue(UUID triggerId) {
         return database.query("""
                 SELECT id, tenant_id, folder_id, name, process_name, robot_name,
-                       interval_minutes, cron, priority, timezone
+                       interval_minutes, cron, priority, timezone, calendar_id, next_run_at
                   FROM triggers
                  WHERE id = ?
                    AND enabled = TRUE
@@ -220,8 +230,33 @@ public class TriggerRepository {
                         rs.getInt("interval_minutes"),
                         rs.getString("cron"),
                         rs.getString("priority"),
-                        rs.getString("timezone")),
+                        rs.getString("timezone"),
+                        rs.getObject("calendar_id", UUID.class),
+                        rs.getObject("next_run_at", OffsetDateTime.class)),
                 triggerId).stream().findFirst();
+    }
+
+    /**
+     * Pemicu yang dilewati karena hari non-kerja: hanya waktu berikutnya yang
+     * maju; {@code last_run_at} tetap, karena memang tidak ada yang dijalankan.
+     */
+    public void recordSkip(UUID triggerId, OffsetDateTime nextRunAt) {
+        database.update("UPDATE triggers SET next_run_at = ? WHERE id = ?", nextRunAt, triggerId);
+    }
+
+    /** Pemicu aktif yang memakai kalender ini. */
+    public List<CalendarTrigger> findEnabledByCalendar(UUID tenantId, UUID calendarId) {
+        return database.query("""
+                SELECT id, cron, interval_minutes, timezone, next_run_at
+                  FROM triggers
+                 WHERE tenant_id = ? AND calendar_id = ? AND enabled
+                """, (rs, rowNumber) -> new CalendarTrigger(rs.getObject(1, UUID.class), rs.getString(2),
+                        rs.getInt(3), rs.getString(4), rs.getObject(5, OffsetDateTime.class)),
+                tenantId, calendarId);
+    }
+
+    public void updateNextRun(UUID triggerId, OffsetDateTime nextRunAt) {
+        database.update("UPDATE triggers SET next_run_at = ? WHERE id = ?", nextRunAt, triggerId);
     }
 
     public void recordRun(UUID triggerId, OffsetDateTime nextRunAt) {

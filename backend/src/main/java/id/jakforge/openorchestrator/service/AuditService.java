@@ -2,6 +2,7 @@ package id.jakforge.openorchestrator.service;
 
 import id.jakforge.openorchestrator.common.PageLimits;
 import id.jakforge.openorchestrator.repository.AuditRepository;
+import id.jakforge.openorchestrator.repository.CalendarRepository;
 import id.jakforge.openorchestrator.repository.FolderRepository;
 import id.jakforge.openorchestrator.repository.JobRepository;
 import id.jakforge.openorchestrator.repository.UserRepository;
@@ -32,6 +33,7 @@ public class AuditService {
     private final UserRepository userRepository;
     private final FolderRepository folderRepository;
     private final JobRepository jobRepository;
+    private final CalendarRepository calendarRepository;
 
     /**
      * @param component hanya komponen ini (Proses, Aset, ...); kosong berarti semua
@@ -69,5 +71,9 @@ public class AuditService {
 
     public Optional<String> findJobProcessName(UUID tenantId, UUID jobId) {
         return jobRepository.findProcessName(tenantId, jobId);
+    }
+
+    public Optional<String> findCalendarName(UUID tenantId, UUID calendarId) {
+        return calendarRepository.findName(tenantId, calendarId);
     }
 }

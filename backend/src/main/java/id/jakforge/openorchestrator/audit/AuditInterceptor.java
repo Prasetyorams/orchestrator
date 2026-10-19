@@ -81,6 +81,8 @@ public class AuditInterceptor implements HandlerInterceptor {
         FOLDER_OF_PATH_ID,
         /** Nama proses pekerjaan {id}, diambil SEBELUM controllernya berjalan. */
         JOB_OF_PATH_ID,
+        /** Nama kalender {id}, diambil SEBELUM controllernya berjalan. */
+        CALENDAR_OF_PATH_ID,
         /** Nama folder dari {@code ?folderId=}. */
         FOLDER_OF_PARAMETER,
         /** Nama folder dari medan {@code folderId} di badan. */
@@ -100,6 +102,8 @@ public class AuditInterceptor implements HandlerInterceptor {
 
     private static final TargetSource FOLDER_BY_ID = new TargetSource(SourceKind.FOLDER_OF_PATH_ID, ID_PATH_VARIABLE);
     private static final TargetSource JOB_BY_ID = new TargetSource(SourceKind.JOB_OF_PATH_ID, ID_PATH_VARIABLE);
+    private static final TargetSource CALENDAR_BY_ID =
+            new TargetSource(SourceKind.CALENDAR_OF_PATH_ID, ID_PATH_VARIABLE);
     private static final TargetSource FOLDER_FROM_PARAMETER =
             new TargetSource(SourceKind.FOLDER_OF_PARAMETER, FOLDER_ID_FIELD);
     private static final TargetSource FOLDER_FROM_BODY = new TargetSource(SourceKind.FOLDER_OF_BODY, FOLDER_ID_FIELD);
@@ -143,6 +147,12 @@ public class AuditInterceptor implements HandlerInterceptor {
             rule(POST, "/api/triggers", "Pemicu", "Simpan", body("name"), FOLDER_FROM_BODY),
             rule(POST, "/api/triggers/{name}/toggle", "Pemicu", "Alihkan status", path("name"), FOLDER_FROM_PARAMETER),
             rule(DELETE, "/api/triggers/{name}", "Pemicu", "Hapus", path("name"), FOLDER_FROM_PARAMETER),
+
+            // Kalender hari non-kerja (V16). Ubah memakai nama di badan — nama
+            // yang baru, kalau diganti; nama lamanya tidak dicari.
+            rule(POST, "/api/calendars", "Kalender", "Buat", body("name")),
+            rule(PUT, "/api/calendars/{id}", "Kalender", "Ubah", body("name")),
+            rule(DELETE, "/api/calendars/{id}", "Kalender", "Hapus", CALENDAR_BY_ID),
 
             rule(POST, "/api/queues", "Antrean", "Buat", body("name"), FOLDER_FROM_BODY),
             rule(DELETE, "/api/queues/{name}", "Antrean", "Hapus", path("name")),
@@ -215,6 +225,10 @@ public class AuditInterceptor implements HandlerInterceptor {
 
             if (rule.targetSources().contains(JOB_BY_ID)) {
                 request.setAttribute(PRE_RESOLVED_TARGET, auditService.findJobProcessName(tenantId, id).orElse(null));
+            }
+
+            if (rule.targetSources().contains(CALENDAR_BY_ID)) {
+                request.setAttribute(PRE_RESOLVED_TARGET, auditService.findCalendarName(tenantId, id).orElse(null));
             }
         } catch (Exception e) {
             log.warn("Jejak audit tidak bisa disiapkan untuk {} {}.", request.getMethod(), request.getRequestURI(), e);
@@ -292,7 +306,8 @@ public class AuditInterceptor implements HandlerInterceptor {
                 case BODY_FIELD -> bodyFields.get(source.name());
                 case FOLDER_OF_PARAMETER -> folderName(principal, request.getParameter(source.name()));
                 case FOLDER_OF_BODY -> folderName(principal, bodyFields.get(source.name()));
-                case FOLDER_OF_PATH_ID, JOB_OF_PATH_ID -> (String) request.getAttribute(PRE_RESOLVED_TARGET);
+                case FOLDER_OF_PATH_ID, JOB_OF_PATH_ID, CALENDAR_OF_PATH_ID ->
+                        (String) request.getAttribute(PRE_RESOLVED_TARGET);
             };
 
             if (value != null && !value.isBlank()) parts.add(value.trim());

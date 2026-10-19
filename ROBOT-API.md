@@ -34,6 +34,11 @@ dasbor (Bagian 5). Satu-satunya perilaku yang berubah: terbit ulang versi yang s
 Catatan untuk tim robot: Bagian 4 (6 Okt 2026). Diuji ujung-ke-ujung (55 pemeriksaan), dengan
 migrasi salinan data asli V11→V14, dan dengan regresi v1.
 
+**Tambahan V16** (`V16__kalender_hari_non_kerja.sql`): **kalender hari non-kerja** untuk pemicu,
+seperti Non-Working Days di UiPath. Pemicu yang memakai kalender tidak menjadwalkan job pada
+tanggal-tanggalnya. Menambah medan di `GET /api/agent/triggers` (2.10); **tidak ada perubahan wajib
+di sisi robot**. Catatan untuk tim robot: Bagian 4 (19 Okt 2026). Diuji ujung-ke-ujung (68 pemeriksaan).
+
 Dokumen ini punya dua bagian:
 
 - **v1** — API untuk JakRunner (attended), Studio, activities `Custom.Orchestrator`, dan
@@ -69,7 +74,7 @@ Semua memakai `Authorization: Bearer <token>` dari login akun pengguna.
   "capabilities": ["jobs.next.package", "packages.sha256", "heartbeat.commands", "jobs.state.guard",
                    "jobs.pause", "jobs.kill", "agent.triggers", "assistant.signin",
                    "folder.machines", "robots.resolution", "heartbeat.busyLocal", "logs.trigger",
-                   "packages.versionConflict", "packages.upload.binary"],
+                   "packages.versionConflict", "packages.upload.binary", "triggers.calendar"],
   "apiVersions": [1, 2] }
 ```
 
@@ -77,7 +82,8 @@ Semua memakai `Authorization: Bearer <token>` dari login akun pengguna.
 kalau `/api/agent` tersedia. `agent.triggers` = 2.10, `assistant.signin` = Bagian 5,
 `folder.machines` = Bagian 6,
 `robots.resolution` = 2.2, `heartbeat.busyLocal` = denyut v1 di bawah dan 2.3, `logs.trigger`,
-`packages.versionConflict` dan `packages.upload.binary` = di bawah. `queues.jobRelease` tidak diumumkan
+`packages.versionConflict` dan `packages.upload.binary` = di bawah, `triggers.calendar` = 2.10 (V16).
+`queues.jobRelease` tidak diumumkan
 selama antrean dinonaktifkan (lihat "Antrean" di bawah).
 
 ### `POST /api/auth/login`
@@ -577,7 +583,9 @@ Kemampuan `agent.triggers` di `/api/health`.
       "processName": "Tagihan", "robotId": "…", "robotName": "Robot_A",
       "type": "Cron", "cron": "0 8 * * 1-5", "intervalMinutes": 60, "timezone": "Asia/Jakarta",
       "priority": "Normal", "enabled": true,
-      "nextRunAt": "2026-10-02T01:00:00.000000Z", "lastRunAt": null } ] }
+      "nextRunAt": "2026-10-02T01:00:00.000000Z", "lastRunAt": null,
+      "calendarId": "…", "calendarName": "Libur Nasional 2026",
+      "nonWorkingDays": ["2026-12-24", "2026-12-25", "2026-12-26"] } ] }
 ```
 
 - **Cakupan:** pemicu yang menargetkan salah satu robot mesin ini (`robotId` sama dengan
@@ -593,6 +601,11 @@ Kemampuan `agent.triggers` di `/api/health`.
   di usulan.
 - `nextRunAt` dihitung **server**, di zona waktu pemicunya (`timezone`, bawaan `UTC`), dan
   ditulis dalam UTC seperti waktu lain. Agent tidak perlu menghitung cron sendiri.
+- **Kalender hari non-kerja (V16, `triggers.calendar`):** `calendarId`/`calendarName` = kalender
+  pemicu, `null` kalau tanpa kalender. `nonWorkingDays` = tanggalnya (`YYYY-MM-DD`, terurut) dari
+  **kemarin sampai 400 hari ke depan** (UTC); `[]` kalau tanpa kalender — medannya selalu ada.
+  Tanggal dibaca **di zona waktu pemicu** (`timezone`), bukan zona mesin. `nextRunAt` sudah
+  melompati tanggal-tanggal itu; daftarnya hanya untuk ditampilkan.
 - Tidak ada → `200 {"triggers": []}`. `401` = token kedaluwarsa atau kunci diganti (login
   ulang); token selain agent → `403`.
 - Beban: baca saat halaman Jadwal dibuka, paling sering tiap 60 detik. `triggersVersion` di
@@ -1000,6 +1013,54 @@ dimatikan dulu, sampai dipakai lagi. Sudah di-deploy (produksi, migrasi V15 ikut
 **Mengaktifkan lagi** (di repo orchestrator): cari `NONAKTIF-SEMENTARA` di `backend` dan `frontend`,
 buka komentarnya, lalu deploy. Kontrak antrean di Bagian 1 dan catatan V15 di atas berlaku lagi tanpa
 perubahan; tidak perlu migrasi.
+
+## Kalender hari non-kerja (19 Okt 2026, V16)
+
+Fitur baru di Orchestrator, seperti **Non-Working Days** di UiPath Orchestrator: kalender berisi
+tanggal libur, dan pemicu yang memakainya tidak menjadwalkan job pada tanggal itu. **Sudah di-deploy**
+ke produksi (19 Okt 2026, migrasi `V16__kalender_hari_non_kerja.sql`).
+
+**Yang berubah di server:**
+
+- Dasbor: **Tenant › Setelan › Hari Non-Kerja** — buat kalender (nama, keterangan, tanggal + catatan;
+  bisa tempel daftar `2026-12-25 Natal` atau rentang `2026-12-24..2026-12-26 Cuti bersama`, atau
+  unggah CSV `tanggal,sampai,catatan` — contohnya bisa diunduh di dialog). CSV dibaca di peramban;
+  API-nya tetap `PUT /api/calendars/{id}`. Satu kalender bisa dipakai banyak pemicu di folder mana
+  pun. Di dialog pemicu ada pilihan **Kalender hari non-kerja** (bawaan: tanpa kalender).
+- Jadwal: tanggal dinilai di **zona waktu pemicu**. Cron melompat ke kecocokan berikutnya di hari kerja
+  (`0 9 * * *` + 25 Des libur → 26 Des 09:00); pemicu berkala (`Time`) yang jatuh di hari libur
+  menunggu sampai 00:00 hari kerja berikutnya. Kalau saat jatuh tempo ternyata hari libur (kalendernya
+  baru diubah), job **tidak** dibuat; baris catatan *"Pemicu 'X' dilewati: 2026-12-25 adalah hari
+  non-kerja di kalender 'Y'. Berikutnya …"* ditulis, dan `nextRunAt` maju.
+- Mengubah tanggal kalender menghitung ulang `nextRunAt` pemicu pemakainya. Kalender yang masih dipakai
+  tidak bisa dihapus (`409`, `errorCode: CALENDAR_IN_USE`).
+- API: `GET/POST /api/calendars`, `GET/PUT/DELETE /api/calendars/{id}`; `POST /api/triggers` menerima
+  `calendarId` (kosong = lepas). Izin baru `calendars.*`; `triggers.read` juga boleh membaca daftar
+  kalender. Perubahan kalender tercatat di Tenant › Audit.
+- `/api/health`: kemampuan baru `triggers.calendar` (15 kemampuan).
+- `GET /api/agent/triggers`: tiap pemicu kini membawa `calendarId`, `calendarName`, dan
+  `nonWorkingDays` (2.10).
+
+**Akibat di sisi robot/Studio:** tidak ada yang wajib. Job dari pemicu tetap diambil dengan cara yang
+sama — yang berubah hanya **kapan** job dibuat, dan itu sepenuhnya di server. Start Job manual dan
+activity Start Job **tidak** terpengaruh kalender.
+
+**Saran (tidak wajib):**
+
+- Halaman Jadwal Open Assistant: tampilkan `calendarName` (mis. kolom "Hari Non-Kerja") dan, kalau
+  mau, tandai tanggal `nonWorkingDays` di tampilan kalender. Jangan menghitung jadwal sendiri;
+  `nextRunAt` sudah benar.
+- Agent lama yang belum mengenal medan baru tetap jalan (medan tak dikenal wajib diabaikan).
+
+**Cara menguji dari sisi robot:**
+
+1. Dasbor: buat kalender berisi tanggal **hari ini** dan **besok**, lalu pasang di pemicu cron
+   (mis. `0 9 * * *`, zona waktu `Asia/Jakarta`) yang menargetkan robot unattended mesin uji.
+2. `GET /api/agent/triggers` dengan token agent mesin itu: pemicunya membawa `calendarName` dan
+   `nonWorkingDays` berisi kedua tanggal itu, dan `nextRunAt` jatuh pada **lusa** 09:00 WIB
+   (`02:00Z`).
+3. Hapus kedua tanggal dari kalender lalu Simpan: `nextRunAt` kembali ke 09:00 berikutnya.
+4. Kalau `/api/health` tidak menyebut `triggers.calendar`, server belum V16 — medan-medan itu tidak ada.
 
 ---
 

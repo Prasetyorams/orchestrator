@@ -106,6 +106,11 @@ function IsiPemicu({ folder }: { folder: FolderNode }) {
             },
             { judul: "Zona Waktu", sel: (p) => <span className="text-muted">{p.timezone}</span>, urut: (p) => p.timezone },
             {
+              judul: "Hari Non-Kerja",
+              sel: (p) => <span className="text-muted">{p.calendarName ?? "-"}</span>,
+              urut: (p) => p.calendarName ?? "",
+            },
+            {
               judul: "Status",
               sel: (p) => (
                 <Badge value={p.enabled ? "AVAILABLE" : "STOPPED"} label={t(p.enabled ? "Aktif" : "Nonaktif")} />
@@ -198,7 +203,11 @@ function DialogPemicu({
   const [selang, setSelang] = useState(awal?.intervalMinutes || 60);
   const [zona, setZona] = useState(awal?.timezone ?? "Asia/Jakarta");
   const [prioritas, setPrioritas] = useState(awal?.priority ?? "Normal");
+  const [kalender, setKalender] = useState(awal?.calendarId ?? "");
   const [galat, setGalat] = useState("");
+
+  // Penyunting pemicu boleh membaca daftar kalender (triggers.read cukup).
+  const daftarKalender = useQuery({ queryKey: ["calendars"], queryFn: OpenOrchestratorApi.calendars });
 
   const simpan = useMutation({
     mutationFn: OpenOrchestratorApi.saveTrigger,
@@ -221,6 +230,8 @@ function DialogPemicu({
       timezone: zona,
       priority: prioritas,
       enabled: awal?.enabled ?? true,
+      // Kosong berarti tanpa kalender — dikirim juga, supaya melepasnya tersimpan.
+      calendarId: kalender,
       ...(pakaiCron ? { cron: cron.trim() } : { intervalMinutes: Number(selang) || 60 }),
     });
   }
@@ -344,6 +355,24 @@ function DialogPemicu({
           </select>
         </Isian>
       </div>
+
+      <Isian
+        label={t("Kalender hari non-kerja")}
+        petunjuk={t("Pemicu tidak berjalan pada tanggal di kalender ini; tanggalnya dinilai menurut zona waktu di atas. Kalender diatur di Tenant › Setelan › Hari Non-Kerja.")}
+      >
+        <select value={kalender} onChange={(e) => setKalender(e.target.value)} className={kelasIsian}>
+          <option value="">{t("Tanpa kalender — jalan setiap hari")}</option>
+          {/* Kalender tersimpan yang tidak ada di daftar (mis. belum termuat) tetap ditawarkan. */}
+          {awal?.calendarId && !(daftarKalender.data ?? []).some((k) => k.id === awal.calendarId) ? (
+            <option value={awal.calendarId}>{awal.calendarName ?? awal.calendarId}</option>
+          ) : null}
+          {(daftarKalender.data ?? []).map((k) => (
+            <option key={k.id} value={k.id}>
+              {k.name} ({t("{0} tanggal", k.dayCount)})
+            </option>
+          ))}
+        </select>
+      </Isian>
 
       <Galat pesan={galat} />
     </Dialog>

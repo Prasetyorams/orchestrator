@@ -1,6 +1,7 @@
 package id.jakforge.openorchestrator.service;
 
 import id.jakforge.openorchestrator.repository.AlertRepository;
+import id.jakforge.openorchestrator.repository.CalendarRepository;
 import id.jakforge.openorchestrator.repository.JobRepository;
 import id.jakforge.openorchestrator.repository.LogRepository;
 import id.jakforge.openorchestrator.repository.ProcessRepository;
@@ -12,11 +13,13 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -31,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class TriggerFiringServiceTest {
 
+    /** Minggu, 27 September 2026, 10:00 UTC (17:00 WIB). */
     private static final Instant NOW = Instant.parse("2026-09-27T10:00:00Z");
 
     private final UUID tenantId = UUID.randomUUID();
@@ -39,14 +43,25 @@ class TriggerFiringServiceTest {
     private final RecordingDatabase database = new RecordingDatabase();
     private final FakeTriggerRepository triggers = new FakeTriggerRepository();
     private final FakeProcessRepository processes = new FakeProcessRepository();
+    private final FakeCalendarRepository calendars = new FakeCalendarRepository();
 
-    private final TriggerFiringService firingService = new TriggerFiringService(triggers, processes,
+    private final TriggerFiringService firingService = new TriggerFiringService(triggers, calendars, processes,
             new JobRepository(database), new LogRepository(database), new AlertRepository(database),
             new NextRunCalculator(Clock.fixed(NOW, ZoneOffset.UTC)));
 
     private DueTrigger dueTrigger(String cron, String priority) {
         return new DueTrigger(UUID.randomUUID(), tenantId, folderId, "Harian", "Tagihan", null, 30, cron, priority,
-                "UTC");
+                "UTC", null, OffsetDateTime.parse("2026-09-27T09:59:00Z"));
+    }
+
+    /** Pemicu harian 07:00 dengan kalender, yang jadwalnya {@code slot}. */
+    private DueTrigger withCalendar(String cron, int interval, String zone, String slot) {
+        return new DueTrigger(UUID.randomUUID(), tenantId, folderId, "Harian", "Tagihan", null, interval, cron, "Normal",
+                zone, calendars.id, OffsetDateTime.parse(slot));
+    }
+
+    private boolean logMentions(String text) {
+        return database.argumentsOf("INSERT INTO logs").stream().anyMatch(a -> String.valueOf(a).contains(text));
     }
 
     @Test
@@ -96,6 +111,61 @@ class TriggerFiringServiceTest {
     }
 
     @Test
+    @DisplayName("hari ini hari non-kerja: tanpa pekerjaan, jadwal maju ke hari kerja berikutnya, dicatat sekali")
+    void nonWorkingTodaySkips() {
+        calendars.dates = Set.of(LocalDate.parse("2026-09-27"));
+        triggers.locked = Optional.of(withCalendar("0 7 * * *", 0, "UTC", "2026-09-27T07:00:00Z"));
+
+        firingService.fireIfDue(triggers.locked.get().id());
+
+        assertTrue(database.statementsContaining("INSERT INTO jobs").isEmpty());
+        assertTrue(triggers.recordedNextRuns.isEmpty(), "bukan jalan: last_run_at tidak diubah");
+        assertEquals(List.of(OffsetDateTime.parse("2026-09-28T07:00:00Z")), triggers.skippedNextRuns);
+        assertEquals(1, database.statementsContaining("INSERT INTO logs").size());
+        assertTrue(logMentions("dilewati: 2026-09-27 adalah hari non-kerja di kalender 'Libur Nasional'"));
+        assertTrue(triggers.disabledIds.isEmpty());
+    }
+
+    @Test
+    @DisplayName("jadwal di hari libur yang baru dikejar sesudah libur tetap dilewati")
+    void overdueHolidaySlotSkips() {
+        calendars.dates = Set.of(LocalDate.parse("2026-09-26"));
+        triggers.locked = Optional.of(withCalendar("0 7 * * *", 0, "UTC", "2026-09-26T07:00:00Z"));
+
+        firingService.fireIfDue(triggers.locked.get().id());
+
+        assertTrue(database.statementsContaining("INSERT INTO jobs").isEmpty());
+        assertEquals(List.of(OffsetDateTime.parse("2026-09-28T07:00:00Z")), triggers.skippedNextRuns);
+        assertTrue(logMentions("dilewati: 2026-09-26"));
+    }
+
+    @Test
+    @DisplayName("hari kerja: pekerjaan dibuat, dan jadwal berikutnya melompati hari libur di depan")
+    void workingDayRunsAndNextSkipsHolidays() {
+        calendars.dates = Set.of(LocalDate.parse("2026-09-28"), LocalDate.parse("2026-09-29"));
+        triggers.locked = Optional.of(withCalendar("0 7 * * *", 0, "UTC", "2026-09-27T07:00:00Z"));
+
+        firingService.fireIfDue(triggers.locked.get().id());
+
+        assertEquals(1, database.statementsContaining("INSERT INTO jobs").size());
+        assertEquals(List.of(OffsetDateTime.parse("2026-09-30T07:00:00Z")), triggers.recordedNextRuns);
+        assertTrue(triggers.skippedNextRuns.isEmpty());
+    }
+
+    @Test
+    @DisplayName("tanggal dinilai di zona pemicu: 17:00 WIB tanggal 27 adalah libur; selang mulai lagi 00:00 WIB")
+    void intervalTriggerInZoneResumesAtMidnight() {
+        calendars.dates = Set.of(LocalDate.parse("2026-09-27"));
+        triggers.locked = Optional.of(withCalendar(null, 30, "Asia/Jakarta", "2026-09-27T09:30:00Z"));
+
+        firingService.fireIfDue(triggers.locked.get().id());
+
+        assertTrue(database.statementsContaining("INSERT INTO jobs").isEmpty());
+        // 28 September 00:00 WIB = 27 September 17:00 UTC.
+        assertEquals(List.of(OffsetDateTime.parse("2026-09-27T17:00:00Z")), triggers.skippedNextRuns);
+    }
+
+    @Test
     @DisplayName("pemicu yang sudah diambil penjadwal lain, atau tidak lagi jatuh tempo, dilewati")
     void triggerNoLongerDueIsSkipped() {
         triggers.locked = Optional.empty();
@@ -110,6 +180,7 @@ class TriggerFiringServiceTest {
 
         Optional<DueTrigger> locked = Optional.empty();
         final List<OffsetDateTime> recordedNextRuns = new ArrayList<>();
+        final List<OffsetDateTime> skippedNextRuns = new ArrayList<>();
         final List<UUID> disabledIds = new ArrayList<>();
 
         FakeTriggerRepository() {
@@ -127,8 +198,33 @@ class TriggerFiringServiceTest {
         }
 
         @Override
+        public void recordSkip(UUID triggerId, OffsetDateTime nextRunAt) {
+            skippedNextRuns.add(nextRunAt);
+        }
+
+        @Override
         public void disable(UUID triggerId) {
             disabledIds.add(triggerId);
+        }
+    }
+
+    private static final class FakeCalendarRepository extends CalendarRepository {
+
+        final UUID id = UUID.randomUUID();
+        Set<LocalDate> dates = Set.of();
+
+        FakeCalendarRepository() {
+            super(null);
+        }
+
+        @Override
+        public Set<LocalDate> findDates(UUID calendarId) {
+            return calendarId == null ? Set.of() : dates;
+        }
+
+        @Override
+        public Optional<String> findName(UUID tenantId, UUID calendarId) {
+            return Optional.of("Libur Nasional");
         }
     }
 

@@ -28,6 +28,19 @@ export function dateTimeOf(iso: string | null | undefined) {
 }
 
 /**
+ * Tanggal saja ("2026-12-25") menjadi "Jum, 25 Des 2026" menurut bahasa yang dipilih.
+ * Dibaca sebagai tanggal LOKAL, bukan UTC: "2026-12-25" tidak boleh bergeser
+ * menjadi tanggal 24 di zona yang di belakang UTC.
+ */
+export function tanggalOf(isoDate: string | null | undefined) {
+  if (!isoDate) return "-";
+  const d = new Date(`${isoDate}T00:00:00`);
+  return Number.isNaN(d.getTime())
+    ? isoDate
+    : d.toLocaleDateString(lokalTanggal(), { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+}
+
+/**
  * Waktu yang ringkas untuk kolom sempit: jamnya saja kalau hari ini, tanggal
  * dan jam kalau tahun ini, dan lengkap kalau lebih lama dari itu. Tanggal
  * lengkapnya ada di petunjuk saat kursor diam di atasnya.
@@ -49,6 +62,22 @@ export function waktuSingkat(iso: string | null | undefined) {
   }
 
   return dateTimeOf(iso);
+}
+
+/** Serahkan blob ke peramban sebagai berkas unduhan. */
+export function simpanBlob(blob: Blob, namaBerkas: string) {
+  const objectUrl = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+
+  a.href = objectUrl;
+  a.download = namaBerkas;
+  document.body.appendChild(a);
+  a.click();
+
+  // Dibersihkan setelah klik: URL objek menahan blob-nya di memori sampai
+  // dilepas, dan halaman yang lama terbuka bisa menumpuk puluhan megabita.
+  a.remove();
+  window.URL.revokeObjectURL(objectUrl);
 }
 
 /** Bita menjadi satuan yang enak dibaca. */

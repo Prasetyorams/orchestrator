@@ -167,6 +167,13 @@ public class PermissionInterceptor implements HandlerInterceptor {
             requires(POST, "/api/triggers/{name}/toggle", "triggers.update"),
             requires(DELETE, "/api/triggers/{name}", "triggers.delete"),
 
+            // --- kalender hari non-kerja (V16): penyunting pemicu boleh membacanya untuk memilih ---
+            requires(GET, "/api/calendars", "calendars.read", "triggers.read"),
+            requires(GET, "/api/calendars/{id}", "calendars.read", "triggers.read"),
+            requires(POST, "/api/calendars", "calendars.create"),
+            requires(PUT, "/api/calendars/{id}", "calendars.update"),
+            requires(DELETE, "/api/calendars/{id}", "calendars.delete"),
+
             // --- antrean: menambah, mengambil, dan melaporkan butir mengubah isi antreannya ---
             // NONAKTIF-SEMENTARA (antrean): QueueController dimatikan; buka komentar bersamanya.
             // requires(GET, "/api/queues", "queues.read"),

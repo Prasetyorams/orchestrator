@@ -40,6 +40,7 @@ const LABEL_SUMBER: Record<string, string> = {
   alerts: "Peringatan",
   audit: "Audit",
   settings: "Setelan",
+  calendars: "Hari Non-Kerja",
 };
 
 const AKSI = [
@@ -61,6 +62,7 @@ const CATATAN: Record<string, string> = {
   robots: "Ubah: denyut robot — akun JakRunner memerlukannya.",
   folders: "Ubah: menugaskan orang dan robot, sekaligus melihat semua folder.",
   roles: "Izin yang bisa diberikan hanya yang juga Anda miliki.",
+  calendars: "Lihat: juga terbuka bagi yang boleh melihat pemicu, untuk memilih kalendernya.",
 };
 
 const KELOMPOK: { judul: string; sumber: string[] }[] = [
@@ -72,7 +74,7 @@ const KELOMPOK: { judul: string; sumber: string[] }[] = [
   },
   {
     judul: "Pengelolaan penyewa",
-    sumber: ["folders", "machines", "environments", "users", "roles", "alerts", "audit", "settings"],
+    sumber: ["folders", "machines", "environments", "users", "roles", "alerts", "audit", "settings", "calendars"],
   },
 ];
 

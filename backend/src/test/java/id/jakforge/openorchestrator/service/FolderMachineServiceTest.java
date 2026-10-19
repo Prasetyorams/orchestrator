@@ -63,7 +63,7 @@ class FolderMachineServiceTest {
 
         return new FolderMachineService(new FolderMachineRepository(database), new MachineRepository(database),
                 new ProcessRepository(database), new FolderAccessService(folders, (p, permission) -> manager),
-                new AuditService(new AuditRepository(database), null, null, null), TestProperties.defaults());
+                new AuditService(new AuditRepository(database), null, null, null, null), TestProperties.defaults());
     }
 
     private void machineRow(String state) {

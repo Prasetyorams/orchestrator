@@ -28,6 +28,8 @@ public final class Permissions {
     public static final String ALERTS = "alerts";
     public static final String AUDIT = "audit";
     public static final String SETTINGS = "settings";
+    /** Kalender hari non-kerja (V16): tanggal saat pemicu tidak berjalan. */
+    public static final String CALENDARS = "calendars";
 
     // --- tindakan ---
     public static final String READ = "read";

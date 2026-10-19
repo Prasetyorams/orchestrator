@@ -35,7 +35,8 @@ public record HealthResponse(String product, String status, String time, int con
             "packages.versionConflict", // POST /api/packages menolak versi yang sudah ada: 409 PACKAGE_VERSION_EXISTS
             // NONAKTIF-SEMENTARA (antrean): API /api/queues dimatikan, jadi kemampuannya tidak diumumkan.
             // "queues.jobRelease",   // V15: butir yang diambil Executor dilepas saat job-nya FAULTED/STOPPED; hasil untuk butir yang tak lagi IN_PROGRESS ditolak 409
-            "packages.upload.binary"); // POST /api/packages menerima multipart/form-data (bagian file + medan yang sama)
+            "packages.upload.binary", // POST /api/packages menerima multipart/form-data (bagian file + medan yang sama)
+            "triggers.calendar"); // V16: pemicu bisa memakai kalender hari non-kerja; /api/agent/triggers membawa nonWorkingDays
 
     static final List<Integer> API_VERSIONS = List.of(1, 2);
 

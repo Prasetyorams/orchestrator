@@ -20,6 +20,7 @@ import id.jakforge.openorchestrator.model.JobTransitions;
 import id.jakforge.openorchestrator.model.LogLevel;
 import id.jakforge.openorchestrator.model.RobotStatus;
 import id.jakforge.openorchestrator.repository.AttachmentRepository;
+import id.jakforge.openorchestrator.repository.CalendarRepository;
 import id.jakforge.openorchestrator.repository.JobRepository;
 import id.jakforge.openorchestrator.repository.LogRepository;
 import id.jakforge.openorchestrator.repository.MachineRepository;
@@ -36,6 +37,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -85,6 +88,7 @@ public class AgentService {
     private final LogRepository logRepository;
     private final AttachmentRepository attachmentRepository;
     private final TriggerRepository triggerRepository;
+    private final CalendarRepository calendarRepository;
     private final AuditService auditService;
     private final JobOutcomeService jobOutcomeService;
     private final JwtService jwtService;
@@ -99,11 +103,36 @@ public class AgentService {
      * Pemicu yang bisa jalan di mesin ini, untuk halaman Jadwal Open Assistant
      * yang tersambung dengan machine key (usulan PR orchestrator#3,
      * ROBOT-API.md 2.10). Hanya dibaca; mengubah pemicu tetap lewat dasbor.
-     * {@code nextRunAt} dihitung server, di zona waktu pemicunya.
+     * {@code nextRunAt} dihitung server, di zona waktu pemicunya (dan sudah
+     * melompati hari non-kerja).
+     *
+     * <p>V16: pemicu yang memakai kalender hari non-kerja membawa
+     * {@code calendarName} dan {@code nonWorkingDays} — tanggal kalender itu
+     * dari kemarin sampai {@value #AGENT_NON_WORKING_DAYS_AHEAD} hari ke depan
+     * (UTC), dinilai menurut zona waktu pemicu — supaya jadwal yang dijalankan
+     * di mesin sendiri juga melompatinya. Tanpa kalender: daftar kosong.
      */
     public Map<String, Object> triggers(OpenOrchestratorPrincipal agent) {
-        return Map.of("triggers", triggerRepository.findForMachine(agent.tenantId(), agent.machineId()));
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        Map<UUID, List<String>> datesByCalendar = new HashMap<>();
+        List<Map<String, Object>> triggers = new ArrayList<>();
+
+        for (Map<String, Object> row : triggerRepository.findForMachine(agent.tenantId(), agent.machineId())) {
+            Map<String, Object> trigger = new LinkedHashMap<>(row);
+            UUID calendarId = Uuids.parseOrNull(row.get("calendarId") == null ? null : String.valueOf(row.get("calendarId")));
+
+            trigger.put("nonWorkingDays", calendarId == null ? List.of()
+                    : datesByCalendar.computeIfAbsent(calendarId, id -> calendarRepository
+                            .findDatesBetween(id, today.minusDays(1), today.plusDays(AGENT_NON_WORKING_DAYS_AHEAD))
+                            .stream().map(LocalDate::toString).toList()));
+            triggers.add(trigger);
+        }
+
+        return Map.of("triggers", triggers);
     }
+
+    /** Rentang tanggal non-kerja yang dikirim ke agent: cukup untuk setahun lebih. */
+    static final int AGENT_NON_WORKING_DAYS_AHEAD = 400;
 
     // -----------------------------------------------------------------
     // Denyut

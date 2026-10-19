@@ -1,5 +1,6 @@
 import axios, { AxiosError } from "axios";
 import { bahasaAktif, terjemahkan, terjemahkanPesan } from "@/lib/bahasa";
+import { simpanBlob } from "@/lib/utils";
 
 /**
  * Klien HTTP ke backend OpenOrchestrator.
@@ -441,6 +442,31 @@ export type Trigger = {
   lastRunAt: string | null;
   createdAt: string;
   folderId?: string;
+  /** Kalender hari non-kerja (V16); null = tanpa kalender. */
+  calendarId?: string | null;
+  calendarName?: string | null;
+};
+
+/** Kalender hari non-kerja (V16), seperti Non-Working Days di UiPath. */
+export type Calendar = {
+  id: string;
+  name: string;
+  description: string | null;
+  dayCount: number;
+  /** Tanggal hari ini dan sesudahnya (menurut tanggal server). */
+  upcomingDayCount: number;
+  nextDay: string | null;
+  triggerCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CalendarDay = { date: string; note: string | null };
+
+export type CalendarDetail = Calendar & {
+  days: CalendarDay[];
+  /** Pemicu yang memakainya, sebagai "folder / nama". */
+  triggers: string[];
 };
 
 export type Queue = {
@@ -1018,6 +1044,8 @@ export const OpenOrchestratorApi = {
     timezone?: string;
     priority?: string;
     enabled?: boolean;
+    /** Kosong = tanpa kalender. */
+    calendarId?: string;
   }) => post<{ ok: boolean; nextRunAt: string }>("/api/triggers", body),
   toggleTrigger: (name: string, folderId: string) =>
     api
@@ -1025,6 +1053,16 @@ export const OpenOrchestratorApi = {
       .then((r) => r.data),
   deleteTrigger: (name: string, folderId: string) =>
     del<{ ok: boolean }>(`/api/triggers/${seg(name)}`, { folderId }),
+
+  // --- kalender hari non-kerja (V16) ---
+  calendars: () => get<Calendar[]>("/api/calendars"),
+  calendar: (id: string) => get<CalendarDetail>(`/api/calendars/${seg(id)}`),
+  createCalendar: (body: { name: string; description?: string; days: CalendarDay[] }) =>
+    post<{ ok: boolean; id: string }>("/api/calendars", body),
+  /** Mengganti SELURUH daftar tanggalnya. */
+  updateCalendar: (id: string, body: { name: string; description?: string; days: CalendarDay[] }) =>
+    put<{ ok: boolean }>(`/api/calendars/${seg(id)}`, body),
+  deleteCalendar: (id: string) => del<{ ok: boolean }>(`/api/calendars/${seg(id)}`),
 
   // --- antrean ---
   queues: (folderId?: string | null) => get<Queue[]>("/api/queues", dalam(folderId)),
@@ -1170,16 +1208,5 @@ export async function unduh(url: string, namaBerkas: string) {
     throw err;
   }
 
-  const objectUrl = window.URL.createObjectURL(r.data as Blob);
-  const a = document.createElement("a");
-
-  a.href = objectUrl;
-  a.download = namaBerkas;
-  document.body.appendChild(a);
-  a.click();
-
-  // Dibersihkan setelah klik: URL objek menahan blob-nya di memori sampai
-  // dilepas, dan halaman yang lama terbuka bisa menumpuk puluhan megabita.
-  a.remove();
-  window.URL.revokeObjectURL(objectUrl);
+  simpanBlob(r.data as Blob, namaBerkas);
 }

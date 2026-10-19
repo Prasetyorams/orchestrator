@@ -6,9 +6,8 @@ import { useT } from "@/lib/i18n";
 import { dateTimeOf } from "@/lib/utils";
 import { Card, CardHeader } from "@/components/ui/primitives";
 import { DataTable } from "@/components/DataTable";
-import { JudulHalaman } from "@/components/HalamanFolder";
 
-/** Setelan seluruh penyewa: layanan, isi basis data, lisensi, dan daftar penyewa. */
+/** Setelan › Umum: layanan, isi basis data, lisensi, dan daftar penyewa. Judul dan tabnya dari layout. */
 export default function Setelan() {
   const { t } = useT();
 
@@ -18,8 +17,6 @@ export default function Setelan() {
 
   return (
     <div className="space-y-5">
-      <JudulHalaman judul={t("Setelan")} konteks="tenant" />
-
       <Card>
         <CardHeader title={t("Layanan")} />
         <dl className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
