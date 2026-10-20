@@ -9,6 +9,7 @@ import { TopNav } from "@/components/TopNav";
 import { NavBar } from "@/components/NavBar";
 import { FolderSidebar } from "@/components/FolderSidebar";
 import { TanpaIzin } from "@/components/HalamanFolder";
+import { PenjagaSesi } from "@/components/PenjagaSesi";
 
 /**
  * Kerangka halaman, seperti Orchestrator:
@@ -65,6 +66,8 @@ function Kerangka({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-canvas">
+      {/* Batas waktu sesi menganggur (V18): di semua halaman sesudah masuk. */}
+      <PenjagaSesi />
       <TopNav onMenu={() => setLaci((x) => !x)} />
 
       <div className="relative flex min-h-0 flex-1">

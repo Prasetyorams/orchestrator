@@ -27,7 +27,8 @@ public final class TestProperties {
                 new OpenOrchestratorProperties.Limits(DataSize.ofMegabytes(64), DataSize.ofMegabytes(32)),
                 new OpenOrchestratorProperties.Bootstrap("default", "OO_Admin", "openorchestrator", "OpenOrchestrator Administrator", ""),
                 agentDefaults(),
-                new OpenOrchestratorProperties.Queues(Duration.ofHours(24), Duration.ofMinutes(5)));
+                new OpenOrchestratorProperties.Queues(Duration.ofHours(24), Duration.ofMinutes(5)),
+                new OpenOrchestratorProperties.Session(2, 480, false));
     }
 
     public static OpenOrchestratorProperties.Agent agentDefaults() {

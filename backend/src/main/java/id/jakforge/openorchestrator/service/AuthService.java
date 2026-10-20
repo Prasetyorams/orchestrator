@@ -16,6 +16,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -43,9 +45,17 @@ public class AuthService {
     private final JwtService jwtService;
     private final PermissionService permissionService;
     private final AssistantSignInService assistantSignInService;
+    private final DashboardSessionService dashboardSessionService;
 
     @Transactional
     public LoginResponse login(LoginRequest request) {
+        return login(request, null);
+    }
+
+    /**
+     * @param userAgent peramban yang masuk, dicatat di sesi dasbor (V18); null untuk klien lain
+     */
+    public LoginResponse login(LoginRequest request, String userAgent) {
         if (request.username() == null) {
             throw ApiException.badRequest("Nama pengguna wajib diisi.");
         }
@@ -77,8 +87,19 @@ public class AuthService {
             userRepository.updatePasswordHash(userId, Passwords.hash(request.password()));
         }
 
+        // Dasbor (V18): tokennya terikat ke sesi dasbor, yang menegakkan batas
+        // waktu menganggur. Klien lain mendapat token biasa, persis seperti dulu.
+        String token;
+        if (DashboardSessionService.DASHBOARD_CLIENT.equalsIgnoreCase(request.client())) {
+            Instant expiresAt = Instant.now().plus(Duration.ofMinutes(jwtService.expirationMinutes()));
+            UUID sessionId = dashboardSessionService.start(tenantId, userId, request.username(), expiresAt, userAgent);
+            token = jwtService.issueDashboardToken(userId, tenantId, request.username(), role, sessionId).token();
+        } else {
+            token = jwtService.issueToken(userId, tenantId, request.username(), role);
+        }
+
         return new LoginResponse(
-                jwtService.issueToken(userId, tenantId, request.username(), role),
+                token,
                 jwtService.expirationMinutes(),
                 userId.toString(),
                 (String) user.get("username"),
@@ -149,6 +170,11 @@ public class AuthService {
         // Sandi baru = semua Open Assistant yang tersambung atas nama orang ini
         // perlu disambungkan lagi, sama seperti di UiPath.
         assistantSignInService.revokeAllOf(principal.tenantId(), principal.username(), "password_changed");
+
+        // Sesi dasbor lain atas nama orang ini (peramban atau perangkat lain)
+        // ikut berakhir; sesi yang dipakai mengganti sandi dibiarkan.
+        dashboardSessionService.revokeAllOf(principal.tenantId(), principal.username(), "password_changed",
+                principal.dashboardSessionId());
 
         return StatusResponse.ok();
     }

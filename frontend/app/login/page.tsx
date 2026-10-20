@@ -1,9 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Clock } from "lucide-react";
 import { OpenOrchestratorApi, jalurKembaliAman, setToken } from "@/lib/api";
 import { useT } from "@/lib/i18n";
+import { mulaiSesiBaru } from "@/lib/sesi";
 import { Logo } from "@/components/Logo";
 import { Button, Card, CardBody } from "@/components/ui/primitives";
 
@@ -15,6 +17,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // ?alasan=idle: dikeluarkan karena menganggur (V18) — dibaca sesudah dipasang, seperti ?next=.
+  const [menganggur, setMenganggur] = useState(false);
+
+  useEffect(() => {
+    setMenganggur(new URLSearchParams(window.location.search).get("alasan") === "idle");
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -24,6 +32,7 @@ export default function LoginPage() {
     try {
       const result = await OpenOrchestratorApi.login(username, password);
       setToken(result.token);
+      mulaiSesiBaru();
       // Kembali ke halaman yang tadi meminta masuk — mis. persetujuan Open
       // Assistant — bukan selalu ke Beranda. Dibaca lewat window, sama seperti
       // halaman lain di dasbor ini.
@@ -45,6 +54,13 @@ export default function LoginPage() {
             <Logo size={36} className="shrink-0" />
             <p className="text-lg font-semibold">Open Orchestrator</p>
           </div>
+
+          {menganggur ? (
+            <div role="status" className="mb-4 flex items-start gap-2 rounded-lg border border-line bg-slate-50 px-3 py-2 text-xs text-ink">
+              <Clock size={15} className="mt-0.5 shrink-0 text-warn" />
+              <span>{t("Sesi Anda berakhir karena tidak ada aktivitas. Silakan masuk lagi.")}</span>
+            </div>
+          ) : null}
 
           <form onSubmit={submit} className="space-y-3.5">
             <div>

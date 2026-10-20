@@ -4,33 +4,66 @@ import id.jakforge.openorchestrator.dto.request.ChangePasswordRequest;
 import id.jakforge.openorchestrator.dto.request.LoginRequest;
 import id.jakforge.openorchestrator.dto.request.UpdateProfileRequest;
 import id.jakforge.openorchestrator.dto.response.LoginResponse;
+import id.jakforge.openorchestrator.dto.response.OkResponse;
+import id.jakforge.openorchestrator.dto.response.SessionStateResponse;
 import id.jakforge.openorchestrator.dto.response.StatusResponse;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
 import id.jakforge.openorchestrator.service.AuthService;
+import id.jakforge.openorchestrator.service.DashboardSessionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
 
-/** Masuk, siapa saya, ubah profil, dan ganti kata sandi. */
+/** Masuk, keluar, sesi dasbor, siapa saya, ubah profil, dan ganti kata sandi. */
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
 public class AuthController {
 
     private final AuthService authService;
+    private final DashboardSessionService dashboardSessionService;
 
-    /** Dibaca longgar: Studio, JakRunner, dan activity Orchestrator masuk lewat sini. */
+    /**
+     * Dibaca longgar: Studio, JakRunner, dan activity Orchestrator masuk lewat sini.
+     * Dasbor mengirim {@code "client": "dashboard"} (V18).
+     */
     @PostMapping("/login")
-    public LoginResponse login(@RequestBody(required = false) Map<String, Object> body) {
-        return authService.login(LoginRequest.fromBody(body));
+    public LoginResponse login(@RequestBody(required = false) Map<String, Object> body,
+                               @RequestHeader(value = HttpHeaders.USER_AGENT, required = false) String userAgent) {
+        return authService.login(LoginRequest.fromBody(body), userAgent);
+    }
+
+    /** Keluar: sesi dasbor dicabut di server, bukan hanya tokennya dibuang dari peramban (V18). */
+    @PostMapping("/logout")
+    public OkResponse logout(@AuthenticationPrincipal OpenOrchestratorPrincipal principal) {
+        dashboardSessionService.logout(principal);
+        return OkResponse.success();
+    }
+
+    /** Keadaan sesi dan batas waktu menganggurnya, TANPA dihitung sebagai aktivitas (V18). */
+    @GetMapping("/session")
+    public SessionStateResponse session(@AuthenticationPrincipal OpenOrchestratorPrincipal principal) {
+        return dashboardSessionService.state(principal);
+    }
+
+    /**
+     * Dasbor melaporkan aktivitas orang (mouse, papan ketik, gulir, sentuh,
+     * pindah halaman), juga tombol "Tetap masuk". Sesi yang sudah berakhir
+     * dijawab 401, tidak diperpanjang (V18).
+     */
+    @PostMapping("/session/activity")
+    public SessionStateResponse activity(@AuthenticationPrincipal OpenOrchestratorPrincipal principal) {
+        return dashboardSessionService.recordActivity(principal);
     }
 
     /**

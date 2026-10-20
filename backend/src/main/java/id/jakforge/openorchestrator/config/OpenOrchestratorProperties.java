@@ -39,7 +39,8 @@ public record OpenOrchestratorProperties(
         @Valid @NotNull Limits limits,
         @Valid @NotNull Bootstrap bootstrap,
         @Valid @NotNull Agent agent,
-        @Valid @NotNull Queues queues) {
+        @Valid @NotNull Queues queues,
+        @Valid @NotNull Session session) {
 
     /**
      * Zona tampilan untuk batas "hari ini" di dasbor; UTC kalau namanya tidak
@@ -108,6 +109,16 @@ public record OpenOrchestratorProperties(
      * @param sweepInterval selang putaran penyapu
      */
     public record Queues(@NotNull Duration abandonAfter, @NotNull Duration sweepInterval) {
+    }
+
+    /**
+     * Sesi dasbor (V18): rentang batas waktu menganggur yang boleh dipilih
+     * admin di Tenant › Setelan › Sesi & Keamanan.
+     *
+     * @param idleTimeoutRequired kebijakan keamanan server: batas waktu menganggur tidak boleh dimatikan
+     */
+    public record Session(@Positive int idleTimeoutMinMinutes, @Positive int idleTimeoutMaxMinutes,
+                          boolean idleTimeoutRequired) {
     }
 
     /**

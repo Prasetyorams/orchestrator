@@ -46,6 +46,11 @@ tidak bisa dihapus (`409 PACKAGE_IN_USE`); nama/versi paket diperiksa dengan atu
 kedua jalur. Kontrak robot tidak berubah, tetapi **ada penyesuaian yang diminta** — terutama
 JakRunner attended jalur v1 yang belum mengunduh paket. Catatan: Bagian 4 (20 Okt 2026).
 
+**Tambahan V18** (`V18__sesi_dasbor.sql`): **batas waktu sesi menganggur** untuk dasbor, diatur di
+Tenant › Setelan › Sesi & Keamanan dan ditegakkan server. Hanya token yang diterbitkan untuk
+`"client": "dashboard"`; Studio, Open Assistant, robot, dan alat lain **tidak terkena** dan tidak
+perlu diubah. Catatan: Bagian 4 (20 Okt 2026, V18).
+
 Dokumen ini punya dua bagian:
 
 - **v1** — API untuk JakRunner (attended), Studio, activities `Custom.Orchestrator`, dan
@@ -1202,6 +1207,40 @@ baru di `GET /api/packages` (`source`, `sourceFileName`, `sourceFileSha256`) dia
 `ExtractSafely`, dicari titik masuknya dengan `EntryPointResolver` asli, dan workflow-nya dijalankan
 WF4; klaim job agent v2 mendapat paket dan sidik yang benar; unggah lewat proxy dasbor juga diuji.
 **Belum** diuji dengan Robot Agent sungguhan di VM.
+
+---
+
+## Batas waktu sesi dasbor (20 Okt 2026, V18)
+
+Fitur Orchestrator untuk **peramban**: sesi dasbor berakhir kalau penggunanya tidak beraktivitas
+selama batas yang diatur admin (bawaan 30 menit, peringatan 2 menit sebelumnya). **Tidak ada
+perubahan wajib di sisi robot/Studio.** **Sudah di-deploy** ke produksi (20 Okt 2026, migrasi
+`V18__sesi_dasbor.sql`).
+
+- **Yang terkena hanya token dasbor.** `POST /api/auth/login` dengan `"client": "dashboard"` membuat
+  satu baris `dashboard_sessions`; tokennya menyebut baris itu (klaim `dsid`) dan setiap
+  permintaannya diperiksa: dicabut, habis umur, atau menganggur → `401`. Tanpa `client` — Studio,
+  Open Assistant v1, activity `Custom.Orchestrator`, skrip — token biasa seperti dulu, hanya
+  dibatasi umurnya (`expiresInMinutes`). Token Robot Agent, executor, dan Open Assistant (V11) tidak
+  berubah. Jawaban login tidak berubah bentuk.
+- **Jangan kirim `client: "dashboard"`** dari Studio, robot, atau Open Assistant: robot yang
+  menunggu job tidak pernah "beraktivitas", jadi tokennya akan diputus sesudah batas menganggur.
+- `401` baru, hanya untuk token dasbor: `errorCode` `SessionIdleTimeout` (menganggur) atau
+  `SessionEnded` (keluar, sandi diganti/direset, akun dinonaktifkan/dihapus, umur habis). Klien
+  lain tetap hanya menerima 401 token kedaluwarsa seperti biasa.
+- Endpoint baru (boleh dipakai, tidak wajib): `POST /api/auth/logout` (mencabut sesi dasbor; tanpa
+  efek untuk token biasa), `GET /api/auth/session` (keadaan sesi, `kind` `dashboard`/`token`,
+  tidak memperpanjang), `POST /api/auth/session/activity` (aktivitas orang, khusus dasbor),
+  `GET|PUT /api/settings/session-timeout` (`settings.read` / izin baru `settings.update`).
+- **Open Assistant yang "masuk lewat dasbor" (V11) tidak terkena.** Halaman `/assistant/connect`
+  memakai sesi dasbor hanya untuk MENYETUJUI sambungan; token yang diterima Open Assistant adalah
+  token sesi Open Assistant (`asid`), bukan sesi dasbor. Sesi dasbor itu berakhir (menganggur atau
+  Keluar) → Open Assistant tetap tersambung, refresh token tetap berlaku (diuji). Yang terkena hanya
+  kalau orangnya membiarkan halaman persetujuan terbuka melewati batas: menyetujui dijawab `401`
+  dan ia diminta masuk lagi, dengan parameter sambungan tetap utuh.
+- Mengganti sandi lewat `POST /api/auth/password` kini juga mengakhiri sesi **dasbor** lain milik
+  orang itu (sesi yang dipakai mengganti dibiarkan); token Studio/robot tetap tidak dicabut, sama
+  seperti sebelumnya.
 
 ---
 

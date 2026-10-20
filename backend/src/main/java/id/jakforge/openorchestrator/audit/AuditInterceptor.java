@@ -136,6 +136,8 @@ public class AuditInterceptor implements HandlerInterceptor {
 
     static final List<AuditRule> RULES = List.of(
             rule(POST, LOGIN_PATH, "Sesi", "Masuk"),
+            rule(POST, "/api/auth/logout", "Sesi", "Keluar"),
+            rule(PUT, "/api/settings/session-timeout", "Setelan", "Ubah batas waktu sesi"),
             rule(PUT, "/api/auth/me", "Profil", "Ubah"),
             rule(POST, "/api/auth/password", "Profil", "Ganti kata sandi"),
             rule(POST, "/api/auth/assistant/code", "Open Assistant", "Sambungkan", body("machine")),

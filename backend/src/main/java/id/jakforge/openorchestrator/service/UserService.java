@@ -34,6 +34,7 @@ public class UserService {
     private final RoleService roleService;
     private final PermissionService permissionService;
     private final AssistantSignInService assistantSignInService;
+    private final DashboardSessionService dashboardSessionService;
 
     public List<Map<String, Object>> findAll(OpenOrchestratorPrincipal principal) {
         return userRepository.findAll(principal.tenantId());
@@ -111,10 +112,12 @@ public class UserService {
             // Sandi direset — biasanya karena dikhawatirkan bocor. Open
             // Assistant yang tersambung atas namanya ikut terputus.
             assistantSignInService.revokeAllOf(tenantId, request.username(), "password_reset");
+            dashboardSessionService.revokeAllOf(tenantId, request.username(), "password_reset", null);
         }
 
         if (!request.isActive()) {
             assistantSignInService.revokeAllOf(tenantId, request.username(), "user_deactivated");
+            dashboardSessionService.revokeAllOf(tenantId, request.username(), "user_deactivated", null);
         }
     }
 
@@ -151,6 +154,7 @@ public class UserService {
 
         deletePersonalFolder(tenantId, username);
         assistantSignInService.revokeAllOf(tenantId, username, "user_deleted");
+        dashboardSessionService.revokeAllOf(tenantId, username, "user_deleted", null);
 
         if (userRepository.deleteByUsername(tenantId, username) == 0) {
             throw ApiException.notFound("Pengguna tidak ada.");

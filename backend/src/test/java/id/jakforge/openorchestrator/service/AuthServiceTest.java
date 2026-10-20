@@ -7,6 +7,8 @@ import id.jakforge.openorchestrator.dto.request.UpdateProfileRequest;
 import id.jakforge.openorchestrator.dto.response.LoginResponse;
 import id.jakforge.openorchestrator.model.UserAccess;
 import id.jakforge.openorchestrator.repository.AssistantSessionRepository;
+import id.jakforge.openorchestrator.repository.DashboardSessionRepository;
+import id.jakforge.openorchestrator.repository.SessionSettingsRepository;
 import id.jakforge.openorchestrator.repository.UserRepository;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
 import id.jakforge.openorchestrator.security.JwtService;
@@ -59,10 +61,16 @@ class AuthServiceTest {
     /** Sambungan Open Assistant: hanya perintah SQL-nya yang direkam. */
     private final RecordingDatabase assistantDatabase = new RecordingDatabase();
 
+    /** Sesi dasbor (V18): hanya perintah SQL-nya yang direkam. */
+    private final RecordingDatabase dashboardDatabase = new RecordingDatabase();
+
     private final AuthService authService = new AuthService(users, jwtService,
             new PermissionService(users, TestProperties.defaults(), Clock.systemUTC()),
             new AssistantSignInService(new AssistantSessionRepository(assistantDatabase), users, null, jwtService,
-                    Clock.systemUTC()));
+                    Clock.systemUTC()),
+            new DashboardSessionService(new DashboardSessionRepository(dashboardDatabase),
+                    new SessionSettingsService(new SessionSettingsRepository(dashboardDatabase), TestProperties.defaults(),
+                            Clock.systemUTC()), null, Clock.systemUTC()));
 
     // ---------- masuk ----------
 
@@ -192,6 +200,26 @@ class AuthServiceTest {
 
         assertEquals(1, assistantDatabase.statementsContaining("UPDATE assistant_sessions SET revoked_at").size());
         assertEquals("password_changed", assistantDatabase.lastArguments().getFirst());
+
+        // V18: sesi dasbor orang ini di peramban lain juga berakhir.
+        assertTrue(dashboardDatabase.argumentsOf("UPDATE dashboard_sessions SET revoked_at").contains("password_changed"));
+    }
+
+    @Test
+    @DisplayName("V18: masuk dengan client=dashboard → token terikat sesi dasbor; tanpa itu token biasa seperti dulu")
+    void dashboardLoginCreatesSession() {
+        users.storeLoginRow(true, Passwords.hash(ADMIN_PASSWORD));
+
+        LoginResponse dashboard = authService.login(new LoginRequest("OO_Admin", ADMIN_PASSWORD, "dashboard"), "Mozilla/5.0");
+        OpenOrchestratorPrincipal dashboardPrincipal = jwtService.parsePrincipal(dashboard.token());
+        assertTrue(dashboardPrincipal.isDashboard());
+        assertEquals(1, dashboardDatabase.statementsContaining("INSERT INTO dashboard_sessions").size());
+        assertTrue(dashboardDatabase.argumentsOf("INSERT INTO dashboard_sessions").contains(dashboardPrincipal.dashboardSessionId()));
+        assertTrue(dashboardDatabase.argumentsOf("INSERT INTO dashboard_sessions").contains("Mozilla/5.0"));
+
+        LoginResponse studio = authService.login(new LoginRequest("OO_Admin", ADMIN_PASSWORD));
+        assertTrue(!jwtService.parsePrincipal(studio.token()).isDashboard(), "Studio, robot, alat lain: token biasa");
+        assertEquals(1, dashboardDatabase.statementsContaining("INSERT INTO dashboard_sessions").size());
     }
 
     // ---------- alat ----------

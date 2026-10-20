@@ -79,6 +79,8 @@ export const SUBTAB: Record<string, SubTab[]> = {
   tenantSetelan: [
     { label: "Umum", href: "/tenant/settings", izin: "settings.read" },
     { label: "Hari Non-Kerja", href: "/tenant/settings/calendars", izin: "calendars.read" },
+    // Batas waktu sesi menganggur dasbor (V18).
+    { label: "Sesi & Keamanan", href: "/tenant/settings/session", izin: "settings.read" },
   ],
 };
 

@@ -3,7 +3,8 @@
 import { useCallback, useState, type ComponentType, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, KeyRound, Laptop, LogOut, UserCog } from "lucide-react";
-import { OpenOrchestratorApi, errorText, setToken, type Profil } from "@/lib/api";
+import { OpenOrchestratorApi, errorText, type Profil } from "@/lib/api";
+import { keluar } from "@/lib/sesi";
 import { useT } from "@/lib/i18n";
 import { cn, dateTimeOf } from "@/lib/utils";
 import { Button } from "@/components/ui/primitives";
@@ -43,9 +44,9 @@ export function ProfileMenu({
     setDialog(d);
   }
 
-  function keluar() {
-    setToken(null);
-    window.location.href = "/login";
+  // Sesi dicabut di server, bukan hanya token dibuang dari peramban (V18).
+  function keluarSekarang() {
+    void keluar("keluar");
   }
 
   return (
@@ -93,7 +94,7 @@ export function ProfileMenu({
 
           <div className="my-1 border-t border-line" />
 
-          <ItemMenu ikon={LogOut} onClick={keluar} bahaya>
+          <ItemMenu ikon={LogOut} onClick={keluarSekarang} bahaya>
             {t("Keluar")}
           </ItemMenu>
         </div>

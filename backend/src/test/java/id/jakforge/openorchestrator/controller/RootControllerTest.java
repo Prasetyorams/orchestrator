@@ -22,7 +22,7 @@ class RootControllerTest {
         return new RootController(new OpenOrchestratorProperties(defaults.displayTimezone(), defaults.secret(),
                 defaults.jwt(), new OpenOrchestratorProperties.Cors(corsOrigins, Duration.ofHours(1)), defaults.robot(),
                 defaults.permissionCache(), defaults.scheduler(), defaults.limits(), defaults.bootstrap(),
-                defaults.agent(), defaults.queues()));
+                defaults.agent(), defaults.queues(), defaults.session()));
     }
 
     private static MockHttpServletRequest request(String host, String query) {

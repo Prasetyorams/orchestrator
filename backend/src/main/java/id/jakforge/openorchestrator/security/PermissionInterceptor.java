@@ -3,6 +3,7 @@ package id.jakforge.openorchestrator.security;
 import id.jakforge.openorchestrator.common.ApiException;
 import id.jakforge.openorchestrator.service.AgentAccessService;
 import id.jakforge.openorchestrator.service.AssistantSignInService;
+import id.jakforge.openorchestrator.service.DashboardSessionService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -91,6 +92,9 @@ public class PermissionInterceptor implements HandlerInterceptor {
             signedIn(GET, "/api/auth/me"),
             signedIn(PUT, "/api/auth/me"),
             signedIn(POST, "/api/auth/password"),
+            signedIn(POST, "/api/auth/logout"),
+            signedIn(GET, "/api/auth/session"),
+            signedIn(POST, "/api/auth/session/activity"),
 
             // --- Open Assistant masuk lewat dasbor (ROBOT-API.md bagian 5) ---
             //
@@ -265,12 +269,15 @@ public class PermissionInterceptor implements HandlerInterceptor {
             requires(GET, "/api/tenants", "settings.read"),
             requires(GET, "/api/licensing", "settings.read"),
             requires(GET, "/api/settings", "settings.read"),
+            requires(GET, "/api/settings/session-timeout", "settings.read"),
+            requires(PUT, "/api/settings/session-timeout", "settings.update"),
             requires(GET, "/api/audit", "audit.read"),
             requires(GET, "/api/audit/components", "audit.read"));
 
     private final PermissionChecker permissionChecker;
     private final AgentAccessService agentAccessService;
     private final AssistantSignInService assistantSignInService;
+    private final DashboardSessionService dashboardSessionService;
 
     @Override
     public boolean preHandle(@NonNull HttpServletRequest request, @NonNull HttpServletResponse response,
@@ -293,6 +300,10 @@ public class PermissionInterceptor implements HandlerInterceptor {
 
         OpenOrchestratorPrincipal principal = CurrentPrincipal.find()
                 .orElseThrow(() -> ApiException.unauthorized(JwtAuthenticationFilter.INVALID_TOKEN_MESSAGE));
+
+        // Sesi dasbor (V18): dicabut, habis umurnya, atau menganggur melewati
+        // batas → 401 untuk SETIAP endpoint, walau tokennya belum kedaluwarsa.
+        if (principal.isDashboard()) dashboardSessionService.requireActive(principal);
 
         if (principal.isAssistant()) {
             assistantSignInService.requireActive(principal);

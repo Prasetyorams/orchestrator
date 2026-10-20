@@ -21,7 +21,37 @@ import { simpanBlob } from "@/lib/utils";
  * mengizinkan Authorization dan Content-Type, dan permintaan TANPA folder tetap
  * berarti seluruh penyewa — bentuk yang dipakai Studio dan JakRunner.
  */
-const TOKEN_KEY = "openorchestrator.token";
+export const TOKEN_KEY = "openorchestrator.token";
+
+/**
+ * Alasan keluar terakhir, untuk tab lain dan layar masuk (V18): {"alasan":
+ * "idle"|"keluar"|"berakhir","pada":ms}. Hanya alasan dan waktu — tidak ada
+ * token atau rahasia apa pun.
+ */
+export const KUNCI_SESI_KELUAR = "openorchestrator.sesi.keluar";
+
+export type AlasanKeluar = "idle" | "keluar" | "berakhir";
+
+/** Catat alasan keluar sebelum token dibuang; tab lain membacanya dari event storage. */
+export function catatKeluar(alasan: AlasanKeluar) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(KUNCI_SESI_KELUAR, JSON.stringify({ alasan, pada: Date.now() }));
+  } catch {
+    /* penyimpanan dilarang: tab lain tetap ke layar masuk, tanpa alasannya */
+  }
+}
+
+/** Alasan keluar yang baru saja dicatat (≤ 1 menit), atau null. */
+export function alasanKeluarTerakhir(): AlasanKeluar | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const nilai = JSON.parse(window.localStorage.getItem(KUNCI_SESI_KELUAR) ?? "null");
+    return nilai && Date.now() - nilai.pada < 60_000 ? nilai.alasan : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Alamat API untuk peramban.
@@ -72,12 +102,16 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (response) => response,
-  (error: AxiosError) => {
+  (error: AxiosError<{ errorCode?: string }>) => {
     // Token kedaluwarsa: buang dan kembalikan ke layar masuk. Membiarkannya
     // hanya menghasilkan rentetan 401 di setiap panel yang menarik data.
-    if (error.response?.status === 401 && typeof window !== "undefined") {
+    // Sesi dasbor yang menganggur melewati batas (V18) dijawab server dengan
+    // errorCode SessionIdleTimeout — layar masuk lalu menyebut alasannya.
+    if (error.response?.status === 401 && typeof window !== "undefined" && window.location.pathname !== "/login") {
+      const alasan: AlasanKeluar = error.response.data?.errorCode === "SessionIdleTimeout" ? "idle" : "berakhir";
+      catatKeluar(alasan);
       setToken(null);
-      if (window.location.pathname !== "/login") window.location.href = alamatMasuk();
+      window.location.href = alamatMasuk(alasan === "idle" ? "idle" : undefined);
     }
     return Promise.reject(error);
   },
@@ -88,11 +122,16 @@ api.interceptors.response.use(
  * kembali ke sana — termasuk ke /assistant/connect dengan parameter Open
  * Assistant yang masih utuh.
  */
-export function alamatMasuk(): string {
+export function alamatMasuk(alasan?: "idle"): string {
   if (typeof window === "undefined") return "/login";
 
   const sekarang = window.location.pathname + window.location.search;
-  return sekarang === "/" ? "/login" : `/login?next=${encodeURIComponent(sekarang)}`;
+  const parameter = new URLSearchParams();
+  if (alasan) parameter.set("alasan", alasan);
+  if (sekarang !== "/") parameter.set("next", sekarang);
+
+  const isi = parameter.toString();
+  return isi ? `/login?${isi}` : "/login";
 }
 
 /**
@@ -437,6 +476,35 @@ export type Package = {
 };
 
 export type PackageSource = "STUDIO" | "MANUAL_UPLOAD";
+
+/** GET /api/auth/session (V18). kind "token": server tidak menegakkan batas menganggurnya. */
+export type SessionState = {
+  kind: "dashboard" | "token";
+  idleTimeoutEnabled: boolean;
+  idleTimeoutMinutes: number;
+  /** 0 = tanpa peringatan. */
+  warningBeforeLogoutMinutes: number;
+  lastActivityAt: string | null;
+  idleExpiresAt: string | null;
+  expiresAt: string | null;
+  serverTime: string;
+};
+
+/** Tenant › Setelan › Sesi & Keamanan (V18). */
+export type SessionTimeoutSettings = {
+  idleTimeoutEnabled: boolean;
+  idleTimeoutMinutes: number;
+  warningBeforeLogoutMinutes: number;
+  updatedAt: string | null;
+  updatedBy: string | null;
+  minMinutes: number;
+  maxMinutes: number;
+  /** Kebijakan server: batas waktu tidak boleh dimatikan. */
+  required: boolean;
+  tokenLifetimeMinutes: number;
+  durationOptions: number[];
+  warningOptions: number[];
+};
 
 /** Jawaban POST /api/packages/upload (V17). */
 export type UploadPackageResult = {
@@ -900,8 +968,19 @@ const seg = (s: string) => encodeURIComponent(s);
 const dalam = (folderId?: string | null) => (folderId ? { folderId } : undefined);
 
 export const OpenOrchestratorApi = {
+  /** client=dashboard: tokennya terikat sesi dasbor dengan batas waktu menganggur (V18). */
   login: (username: string, password: string) =>
-    post<LoginResult>("/api/auth/login", { username, password }),
+    post<LoginResult>("/api/auth/login", { username, password, client: "dashboard" }),
+
+  /** Keluar: sesi dasbor dicabut di server (V18). */
+  logout: () => post<{ ok: boolean }>("/api/auth/logout"),
+  /** Keadaan sesi dan kebijakan batas waktunya — TIDAK dihitung aktivitas. */
+  session: () => get<SessionState>("/api/auth/session"),
+  /** Laporan aktivitas orang, juga tombol "Tetap masuk". 401 kalau sesinya sudah berakhir. */
+  sessionActivity: () => post<SessionState>("/api/auth/session/activity"),
+  sessionTimeout: () => get<SessionTimeoutSettings>("/api/settings/session-timeout"),
+  saveSessionTimeout: (body: { idleTimeoutEnabled: boolean; idleTimeoutMinutes: number; warningBeforeLogoutMinutes: number }) =>
+    put<SessionTimeoutSettings>("/api/settings/session-timeout", body),
 
   me: () => get<Profil>("/api/auth/me"),
 

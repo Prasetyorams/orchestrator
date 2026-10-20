@@ -88,7 +88,7 @@ public final class PermissionCatalog {
             new Resource(ROLES, CRUD),
             new Resource(ALERTS, List.of(READ, UPDATE)),
             new Resource(AUDIT, List.of(READ)),
-            new Resource(SETTINGS, List.of(READ)),
+            new Resource(SETTINGS, List.of(READ, UPDATE)),
             new Resource(CALENDARS, CRUD));
 
     private PermissionCatalog() {

@@ -132,6 +132,15 @@ openorchestrator:
     abandon-after: 24h
     sweep-interval: 5m
 
+  # Sesi dasbor (V18). Lamanya dipilih admin di Tenant › Setelan › Sesi &
+  # Keamanan, di dalam rentang ini; yang paling lama tidak melebihi umur token
+  # (jwt.expiration-minutes) — sesudah itu tokennya habis juga.
+  # idle-timeout-required: true melarang admin mematikan batas waktunya.
+  session:
+    idle-timeout-min-minutes: 2
+    idle-timeout-max-minutes: 480
+    idle-timeout-required: false
+
 management:
   endpoints:
     web:

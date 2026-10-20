@@ -42,6 +42,8 @@ public class JwtService {
     static final String CLAIM_KEY_ID = "keyId";
     /** Sambungan Open Assistant yang menerbitkan token pengguna ini (V11). */
     static final String CLAIM_ASSISTANT_SESSION = "asid";
+    /** Sesi dasbor yang menerbitkan token pengguna ini (V18). */
+    static final String CLAIM_DASHBOARD_SESSION = "dsid";
 
     static final String KIND_AGENT = "agent";
     static final String KIND_EXECUTOR = "executor";
@@ -84,6 +86,19 @@ public class JwtService {
                 CLAIM_USERNAME, username,
                 CLAIM_ROLE, role,
                 CLAIM_ASSISTANT_SESSION, sessionId.toString()), ttl);
+    }
+
+    /**
+     * Token pengguna untuk dasbor (V18): bentuk token pengguna biasa, ditambah
+     * sesi dasbor yang menerbitkannya. Umurnya sama dengan token biasa; batas
+     * menganggurnya ditegakkan lewat sesi itu, bukan lewat umur token.
+     */
+    public IssuedToken issueDashboardToken(UUID userId, UUID tenantId, String username, String role, UUID sessionId) {
+        return sign(userId, Map.of(
+                CLAIM_TENANT_ID, tenantId.toString(),
+                CLAIM_USERNAME, username,
+                CLAIM_ROLE, role,
+                CLAIM_DASHBOARD_SESSION, sessionId.toString()), Duration.ofMinutes(expirationMinutes));
     }
 
     /** Token Robot Agent: hanya berlaku di /api/agent. */
@@ -161,6 +176,13 @@ public class JwtService {
         if (assistantSession != null) {
             return OpenOrchestratorPrincipal.assistant(subject, tenantId, name, claims.get(CLAIM_ROLE, String.class),
                     UUID.fromString(assistantSession));
+        }
+
+        String dashboardSession = claims.get(CLAIM_DASHBOARD_SESSION, String.class);
+
+        if (dashboardSession != null) {
+            return OpenOrchestratorPrincipal.dashboard(subject, tenantId, name, claims.get(CLAIM_ROLE, String.class),
+                    UUID.fromString(dashboardSession));
         }
 
         return new OpenOrchestratorPrincipal(subject, tenantId, name, claims.get(CLAIM_ROLE, String.class));

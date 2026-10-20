@@ -63,6 +63,7 @@ const CATATAN: Record<string, string> = {
   folders: "Ubah: menugaskan orang dan robot, sekaligus melihat semua folder.",
   roles: "Izin yang bisa diberikan hanya yang juga Anda miliki.",
   calendars: "Lihat: juga terbuka bagi yang boleh melihat pemicu, untuk memilih kalendernya.",
+  settings: "Ubah: mengatur batas waktu sesi menganggur dasbor (Sesi & Keamanan).",
 };
 
 const KELOMPOK: { judul: string; sumber: string[] }[] = [
