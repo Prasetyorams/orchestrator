@@ -36,7 +36,7 @@ import java.util.zip.ZipOutputStream;
  * Memeriksa paket yang diunggah manual (V17) dan menyiapkannya dalam tata
  * letak yang dibaca robot.
  *
- * <p>Robot (JakForge.Robot.Core: {@code PackageCache.ExtractSafely} lalu
+ * <p>Robot (OpenStudio.Robot.Core: {@code PackageCache.ExtractSafely} lalu
  * {@code EntryPointResolver}) mengekstrak isi paket APA ADANYA dan mencari
  * workflow di AKAR-nya — tata letak zip yang dikirim Studio saat Terbitkan ke
  * Orchestrator. Paket .nupkg buatan Studio (Terbitkan → Folder lokal) menaruh
@@ -80,10 +80,14 @@ final class PackageInspector {
     /**
      * Pustaka yang ada di robot OpenStudio: .NET Framework/WF, Studio, dan
      * paket activity bawaannya. Yang lain belum tentu ada — dilaporkan, tidak ditolak.
+     *
+     * <p>"OpenStudio" tanpa titik: cocok untuk {@code OpenStudio} dan {@code OpenStudio.*}
+     * (nama sejak ganti nama Studio 16 Okt 2026). Nama lama — OpenRPA, Custom., JakForge. —
+     * tetap dikenal untuk paket dari Studio sebelum itu.
      */
     private static final List<String> KNOWN_ASSEMBLY_PREFIXES = List.of(
             "System", "mscorlib", "netstandard", "Microsoft.", "PresentationFramework", "PresentationCore",
-            "WindowsBase", "UIAutomation", "OpenRPA", "Custom.", "JakForge.", "Newtonsoft.Json", "Xceed.",
+            "WindowsBase", "UIAutomation", "OpenStudio", "OpenRPA", "Custom.", "JakForge.", "Newtonsoft.Json", "Xceed.",
             "DotNetProjects.", "Forge.Forms", "Open3270", "WinFX3270Library", "NSspi", "LiteDB");
 
     private static final Pattern ASSEMBLY = Pattern.compile("assembly=([^;\\s]+)");

@@ -1208,6 +1208,20 @@ baru di `GET /api/packages` (`source`, `sourceFileName`, `sourceFileSha256`) dia
 WF4; klaim job agent v2 mendapat paket dan sidik yang benar; unggah lewat proxy dasbor juga diuji.
 **Belum** diuji dengan Robot Agent sungguhan di VM.
 
+### Jawaban `CATATAN-PREFIKS-OPENSTUDIO.md` (20 Okt 2026)
+
+Kedua usulan diterapkan, belum di-deploy:
+
+1. Pustaka bernama `OpenStudio` dan `OpenStudio.*` kini dikenal sebagai bawaan; prefiks lama
+   (`OpenRPA`, `Custom.`, `JakForge.`) tetap dikenal untuk paket dari Studio sebelum ganti nama.
+   Peringatan "pustaka yang bukan bawaan OpenStudio" hanya muncul untuk pustaka yang benar-benar asing.
+2. Komentar kelas `PackageInspector` kini menyebut `OpenStudio.Robot.Core`.
+
+**Diuji:** uji unit dengan semua nama di tabel catatan (ditambah dua nama lama) → tanpa peringatan.
+Ke-9 workflow `.xaml` di Studio `main` (`ef7a7c3`) yang memakai `assembly=OpenStudio…` juga diperiksa
+dengan pemeriksa paket: sebelum perbaikan 9/9 mendapat peringatan, sesudahnya 0/9. Unggah `.nupkg` dari
+Terbitkan → Folder lokal di Studio sungguhan **belum** dicoba; mohon dicek setelah deploy.
+
 ---
 
 ## Batas waktu sesi dasbor (20 Okt 2026, V18)

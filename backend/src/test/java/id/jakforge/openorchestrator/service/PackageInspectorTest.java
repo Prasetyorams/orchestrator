@@ -171,6 +171,24 @@ class PackageInspectorTest {
         assertTrue(p.warnings().getFirst().contains("Vendor.Activities"), p.warnings().toString());
     }
 
+    @Test
+    @DisplayName("pustaka Studio sesudah ganti nama (OpenStudio, OpenStudio.*) dan nama lama: tanpa peringatan")
+    void openStudioAssembliesAreKnown() {
+        StringBuilder namespaces = new StringBuilder();
+        String[] assemblies = {"OpenStudio.Interfaces", "OpenStudio", "OpenStudio.NM", "OpenStudio.IE", "OpenStudio.Office",
+                "OpenStudio.Forms", "OpenStudio.Utilities", "OpenStudio.Script", "OpenStudio.Mail.Activities",
+                "OpenStudio.Database.Activities", "OpenRPA.Interfaces", "JakForge.Mail.Activities"};
+        for (int i = 0; i < assemblies.length; i++) {
+            namespaces.append("xmlns:s").append(i).append("=\"clr-namespace:Ns").append(i)
+                    .append(";assembly=").append(assemblies[i]).append("\" ");
+        }
+        String xaml = MAIN.replace("xmlns:c=", namespaces + "xmlns:c=");
+
+        PackageInspector.Inspection p = PackageInspector.inspect(zip("Main.xaml", xaml), "A.1.0.0.zip");
+
+        assertTrue(p.warnings().isEmpty(), p.warnings().toString());
+    }
+
     // -------------------------------------------------------------------- yang ditolak
 
     @Test
