@@ -368,7 +368,6 @@ export const JV: Record<string, string> = {
   "Paket yang dipakai proses di folder ini.": "Pakèt sing dienggo proses ing folder iki.",
   "Lihat seluruh umpan paket": "Deleng kabèh umpan pakèt",
   "Belum ada paket yang dipakai proses di folder ini.": "Durung ana pakèt sing dienggo proses ing folder iki.",
-  "Hapus {0} versi {1} dari umpan paket? Proses yang memakai versi ini tidak bisa dijalankan lagi.": "Busak {0} vèrsi {1} saka umpan pakèt? Proses sing nganggo vèrsi iki ora bisa dilakokaké manèh.",
   "Hapus versi ini": "Busak vèrsi iki",
 
   // pemantauan
@@ -539,6 +538,29 @@ export const JV: Record<string, string> = {
   "Ubah: menugaskan orang dan robot, sekaligus melihat semua folder.": "Owahi: nugasaké wong lan robot, sekaligus ndeleng kabèh folder.",
   "Izin yang bisa diberikan hanya yang juga Anda miliki.": "Idin sing bisa diwènèhaké mung sing uga sampéyan duwèni.",
   "Lihat: juga terbuka bagi yang boleh melihat pemicu, untuk memilih kalendernya.": "Deleng: uga kabuka kanggo sing olèh ndeleng pamicu, kanggo milih kalènderé.",
+
+  // --- unggah paket manual (V17) ---
+  "Unggah Paket": "Unggah Pakèt",
+  "{0} bukan paket. Pilih berkas .nupkg atau .zip.": "{0} dudu pakèt. Pilih berkas .nupkg utawa .zip.",
+  "Format yang diterima": "Format sing ditampa",
+  ".nupkg dari OpenStudio (Terbitkan → Folder lokal).": ".nupkg saka OpenStudio (Terbitaké → Folder lokal).",
+  ".zip proyek OpenStudio, mis. yang diunduh dari halaman ini.": ".zip proyek OpenStudio, upamané sing diundhuh saka kaca iki.",
+  "Nama, versi, dan titik masuk dibaca dari paketnya; versi yang sudah ada ditolak.": "Jeneng, vèrsi, lan titik mlebu diwaca saka pakèté; vèrsi sing wis ana ditolak.",
+  "Seret berkas paket ke sini": "Sèrèt berkas pakèt mréné",
+  "atau klik untuk memilih berkas .nupkg / .zip": "utawa klik kanggo milih berkas .nupkg / .zip",
+  "Hapus pilihan": "Busak pilihan",
+  "Terkirim. Memeriksa dan menyimpan paket...": "Wis kakirim. Mriksa lan nyimpen pakèt...",
+  "Mengunggah... {0}%": "Ngunggah... {0}%",
+  "Proses {0} dibuat di folder bawaan.": "Proses {0} digawé ing folder gawan.",
+  "Proses {0} kini memakai versi ini.": "Proses {0} saiki nganggo vèrsi iki.",
+  "Proses {0} tetap di versinya sekarang, yang lebih baru.": "Proses {0} tetep ing vèrsiné saiki, sing luwih anyar.",
+  "{0} versi {1} diunggah.": "{0} vèrsi {1} diunggah.",
+  "Isi lib/net45/ disimpan di akar paket, sama dengan hasil Terbitkan dari Studio, supaya terbaca robot.": "Isi lib/net45/ disimpen ing oyot pakèt, padha karo asil Terbitaké saka Studio, supaya kawaca robot.",
+  "Isi folder di dalam zip dipindah ke akar paket, supaya terbaca robot.": "Isi folder ing jero zip dipindhah menyang oyot pakèt, supaya kawaca robot.",
+  "Studio": "Studio",
+  "Unggah manual": "Unggah manual",
+  "Hapus {0} versi {1} dari umpan paket? Versi yang masih dipakai proses atau sedang dijalankan robot tidak bisa dihapus.": "Busak {0} vèrsi {1} saka umpan pakèt? Vèrsi sing isih dianggo proses utawa lagi dilakokaké robot ora bisa dibusak.",
+  "Belum ada paket. Terbitkan dari Studio (tab Design → grup OpenOrchestrator → Terbitkan), atau Unggah Paket di sini.": "Durung ana pakèt. Terbitaké saka Studio (tab Design → grup OpenOrchestrator → Terbitaké), utawa Unggah Pakèt ing kéné.",
 
   // --- kalender hari non-kerja (V16) ---
   // komponen di Tenant › Audit

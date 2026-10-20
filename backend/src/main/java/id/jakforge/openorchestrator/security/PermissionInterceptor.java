@@ -140,6 +140,7 @@ public class PermissionInterceptor implements HandlerInterceptor {
             requires(DELETE, "/api/processes/{name}", "processes.delete"),
             requires(GET, "/api/packages", "packages.read"),
             requires(POST, "/api/packages", "packages.create", "packages.update"),
+            requires(POST, "/api/packages/upload", "packages.create"),
             requires(GET, PACKAGE_CONTENT_PATH, "packages.read"),
             requires(DELETE, "/api/packages/{name}/{version}", "packages.delete"),
 

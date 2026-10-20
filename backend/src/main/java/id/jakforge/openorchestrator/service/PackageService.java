@@ -2,10 +2,13 @@ package id.jakforge.openorchestrator.service;
 
 import id.jakforge.openorchestrator.common.ApiException;
 import id.jakforge.openorchestrator.common.Hashes;
+import id.jakforge.openorchestrator.common.Uuids;
 import id.jakforge.openorchestrator.config.OpenOrchestratorProperties;
 import id.jakforge.openorchestrator.dto.request.PublishPackageRequest;
 import id.jakforge.openorchestrator.dto.response.PublishPackageResponse;
+import id.jakforge.openorchestrator.dto.response.UploadPackageResponse;
 import id.jakforge.openorchestrator.model.FileContent;
+import id.jakforge.openorchestrator.model.PackageSource;
 import id.jakforge.openorchestrator.model.Severity;
 import id.jakforge.openorchestrator.repository.AlertRepository;
 import id.jakforge.openorchestrator.repository.LogRepository;
@@ -15,6 +18,7 @@ import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
 import id.jakforge.openorchestrator.security.PermissionChecker;
 import id.jakforge.openorchestrator.security.Permissions;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.unit.DataSize;
@@ -41,6 +45,12 @@ public class PackageService {
     static final String PACKAGE_FILE_EXTENSION = ".zip";
     /** errorCode: versi paket itu sudah pernah terbit. */
     public static final String PACKAGE_VERSION_EXISTS = "PACKAGE_VERSION_EXISTS";
+    /** errorCode: versi itu masih disematkan proses atau dipegang robot (V17). */
+    public static final String PACKAGE_IN_USE = "PACKAGE_IN_USE";
+    static final String PROCESS_CREATED = "CREATED";
+    static final String PROCESS_UPDATED = "UPDATED";
+    static final String PROCESS_UNCHANGED = "UNCHANGED";
+    private static final int MAX_FILE_NAME_LENGTH = 255;
     private static final String ALERT_SOURCE = "packages";
     private static final String UNKNOWN_PUBLISHER = "?";
 
@@ -71,7 +81,7 @@ public class PackageService {
     public PublishPackageResponse publish(OpenOrchestratorPrincipal principal, PublishPackageRequest request) {
         checkPublishable(principal, request);
 
-        return store(principal, request, decodeContent(request.contentBase64()));
+        return store(principal, request, decodeContent(request.contentBase64()), null);
     }
 
     /**
@@ -92,25 +102,135 @@ public class PackageService {
         checkSize(file.getSize());
 
         try {
-            return store(principal, request, file.getBytes());
+            return store(principal, request, file.getBytes(), fileNameOf(file));
         } catch (IOException e) {
             throw ApiException.badRequest("Berkas paket tidak bisa dibaca: " + e.getMessage());
         }
     }
 
+    /**
+     * Unggah paket manual dari dasbor (V17, packages.create): berkas .nupkg
+     * atau .zip proyek yang sudah jadi, tanpa Studio.
+     *
+     * <p>Nama, versi, dan titik masuknya dibaca DARI PAKETNYA
+     * ({@link PackageInspector}) — bukan diketik ulang — dan aturannya sama
+     * dengan Terbitkan dari Studio: {@link PackageNaming}, versi yang sudah ada
+     * ditolak 409, isi disimpan di baris yang sama dengan metadatanya.
+     *
+     * <p>Satu beda yang disengaja: proses hanya DIPINDAH ke versi yang lebih
+     * baru. Studio selalu menerbitkan versi yang lebih tinggi; unggahan manual
+     * bisa saja versi lama (arsip, pemulihan), dan itu tidak boleh diam-diam
+     * menurunkan versi proses yang sedang berjalan.
+     */
+    @Transactional
+    public UploadPackageResponse upload(OpenOrchestratorPrincipal principal, MultipartFile file) {
+        permissionChecker.requireSave(principal, Permissions.PACKAGES, false);
+
+        if (file == null || file.isEmpty()) {
+            throw ApiException.badRequest("Pilih berkas paket (.nupkg atau .zip) untuk diunggah.");
+        }
+        checkSize(file.getSize());
+
+        byte[] original;
+        try {
+            original = file.getBytes();
+        } catch (IOException e) {
+            throw ApiException.badRequest("Berkas paket tidak bisa dibaca: " + e.getMessage());
+        }
+
+        String fileName = fileNameOf(file);
+        PackageInspector.Inspection inspected = PackageInspector.inspect(original, fileName);
+        checkSize(inspected.content().length);
+
+        UUID tenantId = principal.tenantId();
+        String name = inspected.name();
+        String version = inspected.version();
+        if (packageRepository.exists(tenantId, name, version)) throw versionExists(name, version);
+
+        String sha256 = Hashes.sha256Hex(inspected.content());
+        insertPackage(tenantId, name, version, inspected.description(), inspected.entryPoint(), principal.username(),
+                inspected.content(), sha256, PackageSource.MANUAL_UPLOAD, fileName, Hashes.sha256Hex(original));
+
+        String processChange = linkUploadedVersion(tenantId, name, version, inspected.description());
+
+        String publisher = principal.username() == null ? UNKNOWN_PUBLISHER : principal.username();
+        alertRepository.insert(tenantId, Severity.Info, "Paket diunggah",
+                name + " " + version + " diunggah manual oleh " + publisher + " (" + fileName + ").", ALERT_SOURCE);
+        logRepository.insertSystemEntry(tenantId,
+                "Paket " + name + " " + version + " diunggah manual dari berkas " + fileName + ".", name, null);
+
+        return new UploadPackageResponse(true, name, version, inspected.content().length, sha256,
+                inspected.entryPoint(), PackageSource.MANUAL_UPLOAD.name(), inspected.layout().name(),
+                inspected.converted(), name, processChange, inspected.dependencies(), inspected.warnings());
+    }
+
+    /** Proses bernama sama: dibuat kalau belum ada, dipindah hanya kalau versinya lebih lama. */
+    private String linkUploadedVersion(UUID tenantId, String name, String version, String description) {
+        List<Map<String, Object>> processes = processRepository.findPackageLinks(tenantId, name);
+
+        if (processes.isEmpty()) {
+            processRepository.insert(tenantId, name, name, version, PublishPackageRequest.DEFAULT_ENVIRONMENT,
+                    description, null);
+            return PROCESS_CREATED;
+        }
+
+        boolean moved = false;
+        for (Map<String, Object> process : processes) {
+            String current = (String) process.get("packageVersion");
+            if (current == null || !PackageNaming.isValidVersion(current) || PackageNaming.compare(version, current) > 0) {
+                processRepository.linkPackageById(tenantId, Uuids.parseOrNull(String.valueOf(process.get("id"))),
+                        name, version);
+                moved = true;
+            }
+        }
+
+        return moved ? PROCESS_UPDATED : PROCESS_UNCHANGED;
+    }
+
+    /** Nama berkas saja, tanpa folder yang dikirim sebagian peramban lama. */
+    private static String fileNameOf(MultipartFile file) {
+        String original = file.getOriginalFilename();
+        if (original == null || original.isBlank()) return null;
+
+        String name = original.substring(Math.max(original.lastIndexOf('/'), original.lastIndexOf('\\')) + 1).trim();
+        return name.length() > MAX_FILE_NAME_LENGTH ? name.substring(0, MAX_FILE_NAME_LENGTH) : name;
+    }
+
     private void checkPublishable(OpenOrchestratorPrincipal principal, PublishPackageRequest request) {
         if (request.name() == null) throw ApiException.badRequest("Nama paket wajib diisi.");
+        PackageNaming.validate(request.name(), request.version());
 
         permissionChecker.requireSave(principal, Permissions.PACKAGES, false);
 
         if (packageRepository.exists(principal.tenantId(), request.name(), request.version())) {
-            throw ApiException.conflict("Paket '" + request.name() + "' versi " + request.version()
-                    + " sudah ada. Naikkan versinya, lalu terbitkan lagi.").withCode(PACKAGE_VERSION_EXISTS);
+            throw versionExists(request.name(), request.version());
+        }
+    }
+
+    /** Satu kebijakan versi ganda untuk Studio dan unggah manual: isi sebuah versi tidak pernah berubah. */
+    private static ApiException versionExists(String name, String version) {
+        return ApiException.conflict("Paket '" + name + "' versi " + version
+                + " sudah ada. Naikkan versinya, lalu terbitkan lagi.").withCode(PACKAGE_VERSION_EXISTS);
+    }
+
+    /**
+     * Baris paket — metadata dan isinya sekaligus. Dua penerbitan versi yang
+     * sama pada saat bersamaan sama-sama lolos {@code exists}; yang kalah
+     * ditolak oleh kunci unik dan mendapat 409 yang sama, bukan 500.
+     */
+    private void insertPackage(UUID tenantId, String name, String version, String description, String entryPoint,
+                               String publisher, byte[] content, String sha256, PackageSource source,
+                               String sourceFileName, String sourceFileSha256) {
+        try {
+            packageRepository.insert(tenantId, name, version, description, entryPoint, publisher,
+                    content == null ? 0 : content.length, content, sha256, source, sourceFileName, sourceFileSha256);
+        } catch (DuplicateKeyException e) {
+            throw versionExists(name, version);
         }
     }
 
     private PublishPackageResponse store(OpenOrchestratorPrincipal principal, PublishPackageRequest request,
-                                         byte[] content) {
+                                         byte[] content, String sourceFileName) {
         UUID tenantId = principal.tenantId();
         String publisher = principal.username();
 
@@ -120,8 +240,8 @@ public class PackageService {
         // menjalankan apa pun dari dalamnya.
         String sha256 = content == null ? null : Hashes.sha256Hex(content);
 
-        packageRepository.insert(tenantId, request.name(), request.version(), request.description(),
-                request.entryPoint(), publisher, sizeBytes, content, sha256);
+        insertPackage(tenantId, request.name(), request.version(), request.description(), request.entryPoint(),
+                publisher, content, sha256, PackageSource.STUDIO, sourceFileName, sourceFileName == null ? null : sha256);
 
         // Menerbitkan paket hampir selalu berarti ingin proses dengan nama yang
         // sama tersedia untuk dijalankan. Membuatnya di sini menghemat satu
@@ -154,8 +274,31 @@ public class PackageService {
         return new FileContent(name + "." + version + PACKAGE_FILE_EXTENSION, PACKAGE_CONTENT_TYPE, content);
     }
 
+    /**
+     * Hapus satu versi — kecuali yang masih dipakai: disematkan proses
+     * (job berikutnya akan memintanya) atau sedang dipegang robot (robot yang
+     * mengunduh ulang, mis. sesudah cache-nya dibersihkan, akan mendapat 404).
+     * Penolakannya {@code 409 PACKAGE_IN_USE}, menyebut siapa pemakainya.
+     */
+    @Transactional
     public void delete(OpenOrchestratorPrincipal principal, String name, String version) {
-        if (packageRepository.delete(principal.tenantId(), name, version) == 0) {
+        UUID tenantId = principal.tenantId();
+
+        List<String> processes = packageRepository.findProcessesUsing(tenantId, name, version);
+        if (!processes.isEmpty()) {
+            String shown = String.join(", ", processes.subList(0, Math.min(5, processes.size())))
+                    + (processes.size() > 5 ? ", dan " + (processes.size() - 5) + " lainnya" : "");
+            throw ApiException.conflict("Paket '" + name + "' versi " + version + " masih dipakai proses: " + shown
+                    + ". Pindahkan prosesnya ke versi lain dulu, lalu hapus lagi.").withCode(PACKAGE_IN_USE);
+        }
+
+        int jobs = packageRepository.countHeldJobsUsing(tenantId, name, version);
+        if (jobs > 0) {
+            throw ApiException.conflict("Paket '" + name + "' versi " + version + " sedang dijalankan " + jobs
+                    + " pekerjaan. Tunggu sampai selesai, lalu hapus lagi.").withCode(PACKAGE_IN_USE);
+        }
+
+        if (packageRepository.delete(tenantId, name, version) == 0) {
             throw ApiException.notFound("Paket tidak ada.");
         }
     }

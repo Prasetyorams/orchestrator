@@ -1,10 +1,13 @@
 package id.jakforge.openorchestrator.controller;
 
+import id.jakforge.openorchestrator.audit.AuditInterceptor;
 import id.jakforge.openorchestrator.dto.request.PublishPackageRequest;
 import id.jakforge.openorchestrator.dto.response.OkResponse;
 import id.jakforge.openorchestrator.dto.response.PublishPackageResponse;
+import id.jakforge.openorchestrator.dto.response.UploadPackageResponse;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
 import id.jakforge.openorchestrator.service.PackageService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -56,6 +59,23 @@ public class PackageController {
                                               @RequestPart(value = "file", required = false) MultipartFile file,
                                               @RequestParam Map<String, String> fields) {
         return packageService.publishFile(principal, PublishPackageRequest.fromForm(fields), file);
+    }
+
+    /**
+     * Unggah paket manual dari dasbor (V17, packages.manualUpload): bagian
+     * {@code file} berisi .nupkg atau .zip proyek; nama, versi, dan titik
+     * masuknya dibaca dari paketnya sendiri. Sumbernya tercatat MANUAL_UPLOAD.
+     */
+    @PostMapping(path = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public UploadPackageResponse upload(@AuthenticationPrincipal OpenOrchestratorPrincipal principal,
+                                        @RequestPart(value = "file", required = false) MultipartFile file,
+                                        HttpServletRequest request) {
+        UploadPackageResponse response = packageService.upload(principal, file);
+
+        // Nama dan versinya baru diketahui sesudah paketnya dibaca.
+        AuditInterceptor.resolvedTarget(request, response.name() + " · " + response.version());
+
+        return response;
     }
 
     /** Unduh isi paket (.zip). */

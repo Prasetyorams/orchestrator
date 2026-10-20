@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -60,6 +61,8 @@ public class AuditInterceptor implements HandlerInterceptor {
 
     /** Nama folder atau proses yang diambil sebelum controllernya berjalan. */
     private static final String PRE_RESOLVED_TARGET = AuditInterceptor.class.getName() + ".preResolvedTarget";
+    /** Sasaran yang baru diketahui controllernya, mis. nama dan versi paket yang dibaca dari berkas unggahan. */
+    private static final String HANDLER_RESOLVED_TARGET = AuditInterceptor.class.getName() + ".handlerResolvedTarget";
 
     private static final String LOGIN_PATH = "/api/auth/login";
     private static final String USERNAME_FIELD = "username";
@@ -86,7 +89,9 @@ public class AuditInterceptor implements HandlerInterceptor {
         /** Nama folder dari {@code ?folderId=}. */
         FOLDER_OF_PARAMETER,
         /** Nama folder dari medan {@code folderId} di badan. */
-        FOLDER_OF_BODY
+        FOLDER_OF_BODY,
+        /** Disebut controllernya lewat {@link #resolvedTarget}. */
+        HANDLER_RESOLVED
     }
 
     record TargetSource(SourceKind kind, String name) {
@@ -107,6 +112,12 @@ public class AuditInterceptor implements HandlerInterceptor {
     private static final TargetSource FOLDER_FROM_PARAMETER =
             new TargetSource(SourceKind.FOLDER_OF_PARAMETER, FOLDER_ID_FIELD);
     private static final TargetSource FOLDER_FROM_BODY = new TargetSource(SourceKind.FOLDER_OF_BODY, FOLDER_ID_FIELD);
+    private static final TargetSource FROM_HANDLER = new TargetSource(SourceKind.HANDLER_RESOLVED, null);
+
+    /** Sasaran jejak audit yang hanya diketahui controllernya; dipakai aturan dengan sumber HANDLER_RESOLVED. */
+    public static void resolvedTarget(HttpServletRequest request, String target) {
+        request.setAttribute(HANDLER_RESOLVED_TARGET, target);
+    }
 
     /**
      * Sasaran disusun dari sumber-sumbernya, dipisah " · ".
@@ -134,6 +145,7 @@ public class AuditInterceptor implements HandlerInterceptor {
             rule(DELETE, "/api/processes/{name}", "Proses", "Hapus", path("name"), FOLDER_FROM_PARAMETER),
             rule(PUT, "/api/processes/{name}/folder", "Proses", "Pindahkan", path("name"), FOLDER_FROM_BODY),
             rule(POST, "/api/packages", "Paket", "Terbitkan", body("name"), body("version")),
+            rule(POST, "/api/packages/upload", "Paket", "Unggah", FROM_HANDLER),
             rule(DELETE, "/api/packages/{name}/{version}", "Paket", "Hapus", path("name"), path("version")),
 
             rule(POST, "/api/jobs", "Pekerjaan", "Jalankan", body("processName"), FOLDER_FROM_BODY),
@@ -303,11 +315,12 @@ public class AuditInterceptor implements HandlerInterceptor {
         for (TargetSource source : rule.targetSources()) {
             String value = switch (source.kind()) {
                 case PATH_VARIABLE -> pathVariables.get(source.name());
-                case BODY_FIELD -> bodyFields.get(source.name());
+                case BODY_FIELD -> bodyFields.getOrDefault(source.name(), formField(request, source.name()));
                 case FOLDER_OF_PARAMETER -> folderName(principal, request.getParameter(source.name()));
                 case FOLDER_OF_BODY -> folderName(principal, bodyFields.get(source.name()));
                 case FOLDER_OF_PATH_ID, JOB_OF_PATH_ID, CALENDAR_OF_PATH_ID ->
                         (String) request.getAttribute(PRE_RESOLVED_TARGET);
+                case HANDLER_RESOLVED -> (String) request.getAttribute(HANDLER_RESOLVED_TARGET);
             };
 
             if (value != null && !value.isBlank()) parts.add(value.trim());
@@ -319,6 +332,17 @@ public class AuditInterceptor implements HandlerInterceptor {
     private String folderName(OpenOrchestratorPrincipal principal, String folderId) {
         UUID id = Uuids.parseOrNull(folderId);
         return id == null ? null : auditService.findFolderName(principal.tenantId(), id).orElse(null);
+    }
+
+    /**
+     * Medan multipart/form-data: Terbitkan dari Studio sebagai berkas biner
+     * (packages.upload.binary) membawa name dan version di sana, bukan di
+     * badan JSON — tanpa ini sasarannya kosong di Tenant › Audit.
+     */
+    private static String formField(HttpServletRequest request, String name) {
+        String type = request.getContentType();
+        return type != null && type.toLowerCase(Locale.ROOT).startsWith("multipart/")
+                ? request.getParameter(name) : null;
     }
 
     /**

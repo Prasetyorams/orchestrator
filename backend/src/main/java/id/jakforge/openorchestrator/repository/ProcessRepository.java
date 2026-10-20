@@ -203,6 +203,18 @@ public class ProcessRepository {
         return moved;
     }
 
+    /** Proses bernama ini di semua folder, dengan versi paket yang disematkannya: id, packageVersion. */
+    public List<Map<String, Object>> findPackageLinks(UUID tenantId, String name) {
+        return database.queryRows("SELECT id, package_version FROM processes WHERE tenant_id = ? AND name = ?",
+                tenantId, name);
+    }
+
+    /** Unggah manual: hanya proses yang versinya lebih lama yang dipindah (lihat PackageService#upload). */
+    public void linkPackageById(UUID tenantId, UUID processId, String packageName, String packageVersion) {
+        database.update("UPDATE processes SET package_name = ?, package_version = ? WHERE tenant_id = ? AND id = ?",
+                packageName, packageVersion, tenantId, processId);
+    }
+
     /**
      * Dipakai penerbitan paket: menyetel paket dan versinya tanpa menyentuh
      * sisanya — di SEMUA folder tempat proses bernama itu dipasang. Studio

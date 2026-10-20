@@ -39,6 +39,13 @@ seperti Non-Working Days di UiPath. Pemicu yang memakai kalender tidak menjadwal
 tanggal-tanggalnya. Menambah medan di `GET /api/agent/triggers` (2.10); **tidak ada perubahan wajib
 di sisi robot**. Catatan untuk tim robot: Bagian 4 (19 Okt 2026). Diuji ujung-ke-ujung (68 pemeriksaan).
 
+**Tambahan V17** (`V17__sumber_paket.sql`): **unggah paket manual** di dasbor (Tenant › Paket ›
+Unggah Paket), di samping Terbitkan dari Studio — `POST /api/packages/upload`. Daftar paket
+menyebut sumbernya (`STUDIO`/`MANUAL_UPLOAD`); versi yang masih dipakai proses atau job robot
+tidak bisa dihapus (`409 PACKAGE_IN_USE`); nama/versi paket diperiksa dengan aturan yang sama di
+kedua jalur. Kontrak robot tidak berubah, tetapi **ada penyesuaian yang diminta** — terutama
+JakRunner attended jalur v1 yang belum mengunduh paket. Catatan: Bagian 4 (20 Okt 2026).
+
 Dokumen ini punya dua bagian:
 
 - **v1** — API untuk JakRunner (attended), Studio, activities `Custom.Orchestrator`, dan
@@ -74,7 +81,8 @@ Semua memakai `Authorization: Bearer <token>` dari login akun pengguna.
   "capabilities": ["jobs.next.package", "packages.sha256", "heartbeat.commands", "jobs.state.guard",
                    "jobs.pause", "jobs.kill", "agent.triggers", "assistant.signin",
                    "folder.machines", "robots.resolution", "heartbeat.busyLocal", "logs.trigger",
-                   "packages.versionConflict", "packages.upload.binary", "triggers.calendar"],
+                   "packages.versionConflict", "packages.upload.binary", "triggers.calendar",
+                   "packages.manualUpload"],
   "apiVersions": [1, 2] }
 ```
 
@@ -82,7 +90,8 @@ Semua memakai `Authorization: Bearer <token>` dari login akun pengguna.
 kalau `/api/agent` tersedia. `agent.triggers` = 2.10, `assistant.signin` = Bagian 5,
 `folder.machines` = Bagian 6,
 `robots.resolution` = 2.2, `heartbeat.busyLocal` = denyut v1 di bawah dan 2.3, `logs.trigger`,
-`packages.versionConflict` dan `packages.upload.binary` = di bawah, `triggers.calendar` = 2.10 (V16).
+`packages.versionConflict`, `packages.upload.binary`, dan `packages.manualUpload` (V17) = di bawah,
+`triggers.calendar` = 2.10 (V16).
 `queues.jobRelease` tidak diumumkan
 selama antrean dinonaktifkan (lihat "Antrean" di bawah).
 
@@ -167,6 +176,15 @@ selama antrean dinonaktifkan (lihat "Antrean" di bawah).
 
 **packages.sha256:** daftar paket menyebut `sha256` (heksa kecil) isi paketnya.
 
+**V17:** tiap versi juga menyebut `source` (`STUDIO` atau `MANUAL_UPLOAD`), `sourceFileName`, dan
+`sourceFileSha256` (berkas yang diunggah; null untuk Terbitkan lewat JSON). `sha256` tetap sidik
+**isi yang disimpan** — yang diunduh dan diperiksa robot; untuk .nupkg yang ditata ulang (lihat
+Bagian 4) nilainya berbeda dengan `sourceFileSha256`. Isi selalu zip proyek dengan workflow di akarnya.
+
+`DELETE /api/packages/{nama}/{versi}` (V17): versi yang disematkan proses, atau yang sedang dipegang
+job robot (`ASSIGNED`…`STOPPING`, `UNRESPONSIVE`), ditolak `409 {"errorCode": "PACKAGE_IN_USE"}`
+dengan nama prosesnya atau jumlah job-nya.
+
 ### `POST /api/packages` (Studio, Terbitkan)
 
 `{ "name": "Tagihan", "version": "1.0.4", "description": "catatan rilis", "entryPoint": "Main.xaml",
@@ -187,7 +205,15 @@ selama antrean dinonaktifkan (lihat "Antrean" di bawah).
   `description`, `entryPoint`, `environment`). Jawaban, 409, izin, dan SHA-256 sama dengan jalur
   JSON. Memori server kira-kira sebesar paketnya (JSON base64: sekitar 2,3×). Batas tetap 64 MB
   (`400 "Paket terlalu besar. Batasnya 64 MB."`); tanpa `file` → `400`. Jalur JSON base64
-  tetap ada untuk Studio lama.
+  tetap ada untuk Studio lama. Isinya disimpan **apa adanya**: kirim zip proyek seperti
+  Terbitkan sekarang, bukan .nupkg — .nupkg mentah (isi di `lib/net45/`) tidak bisa dijalankan
+  robot. .nupkg masuk lewat `POST /api/packages/upload` (Bagian 4, V17), yang menatanya ulang.
+- **Nama dan versi (V17):** nama dengan `/`, `\` atau karakter kendali, atau lebih dari 200
+  karakter → `400 PACKAGE_INVALID_NAME`; versi yang bukan angka bertitik (`1.0`…`1.0.3.7`, boleh
+  `-beta`/`+build`) → `400 PACKAGE_INVALID_VERSION`. Studio selalu mengirim nama proyek dan
+  versi x.y.z, jadi tidak terkena. Dua penerbitan versi yang sama bersamaan: yang kalah tetap
+  `409 PACKAGE_VERSION_EXISTS` (dulu bisa 500).
+- Sumber paket dari endpoint ini: `STUDIO`.
 
 ### `POST /api/logs` — pemicu baris (V14)
 
@@ -1061,6 +1087,121 @@ activity Start Job **tidak** terpengaruh kalender.
    (`02:00Z`).
 3. Hapus kedua tanggal dari kalender lalu Simpan: `nextRunAt` kembali ke 09:00 berikutnya.
 4. Kalau `/api/health` tidak menyebut `triggers.calendar`, server belum V16 — medan-medan itu tidak ada.
+
+---
+
+## Unggah paket manual (20 Okt 2026, V17)
+
+Fitur baru di Orchestrator: **Tenant › Paket › Unggah Paket** — memasukkan paket yang sudah jadi
+tanpa OpenStudio. Hasilnya masuk ke umpan, proses, dan riwayat versi yang sama dengan Terbitkan.
+**Sudah di-deploy** ke produksi (20 Okt 2026, migrasi `V17__sumber_paket.sql`). Penyesuaian yang
+diminta dari tim robot/Studio ada di bawah ("Penyesuaian yang diminta").
+
+**`POST /api/packages/upload`** (`multipart/form-data`, bagian `file`; izin `packages.create`;
+kemampuan `packages.manualUpload`) → `200`:
+
+```json
+{ "ok": true, "name": "Laporan Harian", "version": "1.0.0", "sizeBytes": 1234, "sha256": "…",
+  "entryPoint": "Main.xaml", "source": "MANUAL_UPLOAD", "layout": "NUPKG", "converted": true,
+  "processName": "Laporan Harian", "processChange": "CREATED",
+  "dependencies": ["JakForge.Mail.Activities 1.0.0"], "warnings": ["Paket ini membutuhkan activity: …"] }
+```
+
+- **Format:** `.nupkg` dari OpenStudio (Terbitkan → Folder lokal, `ProjectPackage.Build`) atau
+  `.zip` proyek (mis. hasil unduh `/content`). **Nama, versi, dan titik masuk dibaca dari
+  paketnya**: nama dari `project.json` `name` (sama dengan yang dikirim Terbitkan), lalu `<id>`
+  .nuspec; versi dari `<version>` .nuspec, atau nama berkas `<nama>.<versi>.zip`.
+- **Tata letak — penting untuk robot.** `PackageCache.ExtractSafely` + `EntryPointResolver`
+  mencari workflow di **akar** paket. Karena itu isi `lib/<target>/` .nupkg (dengan nama OPC
+  `%20` dikembalikan menjadi spasi) dan zip yang berisi satu folder proyek **ditata ulang** ke
+  akar; yang disimpan adalah zip proyek yang sama bentuknya dengan hasil Terbitkan. Zip yang sudah
+  benar disimpan apa adanya. `.nuspec`, `_rels/`, `[Content_Types].xml` tidak ikut.
+- **Diperiksa seperti robot membacanya:** arsip utuh; jalur aman (tanpa `..`, jalur mutlak,
+  `<>:"|?*`, berkas ganda beda huruf besar-kecil); XAML terbaca (tanpa DOCTYPE/entitas luar);
+  titik masuk dengan **urutan EntryPointResolver** (`main`/`entryPoint` project.json yang ada →
+  Main.xaml → satu-satunya .xaml di akar), dan akarnya `<Activity>`.
+- **Ditolak `400`** dengan `errorCode`: `PACKAGE_FILE_TYPE`, `PACKAGE_CORRUPT`, `PACKAGE_UNSAFE_PATH`,
+  `PACKAGE_NOT_PROCESS` (paket activity .dll — pasang lewat Kelola Paket), `PACKAGE_NO_WORKFLOW`,
+  `PACKAGE_ENTRY_POINT`, `PACKAGE_INVALID_XAML`, `PACKAGE_INVALID_PROJECT`, `PACKAGE_TOO_LARGE`,
+  `PACKAGE_INVALID_NAME`/`VERSION`, dan `PACKAGE_UIPATH_UNSUPPORTED` (dependency `UiPath.*`,
+  namespace `schemas.uipath.com`, atau `assembly=UiPath.*` — activity UiPath tidak ada di robot).
+  Versi yang sudah ada → `409 PACKAGE_VERSION_EXISTS`, sama dengan Terbitkan. Di atas batas
+  multipart → `413 UPLOAD_TOO_LARGE`.
+- **Yang tidak bisa dipastikan server → `warnings`:** `dependencies` di project.json (robot
+  tidak memasang paket activity sendiri — harus sudah ada di mesinnya), pustaka di `assembly=`
+  yang bukan bawaan OpenStudio, `main` yang menunjuk berkas yang tidak ada, jalur > 160 karakter
+  (MAX_PATH robot). Server **tidak menjanjikan** paket itu jalan; ia menolak yang pasti gagal.
+- **Proses:** dibuat di folder bawaan kalau belum ada (seperti Terbitkan); kalau sudah ada,
+  hanya **dipindah ke versi yang lebih baru** — unggahan versi lama tidak menurunkan proses.
+- **Penyimpanan:** sama dengan Terbitkan — isi dan metadata di satu baris `packages` PostgreSQL
+  (volume basis data), satu transaksi; tidak ada berkas paket di disk container.
+
+**Yang tidak berubah:** klaim job, `/content`, `sha256`, dan `entryPoint` sama persis. Robot
+Agent v2 dan Open Assistant yang tersambung dengan **machine key** (`AttendedAgent` →
+`AgentV2JobRunner` + `PackageCache`) sudah mengunduh paket dari Orchestrator, jadi paket unggahan
+langsung jalan di sana — **asalkan activity yang dibutuhkannya terpasang** (lihat 3).
+
+### Penyesuaian yang diminta
+
+Diurutkan dari yang paling berdampak. Ditemukan saat memeriksa repo Studio `origin/main`
+(`5d896ae`, 19 Okt — sesudah ganti nama JakRunner → OpenAssistant) untuk fitur ini.
+
+1. **Open Assistant jalur v1 harus mengunduh paket (PENTING).** Open Assistant yang masuk
+   dengan **akun pengguna** (tanpa machine key) mengambil job lewat `GET /api/jobs/next`, lalu
+   `OpenAssistant/Views/RunnerWindow.xaml.cs` `StartHubJob` → `MatchAutomation(job.ProcessName)`
+   (baris 884) mencari **proyek lokal** bernama sama. Paketnya tidak pernah diunduh. Akibatnya:
+   - paket yang diunggah manual (dan paket Studio yang tidak ada salinannya di PC itu) selalu
+     gagal: job `FAULTED` "Proses 'X' tidak ada di komputer ini";
+   - kalau salinan lokalnya ada, yang jalan adalah salinan itu, **bukan versi yang diterbitkan**
+     — `packageVersion` dan `packageSha256` diabaikan.
+
+   Yang diminta: pakai `packageName`, `packageVersion`, `packageSha256`, dan `entryPoint` dari
+   jawaban `jobs/next` (kemampuan `jobs.next.package`, sudah ada), unduh
+   `GET /api/packages/{nama}/{versi}/content` (izin `packages.read` sudah ada di peran Robot sejak
+   V8), periksa sidiknya, ekstrak dengan `PackageCache`, dan tentukan titik masuk dengan
+   `EntryPointResolver` (`OpenStudio.Robot.Core/Packages/`) — sama dengan `AgentV2JobRunner`.
+   Proyek lokal cukup jadi cadangan kalau server tidak menyebut paket sama sekali (server lama).
+2. **Studio: kirim zip proyek, bukan .nupkg, di jalur Terbitkan.** `POST /api/packages`
+   (JSON maupun multipart) menyimpan isinya **apa adanya**; .nupkg mentah (isi di `lib/net45/`)
+   tidak bisa dijalankan robot. `StudioOrchestratorClient.PublishProject` saat ini sudah mengirim
+   zip — pertahankan begitu kalau kelak pindah ke multipart (`packages.upload.binary`). .nupkg masuk
+   lewat `/api/packages/upload`.
+3. **Robot: dependency activity.** Robot tidak memulihkan `dependencies` di project.json (tidak ada
+   kode pemulihan di OpenAssistant/OpenStudio.Robot.Core; hanya Studio yang memulihkannya). Paket
+   yang diunggah manual lebih mungkin membawa activity yang belum terpasang di mesin robot. Yang
+   diminta, minimal: galat `WorkflowLoadFailed` yang **menyebut assembly/activity yang hilang**,
+   bukan kegagalan XAML umum. Lebih baik (boleh menyusul): pulihkan dependency dari sumber paket
+   activity sebelum menjalankan, seperti `OpenStudioPackages.RestoreAllProjects` di Studio.
+   Server sudah memberi tahu pengunggah lewat `warnings`, tetapi tidak bisa memastikan isi mesin.
+4. **Studio: versi berikutnya di dialog Terbitkan.** `StudioOrchestratorClient.HighestVersion`
+   hanya menghitung versi x.y.z (`ParseVersion` menolak `-beta` dan 4 bagian). Unggah manual
+   menerima juga `1.3.0-beta` dan `1.0.3.7`, jadi saran versi Studio bisa lebih rendah daripada
+   versi yang sudah ada — dan Terbitkan memindah proses ke versi Studio itu. Yang diminta: ikut
+   hitung versi pra-rilis (bagian angkanya) dan 4 bagian saat mencari yang tertinggi, atau
+   tampilkan peringatan kalau ada versi yang lebih tinggi yang tidak bisa dibaca.
+5. **Alat yang menghapus versi paket:** tangani `409 PACKAGE_IN_USE` sebagai pesan untuk pengguna,
+   jangan dicoba ulang. Studio saat ini tidak menghapus paket Orchestrator, jadi tidak terkena.
+
+**Sudah aman, tidak perlu diubah:** dialog Terbitkan Studio menampilkan `error` dari server apa
+adanya (`StudioOrchestratorClient.Send`), jadi galat baru `PACKAGE_INVALID_NAME`/`PACKAGE_INVALID_VERSION`
+langsung terbaca; Studio selalu mengirim nama proyek dan versi x.y.z sehingga tidak terkena. Medan
+baru di `GET /api/packages` (`source`, `sourceFileName`, `sourceFileSha256`) diabaikan klien lama.
+
+### Cara menguji dari sisi robot
+
+1. OpenStudio: Terbitkan → **Folder lokal**, ambil `.nupkg`-nya.
+2. Dasbor: Tenant › Paket › **Unggah Paket** → pilih .nupkg → hasilnya menyebut nama, versi,
+   titik masuk, dan proses (dibuat / dipindah / tetap).
+3. Start Job ke robot dengan **machine key** (Robot Agent v2 atau Open Assistant v2): harus jalan.
+4. Start Job ke Open Assistant yang masuk dengan **akun pengguna**, di PC tanpa salinan proyeknya:
+   saat ini `FAULTED` "tidak ada di komputer ini" — setelah penyesuaian 1, harus jalan.
+5. Hapus versi yang masih dipakai proses dari dasbor: `409` dengan nama prosesnya.
+
+**Diuji di sisi Orchestrator:** E2E 51 pemeriksaan melawan PostgreSQL uji — .nupkg dibuat dengan
+`ProjectPackage.Build` asli Studio, diunggah, lalu isi yang tersimpan diekstrak dengan salinan
+`ExtractSafely`, dicari titik masuknya dengan `EntryPointResolver` asli, dan workflow-nya dijalankan
+WF4; klaim job agent v2 mendapat paket dan sidik yang benar; unggah lewat proxy dasbor juga diuji.
+**Belum** diuji dengan Robot Agent sungguhan di VM.
 
 ---
 

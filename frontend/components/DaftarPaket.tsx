@@ -3,13 +3,30 @@
 import { useCallback, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, History, Trash2 } from "lucide-react";
-import { OpenOrchestratorApi, errorText, unduh, type Package } from "@/lib/api";
+import { OpenOrchestratorApi, errorText, unduh, type Package, type PackageSource } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { kelompokkanPaket, type RingkasanPaket } from "@/lib/paket";
 import { dateTimeOf, kunciUrutVersi, ukuranBerkas } from "@/lib/utils";
 import { Button, Card, Galat, IconButton } from "@/components/ui/primitives";
 import { DataTable } from "@/components/DataTable";
 import { Dialog } from "@/components/Dialog";
+
+/** Sumber sebuah versi (V17); server lama tidak menyebutnya — semua paket dulu dari Studio. */
+const LABEL_SUMBER: Record<PackageSource, string> = { STUDIO: "Studio", MANUAL_UPLOAD: "Unggah manual" };
+
+function Sumber({ paket }: { paket: Package }) {
+  const { t } = useT();
+  const manual = paket.source === "MANUAL_UPLOAD";
+
+  return (
+    <span
+      title={manual && paket.sourceFileName ? paket.sourceFileName : undefined}
+      className={manual ? "rounded-full bg-brandSoft px-2 py-0.5 text-[11px] font-medium text-brand" : "text-muted"}
+    >
+      {t(LABEL_SUMBER[paket.source ?? "STUDIO"])}
+    </span>
+  );
+}
 
 /**
  * Daftar paket: satu baris per PAKET dengan versi tertingginya.
@@ -53,7 +70,7 @@ export function DaftarPaket({ folderId, bolehHapus = false }: { folderId?: strin
 
   const hapusVersi = useCallback(
     async (p: Package) => {
-      if (!window.confirm(t("Hapus {0} versi {1} dari umpan paket? Proses yang memakai versi ini tidak bisa dijalankan lagi.", p.name, p.version))) {
+      if (!window.confirm(t("Hapus {0} versi {1} dari umpan paket? Versi yang masih dipakai proses atau sedang dijalankan robot tidak bisa dihapus.", p.name, p.version))) {
         return;
       }
 
@@ -82,7 +99,7 @@ export function DaftarPaket({ folderId, bolehHapus = false }: { folderId?: strin
               ? "Memuat..."
               : folderId
                 ? "Belum ada paket yang dipakai proses di folder ini."
-                : "Belum ada paket yang diterbitkan. Terbitkan dari Studio: tab Design → grup OpenOrchestrator → Terbitkan."
+                : "Belum ada paket. Terbitkan dari Studio (tab Design → grup OpenOrchestrator → Terbitkan), atau Unggah Paket di sini."
           }
           kolom={[
             {
@@ -121,6 +138,11 @@ export function DaftarPaket({ folderId, bolehHapus = false }: { folderId?: strin
               judul: "Diterbitkan Oleh",
               sel: (r) => <span className="text-muted">{r.terbaru.publishedBy ?? "-"}</span>,
               urut: (r) => r.terbaru.publishedBy,
+            },
+            {
+              judul: "Sumber",
+              sel: (r) => <Sumber paket={r.terbaru} />,
+              urut: (r) => r.terbaru.source ?? "STUDIO",
             },
             {
               judul: "",
@@ -196,6 +218,7 @@ function DialogVersi({
               urut: (v) => v.publishedAt,
             },
             { judul: "Diterbitkan Oleh", sel: (v) => v.publishedBy ?? "-" },
+            { judul: "Sumber", sel: (v) => <Sumber paket={v} />, urut: (v) => v.source ?? "STUDIO" },
             { judul: "Titik Masuk", sel: (v) => <span className="text-muted">{v.entryPoint ?? "-"}</span> },
             {
               judul: "Ukuran",

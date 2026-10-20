@@ -1,5 +1,6 @@
 package id.jakforge.openorchestrator.repository;
 
+import id.jakforge.openorchestrator.model.PackageSource;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
@@ -9,7 +10,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
-/** Paket automasi yang diterbitkan Studio, beserta isinya. */
+/** Paket automasi — diterbitkan dari Studio atau diunggah manual (V17) — beserta isinya. */
 @Repository
 @RequiredArgsConstructor
 public class PackageRepository {
@@ -37,7 +38,8 @@ public class PackageRepository {
         }
 
         return database.queryRows("""
-                SELECT id, name, version, description, entry_point, published_by, published_at, size_bytes, sha256
+                SELECT id, name, version, description, entry_point, published_by, published_at, size_bytes, sha256,
+                       source, source_file_name, source_file_sha256
                   FROM packages
                  WHERE tenant_id = ?%s
                  ORDER BY name, published_at DESC
@@ -50,16 +52,25 @@ public class PackageRepository {
                 """, tenantId, name, version);
     }
 
-    /** @param sha256 sidik isi paket (heksa kecil), dicocokkan robot sebelum menjalankannya */
-    public void insert(UUID tenantId, String name, String version, String description,
-                       String entryPoint, String publishedBy, long sizeBytes, byte[] content, String sha256) {
+    /**
+     * Satu baris berisi metadata DAN isinya: keduanya masuk atau gagal
+     * bersama, tanpa berkas yang tertinggal di luar basis data.
+     *
+     * @param sha256           sidik isi paket (heksa kecil), dicocokkan robot sebelum menjalankannya
+     * @param sourceFileName   nama berkas yang diunggah, atau null (Terbitkan dari Studio lewat JSON)
+     * @param sourceFileSha256 sidik berkas aslinya; berbeda dengan sha256 kalau isinya ditata ulang
+     */
+    public void insert(UUID tenantId, String name, String version, String description, String entryPoint,
+                       String publishedBy, long sizeBytes, byte[] content, String sha256, PackageSource source,
+                       String sourceFileName, String sourceFileSha256) {
         database.update("""
                 INSERT INTO packages
                     (id, tenant_id, name, version, description, entry_point,
-                     published_by, published_at, size_bytes, content, sha256)
-                VALUES (?, ?, ?, ?, ?, ?, ?, now(), ?, ?, ?)
+                     published_by, published_at, size_bytes, content, sha256,
+                     source, source_file_name, source_file_sha256)
+                VALUES (?, ?, ?, ?, ?, ?, ?, now(), ?, ?, ?, ?, ?, ?)
                 """, UUID.randomUUID(), tenantId, name, version, description, entryPoint, publishedBy,
-                sizeBytes, content, sha256);
+                sizeBytes, content, sha256, source.name(), sourceFileName, sourceFileSha256);
     }
 
     /**
@@ -75,6 +86,30 @@ public class PackageRepository {
                 """, (rs, rowNumber) -> rs.getBytes(1), tenantId, name, version);
 
         return contents.isEmpty() ? Optional.empty() : Optional.ofNullable(contents.getFirst());
+    }
+
+    /** Proses yang menyematkan versi ini, sebagai "folder / proses". */
+    public List<String> findProcessesUsing(UUID tenantId, String name, String version) {
+        return database.query("""
+                SELECT COALESCE(f.name, '?') || ' / ' || p.name
+                  FROM processes p
+                  LEFT JOIN folders f ON f.id = p.folder_id
+                 WHERE p.tenant_id = ? AND p.package_name = ? AND p.package_version = ?
+                 ORDER BY 1
+                """, (rs, rowNumber) -> rs.getString(1), tenantId, name, version);
+    }
+
+    /**
+     * Job yang sedang dipegang robot dengan versi ini. Job yang masih
+     * PENDING belum memilih versi: ia memakai versi prosesnya saat diambil,
+     * dan itu sudah dijaga {@link #findProcessesUsing}.
+     */
+    public int countHeldJobsUsing(UUID tenantId, String name, String version) {
+        return database.queryScalar("""
+                SELECT count(*) FROM jobs
+                 WHERE tenant_id = ? AND package_name = ? AND package_version = ? AND state IN %s
+                """.formatted(JobRepository.HELD_STATES), tenantId, name, version)
+                .map(n -> ((Number) n).intValue()).orElse(0);
     }
 
     public int delete(UUID tenantId, String name, String version) {

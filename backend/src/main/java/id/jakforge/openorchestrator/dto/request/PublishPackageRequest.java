@@ -16,7 +16,7 @@ public record PublishPackageRequest(String name, String version, String descript
                                     String environment, String contentBase64) {
 
     static final String DEFAULT_VERSION = "1.0.0";
-    static final String DEFAULT_ENVIRONMENT = "Production";
+    public static final String DEFAULT_ENVIRONMENT = "Production";
 
     public static PublishPackageRequest fromBody(Map<String, Object> body) {
         return new PublishPackageRequest(

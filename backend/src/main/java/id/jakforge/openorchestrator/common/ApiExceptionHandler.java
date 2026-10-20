@@ -14,6 +14,7 @@ import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.RecordComponent;
@@ -41,11 +42,22 @@ public class ApiExceptionHandler {
 
     static final String INVALID_JSON_MESSAGE = "Badan permintaan bukan JSON yang sah.";
     static final String UNEXPECTED_ERROR_MESSAGE = "Terjadi kesalahan di server.";
+    static final String UPLOAD_TOO_LARGE = "UPLOAD_TOO_LARGE";
 
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ApiError> handleApiException(ApiException ex) {
         return ResponseEntity.status(ex.status())
                 .body(new ApiError(ex.getMessage(), ex.errorCode(), ex.state(), ex.minAgentVersion()));
+    }
+
+    /**
+     * Unggahan multipart yang melewati batas Spring (spring.servlet.multipart),
+     * mis. paket jauh di atas batas paketnya. Tanpa ini jawabannya 413 dengan
+     * kalimat bawaan berbahasa Inggris.
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiError> handleUploadTooLarge(MaxUploadSizeExceededException ex) {
+        return handleApiException(ApiException.tooLarge("Berkas yang diunggah terlalu besar.").withCode(UPLOAD_TOO_LARGE));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

@@ -121,6 +121,11 @@ export function errorText(e: unknown, bawaan = "Terjadi kesalahan."): string {
   return pesan ? terjemahkanPesan(bahasaAktif(), pesan) : terjemahkan(bahasaAktif(), bawaan);
 }
 
+/** Permintaan yang dibatalkan sendiri (AbortController), bukan galat. */
+export function dibatalkan(e: unknown): boolean {
+  return axios.isCancel(e);
+}
+
 /** Status HTTP sebuah galat, kalau ada. */
 export function statusGalat(e: unknown): number | undefined {
   return (e as AxiosError)?.response?.status;
@@ -424,6 +429,31 @@ export type Package = {
   publishedAt: string;
   sizeBytes: number;
   sha256?: string | null;
+  /** V17: STUDIO (Terbitkan dari OpenStudio) atau MANUAL_UPLOAD (Unggah Paket di dasbor). */
+  source?: PackageSource;
+  /** Berkas yang diunggah dan sidik SHA-256-nya; sha256 di atas adalah sidik isi yang disimpan. */
+  sourceFileName?: string | null;
+  sourceFileSha256?: string | null;
+};
+
+export type PackageSource = "STUDIO" | "MANUAL_UPLOAD";
+
+/** Jawaban POST /api/packages/upload (V17). */
+export type UploadPackageResult = {
+  ok: boolean;
+  name: string;
+  version: string;
+  sizeBytes: number;
+  sha256: string;
+  entryPoint: string;
+  source: PackageSource;
+  /** ZIP: disimpan apa adanya; ZIP_IN_FOLDER dan NUPKG: isinya dipindah ke akar paket. */
+  layout: "ZIP" | "ZIP_IN_FOLDER" | "NUPKG";
+  converted: boolean;
+  processName: string;
+  processChange: "CREATED" | "UPDATED" | "UNCHANGED";
+  dependencies: string[];
+  warnings: string[];
 };
 
 export type Trigger = {
@@ -1028,6 +1058,24 @@ export const OpenOrchestratorApi = {
   packages: (folderId?: string | null) => get<Package[]>("/api/packages", dalam(folderId)),
   deletePackage: (name: string, version: string) =>
     del<{ ok: boolean }>(`/api/packages/${seg(name)}/${seg(version)}`),
+  /**
+   * Unggah paket manual (V17): .nupkg atau .zip proyek. Kemajuan kiriman
+   * (0..1) lewat onProgress; dibatalkan lewat signal.
+   */
+  uploadPackage: (file: File, opsi?: { onProgress?: (bagian: number) => void; signal?: AbortSignal }) => {
+    const data = new FormData();
+    data.append("file", file, file.name);
+
+    return api
+      .post<UploadPackageResult>("/api/packages/upload", data, {
+        // Bukan application/json bawaan instance ini: axios akan mengubah
+        // FormData menjadi JSON. Batasnya (boundary) diisi peramban sendiri.
+        headers: { "Content-Type": "multipart/form-data" },
+        signal: opsi?.signal,
+        onUploadProgress: (e) => opsi?.onProgress?.(e.total ? e.loaded / e.total : 0),
+      })
+      .then((r) => r.data);
+  },
   packageUrl: (name: string, version: string) =>
     `${api.defaults.baseURL}/api/packages/${seg(name)}/${seg(version)}/content`,
 
