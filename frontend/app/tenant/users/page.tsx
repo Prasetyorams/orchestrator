@@ -2,8 +2,8 @@
 
 import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Trash2 } from "lucide-react";
-import { OpenOrchestratorApi, errorText, type User } from "@/lib/api";
+import { Pencil, Search, Trash2 } from "lucide-react";
+import { OpenOrchestratorApi, errorText, type AdLookup, type User } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { useIzin } from "@/lib/izin";
 import { dateTimeOf } from "@/lib/utils";
@@ -67,6 +67,20 @@ export default function Pengguna() {
             },
             { judul: "Nama", sel: (u) => u.displayName, urut: (u) => u.displayName },
             { judul: "Peran", sel: (u) => <Badge value={u.role.toUpperCase()} label={u.role} />, urut: (u) => u.role },
+            {
+              judul: "Metode masuk",
+              sel: (u) =>
+                u.authProvider === "AD" ? (
+                  <span title={u.adObjectGuid ? `objectGUID ${u.adObjectGuid}` : undefined}>
+                    <span className="font-medium">{t("Windows AD")}</span>
+                    <span className="text-muted"> · {u.adUsername}</span>
+                    {!u.adObjectGuid ? <span className="ml-1 text-xs text-warn">({t("belum tertaut")})</span> : null}
+                  </span>
+                ) : (
+                  <span className="text-muted">{t("Akun lokal")}</span>
+                ),
+              urut: (u) => u.authProvider ?? "LOCAL",
+            },
             {
               judul: "Folder",
               sel: (u) =>
@@ -143,6 +157,17 @@ function DialogPengguna({
 }) {
   const { t } = useT();
 
+  // Apakah masuk Windows AD aktif di server, dan apakah akun bisa dicari (akun layanan).
+  const ad = useQuery({ queryKey: ["ad-lookup"], queryFn: () => OpenOrchestratorApi.adLookup() });
+  const adAktif = !!ad.data?.enabled;
+  const labelAd = ad.data?.label ?? "Windows AD";
+
+  const [metode, setMetode] = useState<"LOCAL" | "AD">(awal?.authProvider ?? "LOCAL");
+  const [namaAd, setNamaAd] = useState(awal?.adUsername ?? "");
+  const [hasilCari, setHasilCari] = useState<AdLookup | null>(null);
+  const [tertaut, setTertaut] = useState(!!awal?.adObjectGuid);
+  const keLokal = awal?.authProvider === "AD" && metode === "LOCAL";
+
   const [username, setUsername] = useState(awal?.username ?? "");
   const [namaTampil, setNamaTampil] = useState(awal?.displayName ?? "");
   const [surel, setSurel] = useState(awal?.email ?? "");
@@ -160,6 +185,30 @@ function DialogPengguna({
     onError: (e) => setGalat(errorText(e)),
   });
 
+  const cari = useMutation({
+    mutationFn: () => OpenOrchestratorApi.adLookup(namaAd.trim() || username.trim()),
+    onSuccess: (r) => {
+      setGalat("");
+      setHasilCari(r);
+      // Nama dan surel dari direktori, kalau belum diisi.
+      if (r.found) {
+        if (!namaTampil && r.displayName) setNamaTampil(r.displayName);
+        if (!surel && r.email) setSurel(r.email);
+        if (r.samAccountName) setNamaAd(r.samAccountName);
+      }
+    },
+    onError: (e) => setGalat(errorText(e)),
+  });
+
+  const lepas = useMutation({
+    mutationFn: () => OpenOrchestratorApi.unlinkAd(awal!.username),
+    onSuccess: () => {
+      setTertaut(false);
+      onSelesai();
+    },
+    onError: (e) => setGalat(errorText(e)),
+  });
+
   return (
     <Dialog
       judul={awal ? `${t("Sunting")} — ${awal.username}` : t("Tambah pengguna")}
@@ -173,20 +222,25 @@ function DialogPengguna({
             disabled={simpan.isPending}
             onClick={() => {
               if (!username.trim()) return setGalat(t("Nama pengguna wajib diisi."));
-              if (!awal && sandi.length < 6) {
-                return setGalat(t("Pengguna baru butuh kata sandi minimal 6 karakter."));
+              if (metode === "LOCAL" && (!awal || keLokal) && sandi.length < 6) {
+                return setGalat(keLokal
+                  ? t("Akun yang dikembalikan ke akun lokal butuh kata sandi minimal 6 karakter.")
+                  : t("Pengguna baru butuh kata sandi minimal 6 karakter."));
               }
 
               // Kata sandi kosong TIDAK dikirim. Server memakai syarat "hanya
               // kalau dikirim", jadi menyunting surel tidak akan mengosongkan
               // sandinya — dan yang bersangkutan tidak gagal masuk besok pagi.
+              // Pengguna Windows AD tidak pernah punya sandi di sini.
               simpan.mutate({
                 username: username.trim(),
                 displayName: namaTampil || undefined,
                 email: surel || undefined,
                 role: namaPeran,
                 isActive: aktif,
-                ...(sandi ? { password: sandi } : {}),
+                authProvider: metode,
+                ...(metode === "AD" ? { adUsername: namaAd.trim() || username.trim() } : {}),
+                ...(metode === "LOCAL" && sandi ? { password: sandi } : {}),
               });
             }}
           >
@@ -207,18 +261,109 @@ function DialogPengguna({
         <input type="email" value={surel} onChange={(e) => setSurel(e.target.value)} className={kelasIsian} />
       </Isian>
 
-      <Isian
-        label={t("Kata sandi")}
-        petunjuk={awal ? t("Kosongkan kalau tidak ingin menggantinya.") : t("Minimal 6 karakter.")}
-      >
-        <input
-          type="password"
-          value={sandi}
-          onChange={(e) => setSandi(e.target.value)}
-          autoComplete="new-password"
-          className={kelasIsian}
-        />
-      </Isian>
+      {adAktif || awal?.authProvider === "AD" ? (
+        <Isian label={t("Metode masuk")}>
+          <select value={metode} onChange={(e) => setMetode(e.target.value as "LOCAL" | "AD")} className={kelasIsian}>
+            <option value="LOCAL">{t("Akun lokal")}</option>
+            <option value="AD" disabled={!adAktif && awal?.authProvider !== "AD"}>
+              {labelAd}
+            </option>
+          </select>
+        </Isian>
+      ) : null}
+
+      {metode === "AD" ? (
+        <div className="mb-3 rounded-lg border border-line bg-slate-50 p-3">
+          <Isian
+            label={t("Nama pengguna Windows AD")}
+            petunjuk={ad.data?.lookupAvailable
+              ? t("Cari dulu untuk memastikan akunnya ada; identitasnya (objectGUID) disimpan saat disimpan.")
+              : t("Tanpa akun layanan di server: identitas akun (objectGUID) ditautkan saat orang ini pertama kali masuk dengan akun Windows-nya.")}
+          >
+            <div className="flex gap-2">
+              <input
+                value={namaAd}
+                onChange={(e) => {
+                  setNamaAd(e.target.value);
+                  setHasilCari(null);
+                }}
+                placeholder={username || t("nama.pengguna")}
+                autoComplete="off"
+                className={kelasIsian}
+              />
+              {ad.data?.lookupAvailable ? (
+                <Button onClick={() => cari.mutate()} disabled={cari.isPending || !(namaAd.trim() || username.trim())}>
+                  <Search size={14} className="mr-1.5" />
+                  {t("Cari di AD")}
+                </Button>
+              ) : null}
+            </div>
+          </Isian>
+
+          {hasilCari?.found === false ? (
+            <p className="text-xs text-danger">{t("Akun tidak ditemukan di Windows AD.")}</p>
+          ) : null}
+          {hasilCari?.found ? (
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+              <dt className="text-muted">{t("Nama")}</dt>
+              <dd className="text-ink">{hasilCari.displayName ?? "-"}</dd>
+              <dt className="text-muted">{t("Surel")}</dt>
+              <dd className="text-ink">{hasilCari.email ?? "-"}</dd>
+              <dt className="text-muted">objectGUID</dt>
+              <dd className="break-all font-mono text-ink">{hasilCari.objectGuid}</dd>
+              <dt className="text-muted">DN</dt>
+              <dd className="break-all text-ink">{hasilCari.distinguishedName}</dd>
+              <dt className="text-muted">{t("Status di AD")}</dt>
+              <dd className={hasilCari.accountEnabled ? "text-ok" : "text-danger"}>
+                {hasilCari.accountEnabled ? t("Aktif") : t("Dinonaktifkan")}
+              </dd>
+              {hasilCari.linkedTo && hasilCari.linkedTo !== awal?.username ? (
+                <dd className="col-span-2 text-danger">{t("Sudah dipakai pengguna {0}.", hasilCari.linkedTo)}</dd>
+              ) : null}
+            </dl>
+          ) : null}
+
+          {awal?.authProvider === "AD" ? (
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-2 text-xs">
+              <span className="text-muted">
+                {tertaut
+                  ? t("Tertaut ke objectGUID {0} sejak {1}.", awal.adObjectGuid ?? "", dateTimeOf(awal.adLinkedAt))
+                  : t("Belum tertaut — ditautkan saat masuk berikutnya.")}
+              </span>
+              {tertaut ? (
+                <Button
+                  variant="ghost"
+                  disabled={lepas.isPending}
+                  onClick={() => {
+                    if (window.confirm(t("Lepas tautan akun Windows AD dari {0}? Sesinya berakhir; akun AD dengan nama itu ditautkan lagi saat masuk berikutnya.", awal.username))) {
+                      lepas.mutate();
+                    }
+                  }}
+                >
+                  {t("Lepas tautan AD")}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+
+          <p className="mt-2 text-xs text-muted">{t("Kata sandi Windows tidak pernah disimpan di Open Orchestrator.")}</p>
+        </div>
+      ) : (
+        <Isian
+          label={t("Kata sandi")}
+          petunjuk={keLokal
+            ? t("Wajib: akun ini kembali menjadi akun lokal. Minimal 6 karakter.")
+            : awal ? t("Kosongkan kalau tidak ingin menggantinya.") : t("Minimal 6 karakter.")}
+        >
+          <input
+            type="password"
+            value={sandi}
+            onChange={(e) => setSandi(e.target.value)}
+            autoComplete="new-password"
+            className={kelasIsian}
+          />
+        </Isian>
+      )}
 
       <Isian label={t("Peran")} petunjuk={t("Izin setiap peran diatur di tab Peran.")}>
         <select value={namaPeran} onChange={(e) => setNamaPeran(e.target.value)} className={kelasIsian}>
@@ -239,6 +384,16 @@ function DialogPengguna({
         />
         {t("Aktif")}
       </label>
+
+      {awal ? (
+        <p className="mt-3 text-xs text-muted">
+          {t("Dibuat {0}", dateTimeOf(awal.createdAt))}
+          {awal.createdBy ? ` ${t("oleh {0}", awal.createdBy)}` : ""}
+          {awal.updatedAt ? ` · ${t("diubah {0}", dateTimeOf(awal.updatedAt))}${awal.updatedBy ? ` ${t("oleh {0}", awal.updatedBy)}` : ""}` : ""}
+          {" · "}
+          {t("masuk terakhir {0}", dateTimeOf(awal.lastLoginAt))}
+        </p>
+      ) : null}
 
       <Galat pesan={galat} className="mt-3" />
     </Dialog>

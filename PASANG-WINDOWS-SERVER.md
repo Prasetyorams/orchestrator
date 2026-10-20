@@ -119,6 +119,7 @@ karakter escape). Yang sering diubah:
 | `OPENORCHESTRATOR_TZ` | zona waktu tampilan dan jadwal, bawaan `Asia/Jakarta` |
 | `SERVER_PORT` | port API (bawaan 8080). Ubah juga `API_INTERNAL_URL` di `dasbor.env`. |
 | `DB_URL` | kalau PostgreSQL di server lain |
+| `AD_*` | masuk dengan akun Windows AD (opsional, V19): `AD_AUTH_ENABLED=true`, `AD_LDAP_URL=ldaps://dc01.kantor.local:636`, `AD_BASE_DN`, `AD_UPN_SUFFIX` dan/atau akun layanan hanya-baca `AD_BIND_DN` + `AD_BIND_PASSWORD`, `AD_ALLOWED_GROUPS` (dipisah titik koma), `AD_TRUST_STORE=C:/OpenOrchestrator/data/ad-ca.pem` (sertifikat CA penerbit sertifikat domain controller). Penjelasan tiap kunci di `.env.example`. `AD_BIND_PASSWORD` rahasia — folder `data\` hanya terbaca Administrator dan SYSTEM. Setelan yang salah membuat backend gagal menyala dengan pesan yang menyebut kuncinya (`oo periksa`). |
 
 `data\dasbor.env` (dibaca `node --env-file`): `PORT`, `HOSTNAME`, `API_INTERNAL_URL`.
 Setelah mengubah: `oo hentikan` lalu `oo mulai`. Firewall menyesuaikan port

@@ -97,6 +97,11 @@ public class ApiException extends RuntimeException {
     }
 
     /** Terlalu besar atau terlalu banyak. */
+    /** Layanan yang dibutuhkan (mis. Windows AD) tidak terjangkau saat ini. */
+    public static ApiException unavailable(String message) {
+        return new ApiException(HttpStatus.SERVICE_UNAVAILABLE, message);
+    }
+
     public static ApiException tooLarge(String message) {
         return new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, message);
     }

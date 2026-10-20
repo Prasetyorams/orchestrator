@@ -89,6 +89,8 @@ public class PermissionInterceptor implements HandlerInterceptor {
             // --- sesi dan profil ---
             open(GET, "/api/health"),
             open(POST, "/api/auth/login"),
+            open(POST, "/api/auth/login/ad"),
+            open(GET, "/api/auth/methods"),
             signedIn(GET, "/api/auth/me"),
             signedIn(PUT, "/api/auth/me"),
             signedIn(POST, "/api/auth/password"),
@@ -269,6 +271,8 @@ public class PermissionInterceptor implements HandlerInterceptor {
             requires(GET, "/api/tenants", "settings.read"),
             requires(GET, "/api/licensing", "settings.read"),
             requires(GET, "/api/settings", "settings.read"),
+            requires(GET, "/api/users/ad-lookup", "users.create", "users.update"),
+            requires(POST, "/api/users/{username}/ad-unlink", "users.update"),
             requires(GET, "/api/settings/session-timeout", "settings.read"),
             requires(PUT, "/api/settings/session-timeout", "settings.update"),
             requires(GET, "/api/audit", "audit.read"),

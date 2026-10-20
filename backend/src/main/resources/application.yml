@@ -141,6 +141,32 @@ openorchestrator:
     idle-timeout-max-minutes: 480
     idle-timeout-required: false
 
+  # Masuk dengan akun Windows Active Directory (V19), lewat LDAPS. Mati
+  # bawaan; kalau dinyalakan, setelan yang salah membuat backend gagal menyala
+  # dengan pesan yang menyebut variabelnya. Tidak ada domain yang ditanam di
+  # kode — semua nilai di bawah hanya dari lingkungan. Pengguna AD tetap harus
+  # didaftarkan admin di Tenant › Pengguna; tidak ada pendaftaran otomatis.
+  ad:
+    enabled: ${AD_AUTH_ENABLED:false}
+    label: ${AD_LABEL:Windows AD}
+    # Hanya ldaps:// (port 636); beberapa domain controller dipisah spasi.
+    url: ${AD_LDAP_URL:}
+    base-dn: ${AD_BASE_DN:}
+    user-search-base: ${AD_USER_SEARCH_BASE:}
+    # Kosong = (&(objectCategory=person)(objectClass=user)(sAMAccountName={0})).
+    user-search-filter: ${AD_USER_SEARCH_FILTER:}
+    # Masuk tanpa akun layanan: bind sebagai nama@akhiran ini.
+    upn-suffix: ${AD_UPN_SUFFIX:}
+    # Akun layanan hanya-baca untuk mencari akun saat mendaftarkan pengguna (opsional).
+    bind-dn: ${AD_BIND_DN:}
+    bind-password: ${AD_BIND_PASSWORD:}
+    # DN grup yang boleh masuk, dipisah titik koma; kosong = tanpa syarat grup.
+    allowed-groups: ${AD_ALLOWED_GROUPS:}
+    # Berkas PEM sertifikat CA penerbit sertifikat domain controller; kosong = trust store Java.
+    trust-store: ${AD_TRUST_STORE:}
+    connect-timeout: ${AD_CONNECT_TIMEOUT_MS:5000}
+    read-timeout: ${AD_READ_TIMEOUT_MS:10000}
+
 management:
   endpoints:
     web:

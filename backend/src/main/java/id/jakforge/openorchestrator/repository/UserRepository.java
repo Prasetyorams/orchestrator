@@ -29,10 +29,10 @@ public class UserRepository {
     // Masuk
     // -----------------------------------------------------------------
 
-    /** Pengguna beserta hash kata sandinya, untuk memeriksa login. */
+    /** Pengguna beserta hash kata sandinya, untuk memeriksa login. authProvider AD = tidak boleh masuk lokal. */
     public Optional<Map<String, Object>> findForLogin(String username) {
         return database.queryRow("""
-                SELECT u.id, u.username, u.password_hash, u.display_name, u.role, u.is_active,
+                SELECT u.id, u.username, u.password_hash, u.display_name, u.role, u.is_active, u.auth_provider,
                        t.id AS tenant_id, t.name AS tenant_name
                   FROM users u
                   JOIN tenants t ON t.id = u.tenant_id
@@ -55,6 +55,101 @@ public class UserRepository {
     public void updatePasswordHashByUsername(UUID tenantId, String username, String passwordHash) {
         database.update("UPDATE users SET password_hash = ? WHERE tenant_id = ? AND username = ?",
                 passwordHash, tenantId, username);
+    }
+
+    // -----------------------------------------------------------------
+    // Akun Windows AD (V19)
+    // -----------------------------------------------------------------
+
+    private static final String AD_LOGIN_COLUMNS = """
+            SELECT u.id, u.username, u.display_name, u.role, u.is_active, u.ad_username, u.ad_object_guid,
+                   t.id AS tenant_id, t.name AS tenant_name
+              FROM users u
+              JOIN tenants t ON t.id = u.tenant_id
+            """;
+
+    /** Pengguna AD yang identitas STABIL-nya (objectGUID) ini — paling banyak satu (uq_users_ad_guid). */
+    public Optional<Map<String, Object>> findAdUserByGuid(UUID objectGuid) {
+        return database.queryRows(AD_LOGIN_COLUMNS + " WHERE u.auth_provider = 'AD' AND u.ad_object_guid = ?", objectGuid)
+                .stream().findFirst();
+    }
+
+    /** Pengguna AD yang didaftarkan dengan nama AD ini — paling banyak satu (uq_users_ad_username). */
+    public Optional<Map<String, Object>> findAdUserByAdUsername(String adUsername) {
+        return database.queryRows(AD_LOGIN_COLUMNS + " WHERE u.auth_provider = 'AD' AND lower(u.ad_username) = lower(?)",
+                adUsername).stream().findFirst();
+    }
+
+    /**
+     * Tautkan identitas AD — HANYA kalau belum ada tautan (ad_object_guid
+     * null). Dipakai saat masuk pertama untuk pengguna yang didaftarkan tanpa
+     * akun layanan; dua masuk bersamaan tidak bisa menautkan dua identitas.
+     */
+    public boolean linkAdIdentityIfUnlinked(UUID userId, UUID objectGuid, String directory, String adUsername) {
+        return database.update("""
+                UPDATE users SET ad_object_guid = ?, ad_directory = ?, ad_username = ?, ad_linked_at = now()
+                 WHERE id = ? AND auth_provider = 'AD' AND ad_object_guid IS NULL
+                """, objectGuid, directory, adUsername, userId) == 1;
+    }
+
+    /** Nama AD diganti di direktori, identitasnya (GUID) sama. */
+    public void updateAdUsername(UUID userId, String adUsername) {
+        database.update("UPDATE users SET ad_username = ? WHERE id = ? AND auth_provider = 'AD'", adUsername, userId);
+    }
+
+    /** Metode masuk dan identitas AD seorang pengguna: authProvider, adUsername, adObjectGuid, isActive. */
+    public Optional<Map<String, Object>> findAuthIdentity(UUID tenantId, String username) {
+        return database.queryRow("""
+                SELECT auth_provider, ad_username, ad_object_guid, is_active FROM users WHERE tenant_id = ? AND username = ?
+                """, tenantId, username);
+    }
+
+    /** Pengguna (internal) yang sudah memakai identitas AD ini, selain {@code exceptUsername}. */
+    public Optional<String> findUsernameUsingAdIdentity(String adUsername, UUID objectGuid, UUID tenantId,
+                                                        String exceptUsername) {
+        return database.queryScalar("""
+                SELECT username FROM users
+                 WHERE auth_provider = 'AD'
+                   AND (lower(ad_username) = lower(?) OR (CAST(? AS uuid) IS NOT NULL AND ad_object_guid = ?))
+                   AND NOT (tenant_id = ? AND username = ?)
+                 LIMIT 1
+                """, adUsername, objectGuid, objectGuid, tenantId, exceptUsername == null ? "" : exceptUsername)
+                .map(String::valueOf);
+    }
+
+    /**
+     * Jadikan pengguna akun AD: sandi lokal DIHAPUS (tidak ada lagi masuk
+     * lokal), identitas AD diisi. {@code objectGuid} null = ditautkan saat
+     * masuk pertama.
+     */
+    public void setAdIdentity(UUID tenantId, String username, String adUsername, UUID objectGuid, String directory,
+                              String updatedBy) {
+        database.update("""
+                UPDATE users
+                   SET auth_provider = 'AD', password_hash = NULL, ad_username = ?, ad_object_guid = ?,
+                       ad_directory = ?, ad_linked_at = CASE WHEN CAST(? AS uuid) IS NULL THEN NULL ELSE now() END,
+                       updated_at = now(), updated_by = ?
+                 WHERE tenant_id = ? AND username = ?
+                """, adUsername, objectGuid, objectGuid == null ? null : directory, objectGuid, updatedBy, tenantId, username);
+    }
+
+    /** Kembalikan ke akun lokal dengan sandi baru; identitas AD dilepas. */
+    public void setLocalIdentity(UUID tenantId, String username, String passwordHash, String updatedBy) {
+        database.update("""
+                UPDATE users
+                   SET auth_provider = 'LOCAL', password_hash = ?, ad_username = NULL, ad_object_guid = NULL,
+                       ad_directory = NULL, ad_linked_at = NULL, updated_at = now(), updated_by = ?
+                 WHERE tenant_id = ? AND username = ?
+                """, passwordHash, updatedBy, tenantId, username);
+    }
+
+    /** Lepas tautan AD: nama AD tetap, GUID dikosongkan — ditautkan lagi saat masuk berikutnya atau saat didaftarkan ulang. */
+    public int unlinkAdIdentity(UUID tenantId, String username, String updatedBy) {
+        return database.update("""
+                UPDATE users
+                   SET ad_object_guid = NULL, ad_directory = NULL, ad_linked_at = NULL, updated_at = now(), updated_by = ?
+                 WHERE tenant_id = ? AND username = ? AND auth_provider = 'AD'
+                """, updatedBy, tenantId, username);
     }
 
     /** Penyewa pemilik nama pengguna itu — untuk mencatat masuk, saat belum ada token. */
@@ -105,6 +200,7 @@ public class UserRepository {
     public List<Map<String, Object>> findAll(UUID tenantId) {
         return database.queryRows("""
                 SELECT id, username, display_name, email, role, is_active, created_at, last_login_at,
+                       auth_provider, ad_username, ad_object_guid, ad_linked_at, created_by, updated_at, updated_by,
                        (SELECT array_agg(f.name ORDER BY lower(f.name))
                           FROM folder_users fu JOIN folders f ON f.id = fu.folder_id
                          WHERE fu.user_id = users.id) AS folders
@@ -127,23 +223,48 @@ public class UserRepository {
     /** COALESCE: medan yang tidak dikirim tidak menghapus nilai yang sudah ada. */
     public void update(UUID tenantId, String username, String displayName, String email,
                        String role, boolean active) {
+        update(tenantId, username, displayName, email, role, active, null);
+    }
+
+    public void update(UUID tenantId, String username, String displayName, String email,
+                       String role, boolean active, String updatedBy) {
         database.update("""
                 UPDATE users
                    SET display_name = COALESCE(?, display_name),
                        email = COALESCE(?, email),
                        role = COALESCE(?, role),
-                       is_active = ?
+                       is_active = ?,
+                       updated_at = now(),
+                       updated_by = COALESCE(?, updated_by)
                  WHERE tenant_id = ? AND username = ?
-                """, displayName, email, role, active, tenantId, username);
+                """, displayName, email, role, active, updatedBy, tenantId, username);
     }
 
     public void insert(UUID tenantId, String username, String passwordHash, String displayName,
                        String email, String role, boolean active) {
+        insert(tenantId, username, passwordHash, displayName, email, role, active, null);
+    }
+
+    public void insert(UUID tenantId, String username, String passwordHash, String displayName,
+                       String email, String role, boolean active, String createdBy) {
         database.update("""
                 INSERT INTO users (id, tenant_id, username, password_hash, display_name,
-                                   email, role, is_active, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, now())
-                """, UUID.randomUUID(), tenantId, username, passwordHash, displayName, email, role, active);
+                                   email, role, is_active, created_at, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, now(), ?)
+                """, UUID.randomUUID(), tenantId, username, passwordHash, displayName, email, role, active, createdBy);
+    }
+
+    /** Pengguna AD baru (V19): tanpa sandi lokal. {@code objectGuid} null = ditautkan saat masuk pertama. */
+    public void insertAd(UUID tenantId, String username, String adUsername, UUID objectGuid, String directory,
+                         String displayName, String email, String role, boolean active, String createdBy) {
+        database.update("""
+                INSERT INTO users (id, tenant_id, username, password_hash, display_name, email, role, is_active,
+                                   created_at, created_by, auth_provider, ad_username, ad_object_guid, ad_directory,
+                                   ad_linked_at)
+                VALUES (?, ?, ?, NULL, ?, ?, ?, ?, now(), ?, 'AD', ?, ?, ?,
+                        CASE WHEN CAST(? AS uuid) IS NULL THEN NULL ELSE now() END)
+                """, UUID.randomUUID(), tenantId, username, displayName, email, role, active, createdBy, adUsername,
+                objectGuid, objectGuid == null ? null : directory, objectGuid);
     }
 
     public int deleteByUsername(UUID tenantId, String username) {

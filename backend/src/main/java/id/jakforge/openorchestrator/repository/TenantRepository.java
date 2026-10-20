@@ -30,6 +30,11 @@ public class TenantRepository {
         return database.queryScalar("SELECT id FROM tenants WHERE name = ?", name).map(Uuids::fromColumn);
     }
 
+    /** Penyewa pertama — untuk jejak audit masuk dari orang yang belum terdaftar di penyewa mana pun. */
+    public Optional<UUID> findFirstId() {
+        return database.queryScalar("SELECT id FROM tenants ORDER BY created_at, name LIMIT 1").map(Uuids::fromColumn);
+    }
+
     public Optional<String> findName(UUID tenantId) {
         return database.queryScalar("SELECT name FROM tenants WHERE id = ?", tenantId).map(String::valueOf);
     }

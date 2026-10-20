@@ -3,11 +3,14 @@ package id.jakforge.openorchestrator.controller;
 import id.jakforge.openorchestrator.dto.request.ChangePasswordRequest;
 import id.jakforge.openorchestrator.dto.request.LoginRequest;
 import id.jakforge.openorchestrator.dto.request.UpdateProfileRequest;
+import id.jakforge.openorchestrator.dto.response.AuthMethodsResponse;
 import id.jakforge.openorchestrator.dto.response.LoginResponse;
 import id.jakforge.openorchestrator.dto.response.OkResponse;
 import id.jakforge.openorchestrator.dto.response.SessionStateResponse;
 import id.jakforge.openorchestrator.dto.response.StatusResponse;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
+import id.jakforge.openorchestrator.security.ad.ActiveDirectory;
+import id.jakforge.openorchestrator.service.AdLoginService;
 import id.jakforge.openorchestrator.service.AuthService;
 import id.jakforge.openorchestrator.service.DashboardSessionService;
 import jakarta.validation.Valid;
@@ -32,6 +35,8 @@ public class AuthController {
 
     private final AuthService authService;
     private final DashboardSessionService dashboardSessionService;
+    private final AdLoginService adLoginService;
+    private final ActiveDirectory activeDirectory;
 
     /**
      * Dibaca longgar: Studio, JakRunner, dan activity Orchestrator masuk lewat sini.
@@ -41,6 +46,22 @@ public class AuthController {
     public LoginResponse login(@RequestBody(required = false) Map<String, Object> body,
                                @RequestHeader(value = HttpHeaders.USER_AGENT, required = false) String userAgent) {
         return authService.login(LoginRequest.fromBody(body), userAgent);
+    }
+
+    /**
+     * Masuk dengan akun Windows AD (V19): badan yang sama dengan /login
+     * (username, password, client). Hanya pengguna yang didaftarkan admin.
+     */
+    @PostMapping("/login/ad")
+    public LoginResponse loginWithActiveDirectory(@RequestBody(required = false) Map<String, Object> body,
+                                                  @RequestHeader(value = HttpHeaders.USER_AGENT, required = false) String userAgent) {
+        return adLoginService.login(LoginRequest.fromBody(body), userAgent);
+    }
+
+    /** Cara masuk yang tersedia, untuk layar masuk (tanpa token). */
+    @GetMapping("/methods")
+    public AuthMethodsResponse methods() {
+        return new AuthMethodsResponse(true, new AuthMethodsResponse.Ad(activeDirectory.enabled(), activeDirectory.label()));
     }
 
     /** Keluar: sesi dasbor dicabut di server, bukan hanya tokennya dibuang dari peramban (V18). */

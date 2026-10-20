@@ -719,6 +719,36 @@ export type User = {
   lastLoginAt: string | null;
   /** Nama folder tempat pengguna ini ditugaskan. */
   folders?: string[] | null;
+  /** V19: LOCAL (akun lokal) atau AD (Windows Active Directory). */
+  authProvider?: "LOCAL" | "AD";
+  /** Nama Windows AD (sAMAccountName). */
+  adUsername?: string | null;
+  /** objectGUID akun AD; null = belum tertaut (ditautkan saat masuk pertama). */
+  adObjectGuid?: string | null;
+  adLinkedAt?: string | null;
+  createdBy?: string | null;
+  updatedAt?: string | null;
+  updatedBy?: string | null;
+};
+
+/** GET /api/auth/methods — cara masuk yang tersedia (V19). */
+export type AuthMethods = { local: boolean; ad: { enabled: boolean; label: string } };
+
+/** GET /api/users/ad-lookup (V19). */
+export type AdLookup = {
+  enabled: boolean;
+  /** Ada akun layanan untuk mencari akun; tanpa itu identitas ditautkan saat masuk pertama. */
+  lookupAvailable: boolean;
+  label: string;
+  found: boolean | null;
+  samAccountName: string | null;
+  displayName: string | null;
+  email: string | null;
+  objectGuid: string | null;
+  distinguishedName: string | null;
+  accountEnabled: boolean | null;
+  /** Pengguna Open Orchestrator yang sudah memakai akun AD ini. */
+  linkedTo: string | null;
 };
 
 export type Role = {
@@ -971,6 +1001,12 @@ export const OpenOrchestratorApi = {
   /** client=dashboard: tokennya terikat sesi dasbor dengan batas waktu menganggur (V18). */
   login: (username: string, password: string) =>
     post<LoginResult>("/api/auth/login", { username, password, client: "dashboard" }),
+
+  /** Masuk dengan akun Windows AD (V19): hanya pengguna yang didaftarkan admin. */
+  loginAd: (username: string, password: string) =>
+    post<LoginResult>("/api/auth/login/ad", { username, password, client: "dashboard" }),
+  /** Cara masuk yang tersedia — tanpa token. */
+  authMethods: () => get<AuthMethods>("/api/auth/methods"),
 
   /** Keluar: sesi dasbor dicabut di server (V18). */
   logout: () => post<{ ok: boolean }>("/api/auth/logout"),
@@ -1284,7 +1320,13 @@ export const OpenOrchestratorApi = {
     email?: string;
     role?: string;
     isActive?: boolean;
+    /** V19: LOCAL atau AD. */
+    authProvider?: "LOCAL" | "AD";
+    adUsername?: string;
   }) => post<{ ok: boolean; created: boolean }>("/api/users", body),
+  /** Tanpa username: apakah AD dan pencariannya tersedia. */
+  adLookup: (username?: string) => get<AdLookup>("/api/users/ad-lookup", username ? { username } : undefined),
+  unlinkAd: (username: string) => post<{ ok: boolean }>(`/api/users/${seg(username)}/ad-unlink`),
   deleteUser: (username: string) => del<{ ok: boolean }>(`/api/users/${seg(username)}`),
 
   roles: () => get<Role[]>("/api/roles"),

@@ -9,6 +9,9 @@ frontend/out/
 # disandikan dengannya ikut terbuka bagi siapa pun yang bisa membaca repo.
 signing.key
 
+# Sertifikat CA Windows AD milik satu instalasi (AD_TRUST_STORE, V19).
+/ad/
+
 # Setelan docker compose milik SATU mesin: jalur data dan rahasianya
 # (JWT_SECRET, DB_PASSWORD). Yang masuk git adalah templatnya,
 # .env.example.

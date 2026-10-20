@@ -1242,6 +1242,65 @@ perubahan wajib di sisi robot/Studio.** **Sudah di-deploy** ke produksi (20 Okt 
   orang itu (sesi yang dipakai mengganti dibiarkan); token Studio/robot tetap tidak dicabut, sama
   seperti sebelumnya.
 
+## Masuk dengan Windows AD (20 Okt 2026, V19)
+
+Fitur baru Orchestrator: admin bisa mendaftarkan pengguna sebagai **akun Windows AD**. Orang itu
+masuk ke dasbor dengan nama pengguna dan kata sandi Windows kantornya; Orchestrator memeriksanya ke
+domain controller lewat LDAPS. Sandi Windows tidak pernah disimpan. Hanya pengguna yang sudah
+didaftarkan admin yang bisa masuk; akun AD lain ditolak walau sandinya benar. Peran dan izin tetap
+diatur di Orchestrator. Fitur ini **mati secara bawaan** (`AD_AUTH_ENABLED=false`) dan **belum
+di-deploy** (migrasi `V19__akun_windows_ad.sql`).
+
+**Tidak ada perubahan wajib di sisi robot/Studio** selama akun yang dipakai Studio, JakRunner,
+Robot Agent v1, dan activity `Custom.Orchestrator` tetap **akun lokal**. Robot Agent v2 (machine key,
+`/api/agent/*`) dan executor token tidak terkena.
+
+- **Akun robot harus tetap akun lokal.** `POST /api/auth/login` dengan akun AD dijawab `401`
+  "Nama pengguna atau kata sandi salah." — sama persis dengan sandi salah, supaya tidak membocorkan
+  jenis akunnya. Jadi kredensial robot di `JakRunner/Core/ForgeHubClient.cs:951` dan
+  `Custom.Orchestrator/Runtime/HubConnection.cs:290` jangan diisi akun AD.
+- **Endpoint baru `POST /api/auth/login/ad`** (tanpa token). Isi dan jawaban sama dengan
+  `/api/auth/login`: `{username, password, client?}` → `{token, expiresInMinutes, userId, username, …}`.
+  - `username` boleh `nama`, `DOMAIN\nama`, atau `nama@domain`. Yang dikembalikan adalah nama
+    pengguna **di Orchestrator**, yang bisa berbeda dari nama Windows-nya.
+  - Tanpa `client` → token biasa seperti `/api/auth/login`. **Jangan kirim `client: "dashboard"`**
+    dari Studio/Open Assistant (lihat V18).
+  - Kode galat (`errorCode`):
+
+    | HTTP | errorCode | Artinya |
+    |---|---|---|
+    | 400 | `AD_DISABLED` | masuk Windows AD tidak diaktifkan di server ini |
+    | 401 | `AD_INVALID_CREDENTIALS` | sandi salah, akun Windows terkunci/nonaktif/kedaluwarsa — satu pesan untuk semuanya |
+    | 403 | `AD_NOT_REGISTERED` | sandi benar, tetapi belum didaftarkan admin di Orchestrator |
+    | 403 | `AD_USER_INACTIVE` | pengguna Orchestrator-nya dinonaktifkan |
+    | 403 | `AD_IDENTITY_MISMATCH` | akun Windows dengan nama itu sudah diganti (objectGUID lain); admin perlu melepas tautan |
+    | 403 | `AD_GROUP_NOT_ALLOWED` | bukan anggota grup AD yang diizinkan |
+    | 503 | `AD_UNAVAILABLE` | domain controller tidak terjangkau / TLS ditolak — coba lagi nanti |
+
+    Pesannya (`error`) aman ditampilkan apa adanya ke pengguna.
+- **`GET /api/auth/methods`** (tanpa token): `{"local": true, "ad": {"enabled": true, "label": "Windows AD"}}`.
+  Pakai ini untuk memutuskan apakah pilihan "Masuk dengan Windows AD" ditampilkan. Tidak menyebut
+  nama domain atau server.
+- **Open Assistant yang "masuk lewat dasbor" (V11) sudah bisa dipakai pengguna AD tanpa perubahan**
+  (diuji): halaman `/assistant/connect` mengarahkan ke layar masuk dasbor, orangnya memilih
+  "Masuk dengan Windows AD", menyetujui, dan Open Assistant menerima token sesi Assistant (`asid`)
+  atas nama pengguna AD itu. Ini jalur yang disarankan untuk pengguna AD.
+- **Yang disarankan (tidak wajib):** pengguna AD belum bisa memakai masuk-dengan-sandi di
+  - Studio: `OpenRPA/ForgeHub/StudioForgeHubClient.cs:190`;
+  - Open Assistant v1: `JakRunner/Views/RunnerWindow.xaml.cs:1900`.
+
+  Kalau ingin mendukungnya, tanyakan `GET /api/auth/methods`, tampilkan pilihan "Windows AD", lalu
+  kirim nama dan sandi yang sama ke `/api/auth/login/ad` (bentuk jawabannya sama). Sandi tetap
+  disimpan lewat DPAPI seperti sekarang, tidak pernah polos. Tangani `503 AD_UNAVAILABLE` sebagai
+  galat sementara (coba lagi), bukan sandi salah.
+- **`GET /api/users`** punya kolom baru: `authProvider` (`LOCAL`/`AD`), `adUsername`,
+  `adObjectGuid`, `adLinkedAt`, `createdBy`, `updatedAt`, `updatedBy`. **`POST /api/users`**
+  menerima `authProvider` dan `adUsername`; tanpa `authProvider` tetap membuat akun lokal seperti
+  dulu. Akun AD tidak boleh diberi `password` (`400`).
+- `POST /api/auth/password` untuk akun AD dijawab `400`: sandinya diganti di Windows.
+- Endpoint admin baru (izin `users.create`/`users.update`): `GET /api/users/ad-lookup?username=`
+  (cari akun di AD) dan `POST /api/users/{username}/ad-unlink`. Tidak perlu dipakai dari sisi robot.
+
 ---
 
 # Bagian 5 — Open Assistant: masuk lewat dasbor (V11)

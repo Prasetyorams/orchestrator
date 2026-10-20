@@ -143,7 +143,8 @@ class PermissionInterceptorTest {
 
         // Token Open Assistant ditukar dan diperbarui tanpa token: buktinya kode
         // sekali pakai + code_verifier, atau refresh token itu sendiri.
-        assertEquals(List.of("GET /api/health", "POST /api/auth/login",
+        // Masuk Windows AD (V19) dan daftar cara masuk untuk layar masuk juga terbuka.
+        assertEquals(List.of("GET /api/health", "POST /api/auth/login", "POST /api/auth/login/ad", "GET /api/auth/methods",
                 "POST /api/auth/assistant/token", "POST /api/auth/assistant/refresh", "POST /api/auth/assistant/logout",
                 "POST /api/agent/login"), publicEndpoints);
     }

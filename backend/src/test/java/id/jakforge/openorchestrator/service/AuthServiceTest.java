@@ -206,6 +206,24 @@ class AuthServiceTest {
     }
 
     @Test
+    @DisplayName("V19: akun Windows AD tidak bisa masuk lokal (jawabannya sama dengan sandi salah) atau mengganti sandi di sini")
+    void adAccountsHaveNoLocalPassword() {
+        users.storeLoginRow(true, null);
+        users.loginRow.put("authProvider", "AD");
+        ApiException local = assertThrows(ApiException.class, () -> authService.login(new LoginRequest("OO_Admin", "apa-saja")));
+        assertEquals(HttpStatus.UNAUTHORIZED, local.status());
+        assertEquals("Nama pengguna atau kata sandi salah.", local.getMessage());
+        assertTrue(!users.loginRecorded);
+
+        users.provider = "AD";
+        ApiException change = assertThrows(ApiException.class,
+                () -> authService.changePassword(principal, new ChangePasswordRequest("apa-saja", "sandi-baru-123")));
+        assertEquals(HttpStatus.BAD_REQUEST, change.status());
+        assertTrue(change.getMessage().contains("diganti di Windows"));
+        assertEquals(null, users.newHash);
+    }
+
+    @Test
     @DisplayName("V18: masuk dengan client=dashboard → token terikat sesi dasbor; tanpa itu token biasa seperti dulu")
     void dashboardLoginCreatesSession() {
         users.storeLoginRow(true, Passwords.hash(ADMIN_PASSWORD));
@@ -254,6 +272,7 @@ class AuthServiceTest {
         boolean loginRecorded;
         String storedHash;
         String newHash;
+        String provider = "LOCAL";
         String[] lastProfile;
         int changedRows = 1;
 
@@ -297,6 +316,11 @@ class AuthServiceTest {
         @Override
         public Optional<String> findPasswordHash(UUID userId) {
             return Optional.ofNullable(storedHash);
+        }
+
+        @Override
+        public Optional<Map<String, Object>> findAuthIdentity(UUID tenantId, String username) {
+            return Optional.of(Map.of("authProvider", provider));
         }
 
         @Override

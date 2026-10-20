@@ -1,6 +1,7 @@
 package id.jakforge.openorchestrator.controller;
 
 import id.jakforge.openorchestrator.dto.request.SaveUserRequest;
+import id.jakforge.openorchestrator.dto.response.AdLookupResponse;
 import id.jakforge.openorchestrator.dto.response.OkResponse;
 import id.jakforge.openorchestrator.dto.response.SaveResponse;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -37,6 +39,21 @@ public class UserController {
     public SaveResponse save(@AuthenticationPrincipal OpenOrchestratorPrincipal principal,
                              @Valid @RequestBody SaveUserRequest request) {
         return userService.save(principal, request);
+    }
+
+    /** Cari akun Windows AD untuk didaftarkan (V19); tanpa username: apakah AD dan pencariannya tersedia. */
+    @GetMapping("/ad-lookup")
+    public AdLookupResponse lookUpAd(@AuthenticationPrincipal OpenOrchestratorPrincipal principal,
+                                     @RequestParam(required = false) String username) {
+        return userService.lookUpAd(principal, username);
+    }
+
+    /** Lepas tautan identitas Windows AD (V19). */
+    @PostMapping("/{username}/ad-unlink")
+    public OkResponse unlinkAd(@AuthenticationPrincipal OpenOrchestratorPrincipal principal,
+                               @PathVariable String username) {
+        userService.unlinkAd(principal, username);
+        return OkResponse.success();
     }
 
     @DeleteMapping("/{username}")

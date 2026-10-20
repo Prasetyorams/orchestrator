@@ -29,6 +29,9 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class AuthService {
 
+    /** users.auth_provider akun Windows AD (V19). */
+    static final String AUTH_PROVIDER_AD = "AD";
+
     /**
      * Bentuk surel yang cukup untuk menangkap salah ketik, bukan validasi RFC.
      *
@@ -55,6 +58,7 @@ public class AuthService {
     /**
      * @param userAgent peramban yang masuk, dicatat di sesi dasbor (V18); null untuk klien lain
      */
+    @Transactional
     public LoginResponse login(LoginRequest request, String userAgent) {
         if (request.username() == null) {
             throw ApiException.badRequest("Nama pengguna wajib diisi.");
@@ -69,6 +73,10 @@ public class AuthService {
         Map<String, Object> user = userRepository.findForLogin(request.username()).orElseThrow(() -> rejected);
 
         if (!Boolean.TRUE.equals(user.get("isActive"))) throw rejected;
+
+        // Akun Windows AD (V19) tidak punya sandi lokal dan hanya masuk lewat
+        // POST /api/auth/login/ad. Jawabannya sama dengan sandi salah.
+        if (AUTH_PROVIDER_AD.equals(user.get("authProvider"))) throw rejected;
 
         String storedHash = (String) user.get("passwordHash");
 
@@ -87,22 +95,38 @@ public class AuthService {
             userRepository.updatePasswordHash(userId, Passwords.hash(request.password()));
         }
 
+        return issue(user, request.client(), userAgent);
+    }
+
+    /**
+     * Token untuk pengguna yang SUDAH lolos semua pemeriksaan masuk — lokal
+     * maupun Windows AD (V19), lewat jalan yang sama: sesi dasbor dan batas
+     * waktu menganggurnya (V18) berlaku untuk keduanya.
+     *
+     * @param user baris pengguna: id, username, displayName, role, tenantId, tenantName
+     */
+    LoginResponse issue(Map<String, Object> user, String client, String userAgent) {
+        UUID userId = Uuids.parseOrNull((String) user.get("id"));
+        UUID tenantId = Uuids.parseOrNull((String) user.get("tenantId"));
+        String username = (String) user.get("username");
+        String role = (String) user.get("role");
+
         // Dasbor (V18): tokennya terikat ke sesi dasbor, yang menegakkan batas
         // waktu menganggur. Klien lain mendapat token biasa, persis seperti dulu.
         String token;
-        if (DashboardSessionService.DASHBOARD_CLIENT.equalsIgnoreCase(request.client())) {
+        if (DashboardSessionService.DASHBOARD_CLIENT.equalsIgnoreCase(client)) {
             Instant expiresAt = Instant.now().plus(Duration.ofMinutes(jwtService.expirationMinutes()));
-            UUID sessionId = dashboardSessionService.start(tenantId, userId, request.username(), expiresAt, userAgent);
-            token = jwtService.issueDashboardToken(userId, tenantId, request.username(), role, sessionId).token();
+            UUID sessionId = dashboardSessionService.start(tenantId, userId, username, expiresAt, userAgent);
+            token = jwtService.issueDashboardToken(userId, tenantId, username, role, sessionId).token();
         } else {
-            token = jwtService.issueToken(userId, tenantId, request.username(), role);
+            token = jwtService.issueToken(userId, tenantId, username, role);
         }
 
         return new LoginResponse(
                 token,
                 jwtService.expirationMinutes(),
                 userId.toString(),
-                (String) user.get("username"),
+                username,
                 (String) user.get("displayName"),
                 role,
                 tenantId.toString(),
@@ -159,6 +183,12 @@ public class AuthService {
         // tokennya begitu menerima 401 — jadi 401 di sini membuat orang yang
         // salah ketik kata sandi lamanya langsung terlempar ke layar masuk.
         // Tokennya sah; yang salah isiannya. OpenOrchestrator .NET juga menjawab 400.
+        boolean adAccount = userRepository.findAuthIdentity(principal.tenantId(), principal.username())
+                .map(identity -> AUTH_PROVIDER_AD.equals(identity.get("authProvider"))).orElse(false);
+        if (adAccount) {
+            throw ApiException.badRequest("Kata sandi akun Windows AD diganti di Windows, bukan di Open Orchestrator.");
+        }
+
         String storedHash = userRepository.findPasswordHash(principal.userId()).orElse(null);
 
         if (!Passwords.verify(request.currentPassword(), storedHash)) {

@@ -36,6 +36,20 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       OPENORCHESTRATOR_SIGNING_KEY: /data/signing.key
       OPENORCHESTRATOR_TZ: ${OPENORCHESTRATOR_TZ:-Asia/Jakarta}
+      # Masuk Windows AD (V19) — opsional, mati bawaan. Lihat .env.example.
+      AD_AUTH_ENABLED: ${AD_AUTH_ENABLED:-false}
+      AD_LABEL: ${AD_LABEL:-Windows AD}
+      AD_LDAP_URL: ${AD_LDAP_URL:-}
+      AD_BASE_DN: ${AD_BASE_DN:-}
+      AD_USER_SEARCH_BASE: ${AD_USER_SEARCH_BASE:-}
+      AD_USER_SEARCH_FILTER: ${AD_USER_SEARCH_FILTER:-}
+      AD_UPN_SUFFIX: ${AD_UPN_SUFFIX:-}
+      AD_BIND_DN: ${AD_BIND_DN:-}
+      AD_BIND_PASSWORD: ${AD_BIND_PASSWORD:-}
+      AD_ALLOWED_GROUPS: ${AD_ALLOWED_GROUPS:-}
+      AD_TRUST_STORE: ${AD_TRUST_STORE:-}
+      AD_CONNECT_TIMEOUT_MS: ${AD_CONNECT_TIMEOUT_MS:-5000}
+      AD_READ_TIMEOUT_MS: ${AD_READ_TIMEOUT_MS:-10000}
     volumes:
       # signing.key dari folder data mesin ini, dipasang apa adanya dan hanya-baca.
       #
@@ -45,6 +59,10 @@ services:
       # sebagai kosong — dan yang terlihat cuma "login gagal" di aplikasi yang
       # diotomasi robot, jauh dari sini.
       - ${OPENORCHESTRATOR_DATA:-${LOCALAPPDATA}/JakForge/ForgeHub}/signing.key:/data/signing.key:ro
+      # Sertifikat CA Windows AD (V19): taruh ca.pem di folder ad di folder data, lalu
+      # AD_TRUST_STORE=/data/ad/ca.pem. FOLDER yang dipasang, bukan berkasnya: folder
+      # yang belum ada dibuat kosong oleh Docker dan tidak mengganggu apa pun.
+      - ${OPENORCHESTRATOR_DATA:-${LOCALAPPDATA}/JakForge/ForgeHub}/ad:/data/ad:ro
     ports:
       - "8080:8080"
     healthcheck:
