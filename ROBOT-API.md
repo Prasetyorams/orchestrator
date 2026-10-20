@@ -1210,7 +1210,7 @@ WF4; klaim job agent v2 mendapat paket dan sidik yang benar; unggah lewat proxy 
 
 ### Jawaban `CATATAN-PREFIKS-OPENSTUDIO.md` (20 Okt 2026)
 
-Kedua usulan diterapkan, belum di-deploy:
+Kedua usulan diterapkan dan **sudah di-deploy** (20 Okt 2026):
 
 1. Pustaka bernama `OpenStudio` dan `OpenStudio.*` kini dikenal sebagai bawaan; prefiks lama
    (`OpenRPA`, `Custom.`, `JakForge.`) tetap dikenal untuk paket dari Studio sebelum ganti nama.
