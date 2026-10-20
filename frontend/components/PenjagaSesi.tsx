@@ -17,10 +17,14 @@ import { keluar } from "@/lib/sesi";
 import { Button, Galat } from "@/components/ui/primitives";
 import { Dialog } from "@/components/Dialog";
 
-/** Event yang menandakan ORANG sedang memakai halaman. Penarikan data tidak pernah termasuk. */
+/**
+ * Event yang menandakan ORANG sedang memakai halaman. Penarikan data tidak
+ * pernah termasuk. Gerakan mouse sengaja TIDAK: mouse yang tersenggol, atau
+ * kursor yang kebetulan melintas di atas jendela, bukan tanda orangnya ada.
+ */
 const EVENT_SEKETIKA = ["mousedown", "keydown", "wheel", "touchstart", "pointerdown"] as const;
 /** Sering sekali — dibatasi sekali per detik sebelum diteruskan. */
-const EVENT_BERUNTUN = ["mousemove", "touchmove", "scroll"] as const;
+const EVENT_BERUNTUN = ["touchmove", "scroll"] as const;
 const BATAS_BERUNTUN_MS = 1000;
 
 /**

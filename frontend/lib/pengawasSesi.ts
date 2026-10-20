@@ -3,7 +3,7 @@
  *
  * Murni — tanpa React, tanpa impor, tanpa window — supaya bisa diuji dengan
  * jam palsu di Node. Komponen PenjagaSesi yang menyambungkannya ke peramban:
- * event mouse/papan ketik/gulir/sentuh, localStorage, dan API.
+ * event klik/papan ketik/gulir/sentuh (bukan gerakan mouse), localStorage, dan API.
  *
  * Yang dijaga di sini hanya PENGALAMAN pengguna (peringatan, hitung mundur,
  * keluar tepat waktu). Yang menegakkan tetap server: sesi yang menganggur
@@ -18,7 +18,7 @@
  * - Server diberi tahu paling sering sekali per SELANG_LAPOR_MS, dengan
  *   laporan susulan untuk aktivitas terakhir — jadi catatan server tidak
  *   pernah lebih tua daripada aktivitas terakhir lebih dari selang itu.
- * - Selama peringatan tampil, gerakan mouse TIDAK memperpanjang sesi; hanya
+ * - Selama peringatan tampil, aktivitas di tab ini TIDAK memperpanjang sesi; hanya
  *   "Tetap masuk" (yang diperiksa server) atau aktivitas di tab lain.
  */
 
@@ -105,7 +105,7 @@ export class PengawasSesi {
     this.detakSekali();
   }
 
-  /** Mouse, papan ketik, gulir, sentuh, pindah halaman — dipanggil sesering apa pun. */
+  /** Klik, papan ketik, gulir, sentuh, pindah halaman — dipanggil sesering apa pun. */
   aktivitas(): void {
     if (this.selesai || this.memperingatkan) return;
 

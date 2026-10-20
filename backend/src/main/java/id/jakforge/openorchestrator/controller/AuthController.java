@@ -57,7 +57,7 @@ public class AuthController {
     }
 
     /**
-     * Dasbor melaporkan aktivitas orang (mouse, papan ketik, gulir, sentuh,
+     * Dasbor melaporkan aktivitas orang (klik, papan ketik, gulir, sentuh,
      * pindah halaman), juga tombol "Tetap masuk". Sesi yang sudah berakhir
      * dijawab 401, tidak diperpanjang (V18).
      */

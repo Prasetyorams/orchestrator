@@ -28,7 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 401 kalau sesi itu dicabut, habis umurnya, atau menganggur melewati batas.
  *
  * <p><b>Aktivitas</b> hanya dicatat lewat {@link #recordActivity} — laporan
- * dasbor bahwa ORANG sedang memakai halaman (mouse, papan ketik, gulir,
+ * dasbor bahwa ORANG sedang memakai halaman (klik, papan ketik, gulir,
  * sentuh, pindah halaman). Permintaan lain, termasuk penarikan data berkala,
  * hanya DIPERIKSA, tidak pernah memperpanjang sesi.
  *
