@@ -309,10 +309,6 @@ function DialogPengguna({
               <dd className="text-ink">{hasilCari.displayName ?? "-"}</dd>
               <dt className="text-muted">{t("Surel")}</dt>
               <dd className="text-ink">{hasilCari.email ?? "-"}</dd>
-              <dt className="text-muted">objectGUID</dt>
-              <dd className="break-all font-mono text-ink">{hasilCari.objectGuid}</dd>
-              <dt className="text-muted">DN</dt>
-              <dd className="break-all text-ink">{hasilCari.distinguishedName}</dd>
               <dt className="text-muted">{t("Status di AD")}</dt>
               <dd className={hasilCari.accountEnabled ? "text-ok" : "text-danger"}>
                 {hasilCari.accountEnabled ? t("Aktif") : t("Dinonaktifkan")}
