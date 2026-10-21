@@ -82,8 +82,9 @@ public class PermissionInterceptor implements HandlerInterceptor {
         return new PermissionRule(method, pathPattern, Access.AGENT, List.of());
     }
 
-    /** Satu-satunya endpoint di luar /api/agent yang boleh dipanggil token agent. */
+    /** Endpoint di luar /api/agent yang boleh dipanggil token agent: unduhan paket dan library job-nya. */
     static final String PACKAGE_CONTENT_PATH = "/api/packages/{name}/{version}/content";
+    static final String LIBRARY_CONTENT_PATH = "/api/libraries/{name}/{version}/content";
 
     static final List<PermissionRule> RULES = List.of(
             // --- sesi dan profil ---
@@ -149,6 +150,12 @@ public class PermissionInterceptor implements HandlerInterceptor {
             requires(POST, "/api/packages/upload", "packages.create"),
             requires(GET, PACKAGE_CONTENT_PATH, "packages.read"),
             requires(DELETE, "/api/packages/{name}/{version}", "packages.delete"),
+
+            // --- feed library (V20): izinnya izin paket — library juga kode yang dijalankan robot ---
+            requires(GET, "/api/libraries", "packages.read"),
+            requires(POST, "/api/libraries", "packages.create"),
+            requires(GET, LIBRARY_CONTENT_PATH, "packages.read"),
+            requires(DELETE, "/api/libraries/{name}/{version}", "packages.delete"),
 
             // --- pekerjaan: mengambil dan melaporkan pekerjaan adalah tugas robot ---
             requires(GET, "/api/jobs", "jobs.read"),
@@ -245,6 +252,7 @@ public class PermissionInterceptor implements HandlerInterceptor {
             agent(POST, "/api/agent/jobs/{id}/attachments"),
             agent(POST, "/api/agent/logs"),
             agent(GET, "/api/agent/triggers"),
+            agent(GET, "/api/agent/libraries/{name}/{version}/content"),
 
             // --- catatan dan peringatan ---
             requires(GET, "/api/logs", "logs.read"),
@@ -332,6 +340,16 @@ public class PermissionInterceptor implements HandlerInterceptor {
                 }
 
                 throw ApiException.forbidden("Paket ini tidak sedang dijalankan robot di mesin ini.");
+            }
+
+            if (LIBRARY_CONTENT_PATH.equals(rule.pathPattern())) {
+                Map<String, String> variables = pathVariables(request);
+
+                if (agentAccessService.canDownloadLibrary(principal, variables.get("name"), variables.get("version"))) {
+                    return true;
+                }
+
+                throw ApiException.forbidden("Library ini tidak dipakai job yang sedang dijalankan robot di mesin ini.");
             }
 
             throw ApiException.forbidden("Token Robot Agent hanya berlaku di /api/agent.");

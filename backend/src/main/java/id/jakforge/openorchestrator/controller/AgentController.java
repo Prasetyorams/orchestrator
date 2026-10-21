@@ -13,6 +13,7 @@ import id.jakforge.openorchestrator.dto.response.WindowsCredentialResponse;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
 import id.jakforge.openorchestrator.service.AgentAuthService;
 import id.jakforge.openorchestrator.service.AgentService;
+import id.jakforge.openorchestrator.service.LibraryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
@@ -47,6 +48,7 @@ public class AgentController {
 
     private final AgentAuthService agentAuthService;
     private final AgentService agentService;
+    private final LibraryService libraryService;
 
     /** Tukar machine key dengan token satu jam, beserta robot dan setelan mesinnya. */
     @PostMapping("/login")
@@ -89,6 +91,17 @@ public class AgentController {
     public LogWriteResponse writeLogs(@AuthenticationPrincipal OpenOrchestratorPrincipal principal,
                                       @RequestBody(required = false) Map<String, Object> body) {
         return agentService.writeLogs(principal, LogBatchRequest.fromBody(body));
+    }
+
+    /**
+     * Unduh library (V20) yang diberikan ke job yang sedang dipegang mesin ini
+     * — {@code libraries[].url} di jawaban klaim. Robot mencocokkan SHA-256-nya
+     * sebelum menaruh DLL-nya di folder extensions.
+     */
+    @GetMapping("/libraries/{name}/{version}/content")
+    public ResponseEntity<byte[]> libraryContent(@AuthenticationPrincipal OpenOrchestratorPrincipal principal,
+                                                 @PathVariable String name, @PathVariable String version) {
+        return DownloadResponses.attachment(libraryService.getContentForAgent(principal, name, version));
     }
 
     /** Jadwal yang bisa jalan di mesin ini; {@code {"triggers": []}} kalau tidak ada. */

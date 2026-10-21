@@ -1315,6 +1315,108 @@ Robot Agent v1, dan activity `Custom.Orchestrator` tetap **akun lokal**. Robot A
 - Endpoint admin baru (izin `users.create`/`users.update`): `GET /api/users/ad-lookup?username=`
   (cari akun di AD) dan `POST /api/users/{username}/ad-unlink`. Tidak perlu dipakai dari sisi robot.
 
+## Feed library (21 Okt 2026, V20)
+
+Jawaban `CATATAN-FEED-LIBRARY-OPENSTUDIO.md` (cabang `jakforge/catatan-feed-library`). Semua usulan
+diterapkan dan **sudah di-deploy** (21 Okt 2026; migrasi `V20__feed_library.sql`, kemampuan `libraries.feed` di
+`/api/health`). **Tidak ada perubahan wajib**: agent yang tidak membaca `libraries` berjalan seperti dulu.
+
+**Diuji di sisi Orchestrator:** uji unit, dan E2E 55 pemeriksaan melawan backend uji. E2E mencakup unggah,
+izin, klaim dengan `libraries[]` beserta turunannya, unduh dengan token agent dan pencocokan sidik, gagal
+`LibraryNotFound`, paket dari sebelum V20, dan hapus. **Belum** diuji dengan Robot Agent sungguhan.
+
+### Jawaban tiga pertanyaan
+
+1. **Satu feed untuk seluruh tenant**, sama seperti umpan paket proses (tabel `packages` juga tidak
+   per folder). Feed per folder bisa ditambah nanti kalau dibutuhkan.
+2. **Server yang mengisi `libraries`.** Server sudah membaca `project.json` saat paket terbit, jadi
+   robot tidak perlu menebak, dan library yang tidak ada ditolak sebelum robot menyiapkan sesi.
+3. **Batas ukuran sama dengan paket proses**: `openorchestrator.limits.max-package-size` (bawaan 64 MB),
+   dan unggahan multipart dibatasi 70 MB per berkas.
+
+### Endpoint (izinnya izin paket)
+
+| Endpoint | Izin | Isi |
+|---|---|---|
+| `POST /api/libraries` | `packages.create` | multipart, bagian `file` = satu `.nupkg` |
+| `GET /api/libraries?search=` | `packages.read` | satu baris per versi, tanpa isi |
+| `GET /api/libraries/{id}/{version}/content` | `packages.read`, atau token agent untuk library job-nya | `.nupkg` apa adanya |
+| `DELETE /api/libraries/{id}/{version}` | `packages.delete` | |
+| `GET /api/agent/libraries/{id}/{version}/content` | token agent (machine key) | `.nupkg` apa adanya |
+
+- **Validasi unggah:**
+  - berkas harus `.nupkg` dengan `.nuspec` di akar;
+  - id dan versi diambil dari `<metadata>`; id hanya huruf, angka, `.`, `_`, `-`;
+  - harus ada tag `OpenStudio` dan `Library` (dipisah spasi, huruf besar-kecil bebas);
+  - harus ada **tepat satu** DLL di seluruh paket, langsung di `lib/net45/`, dan bertanda `MZ`;
+  - aturan arsip sama dengan paket proses: jalur keluar folder ditolak, `.nuspec` tanpa DTD;
+  - nama DLL yang bukan `<Id>.dll` hanya diperingatkan;
+  - versi yang sudah ada dijawab `409 LIBRARY_VERSION_EXISTS`. Id tidak peka huruf besar-kecil, dan `1.2` dianggap sama dengan `1.2.0`.
+
+  Kode galat `400`: `LIBRARY_FILE_TYPE`, `LIBRARY_NOT_LIBRARY` (paket proses diarahkan ke Unggah Paket, paket
+  activity ke Kelola Paket), `LIBRARY_ASSEMBLY`, `LIBRARY_INVALID_NAME`.
+- **Jawaban unggah:** `{ok, id, version, description, sizeBytes, sha256, assemblyFile, dependencies, warnings}`.
+  `sha256` adalah sidik **berkas .nupkg**, dan isi itulah yang disimpan dan diunduh.
+- **Daftar:** `[{id, version, description, authors, assemblyFile, dependencies, publishedBy, publishedAt,
+  sizeBytes, sha256, sourceFileName}]`. `id` adalah Id library (NuGet), bukan kunci baris. Urutannya per Id,
+  lalu versi tertinggi lebih dulu.
+- **Hapus:** `409 LIBRARY_IN_USE` kalau versi itu sedang dipakai job yang dipegang robot, atau masih dibutuhkan
+  paket yang disematkan proses (termasuk lewat library lain).
+- **Keamanan:**
+  - unggah dan hapus masuk audit (komponen "Library");
+  - isi sebuah versi tidak pernah berubah;
+  - token agent hanya boleh mengunduh library yang diberikan ke job yang **sedang dipegang mesinnya**
+    (aturan yang sama dengan unduhan paket); library lain dijawab `403`.
+- **Paket proses:**
+  - Unggah Paket tidak lagi memperingatkan dependensi yang ada di feed library, dan menyebutnya di `libraries`;
+  - versi library yang belum ada diperingatkan;
+  - library yang diunggah lewat Unggah Paket ditolak `400 PACKAGE_IS_LIBRARY`.
+
+### Klaim job (`POST /api/agent/jobs/claim`)
+
+Catatan menyebut `GET /api/agent/jobs/next`; di kontrak v2 namanya `POST /api/agent/jobs/claim`. Jawabannya kini
+selalu membawa `libraries` (kosong kalau tidak ada):
+
+```json
+"libraries": [
+  { "id": "Tagihan.Umum", "version": "1.2.0", "sha256": "…", "sizeBytes": 4096,
+    "url": "/api/agent/libraries/Tagihan.Umum/1.2.0/content" },
+  { "id": "Tagihan.Dasar", "version": "1.0.0", "sha256": "…", "sizeBytes": 3072,
+    "url": "/api/agent/libraries/Tagihan.Dasar/1.0.0/content" }
+]
+```
+
+- **Cara memilih library:**
+  - dependensi `project.json` yang Id-nya ada di feed adalah library;
+  - yang tidak ada di feed dianggap paket activity di mesin robot, seperti dulu;
+  - dependensi library di `.nuspec`-nya ikut diberikan, bertingkat.
+- **Versi** sama dengan cara Studio memulihkan dependensi (`Project.InstallDependencies`): batas bawah
+  rentang NuGet yang inklusif, **persis**. `1.2.0`, `[1.2.0]`, dan `[1.2.0, )` berarti 1.2.0 — bukan versi
+  yang lebih baru di feed.
+- **Kalau tidak bisa dipenuhi:** versi tidak ada di feed, rentang tanpa batas bawah inklusif, atau satu library
+  dibutuhkan dalam dua versi. Akibatnya:
+  - job **gagal saat klaim** dengan `error_code` `LibraryNotFound` dan alasannya di `info` dan catatan job;
+  - klaim dijawab `204`, dan robot tetap bebas mengambil job lain;
+  - job seperti itu tidak diulang otomatis.
+- **Yang perlu dilakukan robot:**
+  1. unduh tiap `url` dengan token agent;
+  2. cocokkan SHA-256 dengan `sha256`;
+  3. ambil DLL dari `lib/net45/` dan taruh di folder extensions sebelum job dijalankan.
+
+  Sidik yang tidak cocok sebaiknya dilaporkan seperti `PackageIntegrityFailed`.
+- Daftar library per job tersimpan (`job_libraries`), jadi riwayat job tetap menyebut versi library yang dipakai.
+
+### Yang belum bisa kami cocokkan
+
+- **Format dicocokkan dengan catatan Anda, bukan dengan berkas sungguhan.** Kode Library (`OpenStudioLibrary.zip`,
+  tag `OpenStudio Library`) belum ada di cabang Studio mana pun yang sudah di-push. Pemeriksanya kami cocokkan
+  dengan isi catatan; DLL uji dikompilasi dengan csc .NET Framework dan berisi sumber daya `OpenStudioLibrary.zip`.
+  **Mohon kirim satu `.nupkg` library hasil Studio** atau push cabangnya, supaya bisa diuji dengan berkas asli.
+- **Dependensi yang tidak dikenal tidak bisa ditandai sebagai library yang hilang.** Library yang **belum pernah**
+  diunggah sama sekali tidak bisa dibedakan dari paket activity, jadi tetap dianggap activity, dan robot akan
+  gagal dengan "Could not load file or assembly". Kalau Studio bisa menandai dependensi library di
+  `project.json` (mis. kunci terpisah), server bisa menolaknya lebih awal. Apakah itu memungkinkan?
+
 ---
 
 # Bagian 5 — Open Assistant: masuk lewat dasbor (V11)

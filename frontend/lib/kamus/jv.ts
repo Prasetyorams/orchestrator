@@ -539,6 +539,28 @@ export const JV: Record<string, string> = {
   "Izin yang bisa diberikan hanya yang juga Anda miliki.": "Idin sing bisa diwènèhaké mung sing uga sampéyan duwèni.",
   "Lihat: juga terbuka bagi yang boleh melihat pemicu, untuk memilih kalendernya.": "Deleng: uga kabuka kanggo sing olèh ndeleng pamicu, kanggo milih kalènderé.",
 
+  // --- feed library (V20) ---
+  "Library": "Library",
+  "Unggah Library": "Unggah Library",
+  "Cari Id atau keterangan...": "Golèki Id utawa katrangan...",
+  "Id": "Id",
+  "Dependensi": "Dependensi",
+  "SHA-256": "SHA-256",
+  "DLL": "DLL",
+  "Dependensi: {0}": "Dependensi: {0}",
+  "Hapus {0} versi {1} dari feed library? Versi yang masih dibutuhkan proses atau sedang dipakai robot tidak bisa dihapus.": "Busak {0} versi {1} saka feed library? Versi sing isih dibutuhaké proses utawa lagi dianggo robot ora bisa dibusak.",
+  "Satu baris per library, dengan versi tertingginya. Proses yang menyebut library ini di dependensinya mendapat versi persis yang disebut; robot memasangnya sebelum job berjalan.": "Siji baris saben library, kanthi versi paling dhuwur. Proses sing nyebut library iki ing dependensiné éntuk versi persis sing disebut; robot masang sadurungé job mlaku.",
+  "Belum ada library. Terbitkan proyek Library dari OpenStudio, atau Unggah Library di sini.": "Durung ana library. Terbitaké proyèk Library saka OpenStudio, utawa Unggah Library ing kéné.",
+  "Tidak ada library yang cocok.": "Ora ana library sing cocog.",
+  "{0} bukan library. Pilih berkas .nupkg hasil Terbitkan proyek Library.": "{0} dudu library. Pilih berkas .nupkg asil Terbitaké proyèk Library.",
+  ".nupkg hasil Terbitkan proyek Library di OpenStudio (tag OpenStudio Library, satu lib/net45/<Id>.dll).": ".nupkg asil Terbitaké proyèk Library ing OpenStudio (tag OpenStudio Library, siji lib/net45/<Id>.dll).",
+  "Id dan versi dibaca dari .nuspec-nya; versi yang sudah ada ditolak.": "Id lan versi diwaca saka .nuspec-é; versi sing wis ana ditolak.",
+  "Robot memasang library ini sendiri sebelum menjalankan proses yang memakainya.": "Robot masang library iki dhéwé sadurungé nglakokaké proses sing nganggo.",
+  "Seret berkas library ke sini": "Sèrèt berkas library mrénéa",
+  "atau klik untuk memilih berkas .nupkg": "utawa klik kanggo milih berkas .nupkg",
+  "Terkirim. Memeriksa dan menyimpan library...": "Wis kekirim. Mriksa lan nyimpen library...",
+  "Library dari feed yang dipasang robot sendiri: {0}": "Library saka feed sing dipasang robot dhéwé: {0}",
+
   // --- masuk Windows AD (V19) ---
   "Windows AD": "Windows AD",
   "belum tertaut": "durung kecanthel",

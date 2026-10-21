@@ -27,6 +27,8 @@ public final class AgentErrorCodes {
     public static final String AGENT_RESTARTED = "AgentRestarted";
     public static final String AGENT_LOST = "AgentLost";
     public static final String LEASE_EXPIRED = "LeaseExpired";
+    /** V20: library yang dibutuhkan paketnya tidak ada di feed library; disimpulkan saat klaim. Tidak diulang otomatis. */
+    public static final String LIBRARY_NOT_FOUND = "LibraryNotFound";
 
     /** Kode sebelum workflow sempat berjalan — hanya ini yang boleh diulang otomatis. */
     public static final Set<String> RETRYABLE = Set.of(

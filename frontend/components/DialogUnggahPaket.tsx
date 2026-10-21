@@ -1,12 +1,13 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { CheckCircle2, CloudUpload, FileArchive, TriangleAlert, X } from "lucide-react";
+import { CheckCircle2, CloudUpload, TriangleAlert } from "lucide-react";
 import { OpenOrchestratorApi, dibatalkan, errorText, type UploadPackageResult } from "@/lib/api";
 import { useT } from "@/lib/i18n";
-import { cn, ukuranBerkas } from "@/lib/utils";
-import { Button, Galat, IconButton } from "@/components/ui/primitives";
+import { ukuranBerkas } from "@/lib/utils";
+import { Button, Galat } from "@/components/ui/primitives";
 import { Dialog } from "@/components/Dialog";
+import { PemilihBerkas } from "@/components/PemilihBerkas";
 
 const POLA_PAKET = /\.(nupkg|zip)$/i;
 
@@ -22,11 +23,9 @@ const POLA_PAKET = /\.(nupkg|zip)$/i;
  */
 export function DialogUnggahPaket({ onTutup, onSelesai }: { onTutup: () => void; onSelesai: () => void }) {
   const { t } = useT();
-  const pemilih = useRef<HTMLInputElement>(null);
   const pembatal = useRef<AbortController | null>(null);
 
   const [berkas, setBerkas] = useState<File | null>(null);
-  const [diseret, setDiseret] = useState(false);
   /** null: tidak sedang mengunggah; 0..1: bagian yang sudah terkirim. */
   const [kemajuan, setKemajuan] = useState<number | null>(null);
   const [galat, setGalat] = useState("");
@@ -107,82 +106,16 @@ export function DialogUnggahPaket({ onTutup, onSelesai }: { onTutup: () => void;
         </ul>
       </div>
 
-      <div
-        role="button"
-        tabIndex={0}
-        aria-disabled={mengunggah}
-        onClick={() => !mengunggah && pemilih.current?.click()}
-        onKeyDown={(e) => {
-          if ((e.key === "Enter" || e.key === " ") && !mengunggah) {
-            e.preventDefault();
-            pemilih.current?.click();
-          }
-        }}
-        onDragOver={(e) => {
-          e.preventDefault();
-          if (!mengunggah) setDiseret(true);
-        }}
-        onDragLeave={() => setDiseret(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDiseret(false);
-          ambil(e.dataTransfer.files?.[0]);
-        }}
-        className={cn(
-          "flex flex-col items-center justify-center rounded-lg border-2 border-dashed px-4 py-7 text-center transition",
-          diseret ? "border-brand bg-brandSoft" : "border-line hover:border-brandLine",
-          mengunggah ? "cursor-not-allowed opacity-60" : "cursor-pointer",
-        )}
-      >
-        <CloudUpload size={28} className="mb-2 text-muted" />
-        <p className="text-sm font-medium text-ink">{t("Seret berkas paket ke sini")}</p>
-        <p className="text-xs text-muted">{t("atau klik untuk memilih berkas .nupkg / .zip")}</p>
-        <input
-          ref={pemilih}
-          type="file"
-          accept=".nupkg,.zip"
-          className="hidden"
-          onChange={(e) => {
-            ambil(e.target.files?.[0]);
-            // Dikosongkan supaya berkas yang SAMA bisa dipilih lagi sesudah diperbaiki.
-            e.target.value = "";
-          }}
-        />
-      </div>
-
-      {berkas ? (
-        <div className="mt-3 flex items-center gap-3 rounded-lg border border-line px-3 py-2">
-          <FileArchive size={18} className="shrink-0 text-muted" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-ink" title={berkas.name}>
-              {berkas.name}
-            </p>
-            <p className="text-xs tabular-nums text-muted">{ukuranBerkas(berkas.size)}</p>
-          </div>
-          {!mengunggah ? (
-            <IconButton label={t("Hapus pilihan")} onClick={() => setBerkas(null)}>
-              <X size={15} />
-            </IconButton>
-          ) : null}
-        </div>
-      ) : null}
-
-      {mengunggah ? (
-        <div className="mt-3">
-          <div
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round((kemajuan ?? 0) * 100)}
-            className="h-2 overflow-hidden rounded-full bg-line"
-          >
-            <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${Math.round((kemajuan ?? 0) * 100)}%` }} />
-          </div>
-          <p className="mt-1 text-xs text-muted">
-            {memeriksa ? t("Terkirim. Memeriksa dan menyimpan paket...") : t("Mengunggah... {0}%", Math.round((kemajuan ?? 0) * 100))}
-          </p>
-        </div>
-      ) : null}
+      <PemilihBerkas
+        accept=".nupkg,.zip"
+        judul={t("Seret berkas paket ke sini")}
+        petunjuk={t("atau klik untuk memilih berkas .nupkg / .zip")}
+        berkas={berkas}
+        kemajuan={kemajuan}
+        memeriksa={t("Terkirim. Memeriksa dan menyimpan paket...")}
+        onPilih={ambil}
+        onHapus={() => setBerkas(null)}
+      />
 
       <Galat pesan={galat} className="mt-3" />
 
@@ -212,6 +145,9 @@ function HasilUnggah({ hasil }: { hasil: UploadPackageResult }) {
           {t("Titik Masuk")}: <span className="text-ink">{hasil.entryPoint}</span> · {ukuranBerkas(hasil.sizeBytes)}
         </li>
         <li>{proses}</li>
+        {hasil.libraries?.length ? (
+          <li>{t("Library dari feed yang dipasang robot sendiri: {0}", hasil.libraries.join(", "))}</li>
+        ) : null}
         {hasil.layout === "NUPKG" ? (
           <li>{t("Isi lib/net45/ disimpan di akar paket, sama dengan hasil Terbitkan dari Studio, supaya terbaca robot.")}</li>
         ) : hasil.layout === "ZIP_IN_FOLDER" ? (

@@ -7,6 +7,7 @@ import id.jakforge.openorchestrator.dto.response.PublishPackageResponse;
 import id.jakforge.openorchestrator.dto.response.UploadPackageResponse;
 import id.jakforge.openorchestrator.model.PackageSource;
 import id.jakforge.openorchestrator.repository.AlertRepository;
+import id.jakforge.openorchestrator.repository.LibraryRepository;
 import id.jakforge.openorchestrator.repository.LogRepository;
 import id.jakforge.openorchestrator.repository.PackageRepository;
 import id.jakforge.openorchestrator.repository.ProcessRepository;
@@ -54,7 +55,7 @@ class PackageServiceTest {
         };
 
         return new PackageService(packages, new ProcessRepository(database), new LogRepository(database),
-                new AlertRepository(database), TestFolderAccess.permitAll(), checker, TestProperties.defaults());
+                new AlertRepository(database), TestFolderAccess.permitAll(), checker, TestProperties.defaults(), new LibraryRepository(database));
     }
 
     private static PublishPackageRequest request(String version) {
@@ -192,7 +193,7 @@ class PackageServiceTest {
             }
         };
         PackageService service = new PackageService(packages, new ProcessRepository(database), new LogRepository(database),
-                new AlertRepository(database), TestFolderAccess.permitAll(), (p, permission) -> true, TestProperties.defaults());
+                new AlertRepository(database), TestFolderAccess.permitAll(), (p, permission) -> true, TestProperties.defaults(), new LibraryRepository(database));
 
         ApiException error = assertThrows(ApiException.class, () -> service.publish(principal, request("1.0.4")));
         assertEquals("PACKAGE_VERSION_EXISTS", error.errorCode());
@@ -219,7 +220,7 @@ class PackageServiceTest {
         };
 
         return new PackageService(packages, processRepository, new LogRepository(database),
-                new AlertRepository(database), TestFolderAccess.permitAll(), checker, TestProperties.defaults());
+                new AlertRepository(database), TestFolderAccess.permitAll(), checker, TestProperties.defaults(), new LibraryRepository(database));
     }
 
     /** Peramban lama mengirim jalur lengkapnya; yang disimpan nama berkasnya saja. */
@@ -329,7 +330,7 @@ class PackageServiceTest {
 
         return new PackageService(packages, new ProcessRepository(database), new LogRepository(database),
                 new AlertRepository(database), TestFolderAccess.permitAll(), (p, permission) -> true,
-                TestProperties.defaults());
+                TestProperties.defaults(), new LibraryRepository(database));
     }
 
     @Test

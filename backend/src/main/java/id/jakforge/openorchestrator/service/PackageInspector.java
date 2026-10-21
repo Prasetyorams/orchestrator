@@ -26,6 +26,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
@@ -71,6 +72,8 @@ final class PackageInspector {
     static final String INVALID_PROJECT = "PACKAGE_INVALID_PROJECT";
     static final String UIPATH = "PACKAGE_UIPATH_UNSUPPORTED";
     static final String TOO_LARGE = "PACKAGE_TOO_LARGE";
+    /** V20: library OpenStudio yang diunggah sebagai paket proses — tempatnya feed library. */
+    static final String IS_LIBRARY = "PACKAGE_IS_LIBRARY";
 
     private static final String WORKFLOW_NAMESPACE = "http://schemas.microsoft.com/netfx/2009/xaml/activities";
     private static final String UIPATH_NAMESPACE = "http://schemas.uipath.com/workflow/activities";
@@ -108,12 +111,14 @@ final class PackageInspector {
     }
 
     /**
-     * @param content      isi yang disimpan: zip proyek, workflow di akarnya
-     * @param dependencies paket activity dari project.json, "Id versi"
-     * @param warnings     yang tidak bisa dipastikan server, untuk ditampilkan ke pengunggah
+     * @param content            isi yang disimpan: zip proyek, workflow di akarnya
+     * @param dependencies       dependensi dari project.json, "Id versi" (activity dan library)
+     * @param dependencyVersions dependensi yang sama sebagai Id → versi, untuk disimpan dan dicocokkan dengan feed library
+     * @param warnings           yang tidak bisa dipastikan server, untuk ditampilkan ke pengunggah
      */
     record Inspection(String name, String version, String description, String entryPoint, byte[] content,
-                      Layout layout, List<String> dependencies, List<String> warnings) {
+                      Layout layout, List<String> dependencies, Map<String, String> dependencyVersions,
+                      List<String> warnings) {
 
         boolean converted() {
             return layout != Layout.ZIP;
@@ -124,6 +129,15 @@ final class PackageInspector {
     }
 
     static Inspection inspect(byte[] file, String fileName) {
+        return inspect(file, fileName, id -> false);
+    }
+
+    /**
+     * @param isLibrary Id dependensi yang ada di feed library (V20): dipasang
+     *                  robot dari Orchestrator, jadi tidak diperingatkan sebagai
+     *                  activity yang harus sudah ada di mesin robot
+     */
+    static Inspection inspect(byte[] file, String fileName, Predicate<String> isLibrary) {
         String shownName = fileName == null || fileName.isBlank() ? "paket" : fileName;
         String lower = shownName.toLowerCase(Locale.ROOT);
 
@@ -132,6 +146,20 @@ final class PackageInspector {
                     + " (Terbitkan → Folder lokal) atau .zip proyek yang diunduh dari Open Orchestrator.").withCode(FILE_TYPE);
         }
 
+        return withZip(file, shownName, zip -> inspect(zip, file, shownName, isLibrary));
+    }
+
+    /** Membaca arsip zip di memori; yang memeriksanya. */
+    interface ZipReader<T> {
+        T read(ZipFile zip) throws IOException;
+    }
+
+    /**
+     * Arsip di memori dibuka sebagai ZipFile — lewat berkas sementara, karena
+     * hanya ZipFile yang membaca direktori pusat zip (ukuran yang dinyatakan,
+     * entri ganda) sebelum isinya dibuka.
+     */
+    static <T> T withZip(byte[] file, String shownName, ZipReader<T> reader) {
         if (file == null || file.length < 4 || file[0] != 'P' || file[1] != 'K') {
             throw corrupt(shownName, "bukan arsip zip");
         }
@@ -142,7 +170,7 @@ final class PackageInspector {
             Files.write(temporary, file);
 
             try (ZipFile zip = open(temporary, shownName)) {
-                return inspect(zip, file, shownName);
+                return reader.read(zip);
             }
         } catch (IOException e) {
             throw corrupt(shownName, e.getMessage());
@@ -154,6 +182,26 @@ final class PackageInspector {
                     // Berkas sementara sistem; dibersihkan sistem operasinya.
                 }
             }
+        }
+    }
+
+    /**
+     * Dependensi project.json dari isi paket yang SUDAH tersimpan (zip proyek,
+     * project.json di akarnya), Id → versi. Paket tanpa project.json, atau yang
+     * tidak terbaca, dianggap tanpa dependensi: yang dipakai di sini hanya untuk
+     * mencari library yang dibutuhkan, dan paket itu sudah lolos saat terbit.
+     */
+    static Map<String, String> projectDependencies(byte[] content) {
+        if (content == null) return Map.of();
+
+        try {
+            return withZip(content, "paket", zip -> {
+                ZipEntry entry = readEntries(zip, "paket").get(PROJECT_JSON);
+                if (entry == null) return Map.of();
+                return dependencies(JSON.readTree(readText(zip, entry, PROJECT_JSON, "paket")));
+            });
+        } catch (RuntimeException e) {
+            return Map.of();
         }
     }
 
@@ -174,7 +222,8 @@ final class PackageInspector {
         }
     }
 
-    private static Inspection inspect(ZipFile zip, byte[] original, String shownName) throws IOException {
+    private static Inspection inspect(ZipFile zip, byte[] original, String shownName, Predicate<String> isLibrary)
+            throws IOException {
         Map<String, ZipEntry> entries = readEntries(zip, shownName);
 
         List<String> warnings = new ArrayList<>();
@@ -189,7 +238,7 @@ final class PackageInspector {
         if (nuspecName != null && (hasLib || !hasProjectAtRoot(entries.keySet()))) {
             layout = Layout.NUPKG;
             if (nuspecName != null) nuspec = readNuspec(zip, entries.get(nuspecName), shownName);
-            project = nupkgProject(entries, shownName);
+            project = nupkgProject(entries, shownName, LibraryInspector.hasLibraryTag(nuspec.get("tags")));
         } else if (hasProjectAtRoot(entries.keySet())) {
             layout = Layout.ZIP;
             project = entries;
@@ -287,9 +336,13 @@ final class PackageInspector {
         String description = firstText(nuspec.get("description"), text(projectJson, "description"));
         if (description != null && description.length() > 400) description = description.substring(0, 400);
 
-        if (!dependencies.isEmpty()) {
-            warnings.add("Paket ini membutuhkan activity: " + String.join(", ", dependencies.entrySet().stream()
-                    .map(d -> d.getKey() + (d.getValue().isBlank() ? "" : " " + d.getValue())).toList())
+        // Library dari feed dipasang robot sendiri (V20); yang lain activity yang
+        // harus sudah terpasang di mesin robot.
+        List<String> activities = dependencies.entrySet().stream()
+                .filter(d -> !isLibrary.test(d.getKey()))
+                .map(d -> d.getKey() + (d.getValue().isBlank() ? "" : " " + d.getValue())).toList();
+        if (!activities.isEmpty()) {
+            warnings.add("Paket ini membutuhkan activity: " + String.join(", ", activities)
                     + ". Robot tidak memasangnya otomatis; pastikan sudah ada di mesin robot.");
         }
         if (!unknownAssemblies.isEmpty()) {
@@ -307,7 +360,7 @@ final class PackageInspector {
 
         return new Inspection(name, version, description, entryPoint, content, layout,
                 dependencies.entrySet().stream().map(d -> (d.getKey() + " " + d.getValue()).trim()).toList(),
-                List.copyOf(warnings));
+                java.util.Collections.unmodifiableMap(dependencies), List.copyOf(warnings));
     }
 
     // -------------------------------------------------------------------- entri
@@ -320,7 +373,7 @@ final class PackageInspector {
      * <p>Kunci tidak peka huruf besar-kecil: robot mengekstrak di Windows,
      * dan dua entri yang hanya berbeda huruf saling menimpa di sana.
      */
-    private static Map<String, ZipEntry> readEntries(ZipFile zip, String shownName) {
+    static Map<String, ZipEntry> readEntries(ZipFile zip, String shownName) {
         Map<String, ZipEntry> entries = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         long declared = 0;
         int count = 0;
@@ -358,7 +411,7 @@ final class PackageInspector {
      * folder, dan tanpa karakter yang ditolak Path.GetFullPath .NET
      * Framework (&lt;&gt;:"|?* dan karakter kendali).
      */
-    private static String safePath(String raw, String shownName) {
+    static String safePath(String raw, String shownName) {
         String path = raw.replace('\\', '/');
         boolean unsafe = path.startsWith("/") || path.chars().anyMatch(c -> c < 32 || "<>:\"|?*".indexOf(c) >= 0);
 
@@ -374,7 +427,7 @@ final class PackageInspector {
         return path.replaceAll("/{2,}", "/").replaceFirst("^\\./", "");
     }
 
-    private static String rootNuspec(Map<String, ZipEntry> entries) {
+    static String rootNuspec(Map<String, ZipEntry> entries) {
         return entries.keySet().stream()
                 .filter(p -> !p.contains("/") && p.toLowerCase(Locale.ROOT).endsWith(".nuspec"))
                 .findFirst().orElse(null);
@@ -408,7 +461,8 @@ final class PackageInspector {
      * di-escape (spasi = %20) dikembalikan ke nama aslinya — sama dengan yang
      * dilakukan Open Assistant (ProjectPackage.Extract) untuk feed lokal.
      */
-    private static Map<String, ZipEntry> nupkgProject(Map<String, ZipEntry> entries, String shownName) {
+    private static Map<String, ZipEntry> nupkgProject(Map<String, ZipEntry> entries, String shownName,
+                                                      boolean libraryTag) {
         Map<String, Map<String, ZipEntry>> perTarget = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         boolean hasLibrary = false;
 
@@ -432,6 +486,10 @@ final class PackageInspector {
                 .map(Map.Entry::getKey).toList();
 
         if (withWorkflow.isEmpty()) {
+            if (hasLibrary && libraryTag) {
+                throw ApiException.badRequest("'" + shownName + "' adalah library OpenStudio, bukan paket proses."
+                        + " Unggah lewat Tenant › Library.").withCode(IS_LIBRARY);
+            }
             if (hasLibrary) {
                 throw ApiException.badRequest("'" + shownName + "' adalah paket activity (pustaka .dll), bukan paket"
                         + " proses. Pasang lewat OpenStudio › Kelola Paket.").withCode(NOT_PROCESS);
@@ -475,7 +533,7 @@ final class PackageInspector {
 
     // -------------------------------------------------------------------- isi
 
-    private static byte[] readBytes(ZipFile zip, ZipEntry entry, String path, String shownName, long limit)
+    static byte[] readBytes(ZipFile zip, ZipEntry entry, String path, String shownName, long limit)
             throws IOException {
         if (entry.getSize() > limit) {
             throw ApiException.badRequest("Berkas " + path + " di '" + shownName + "' terlalu besar untuk diperiksa.")
@@ -540,7 +598,7 @@ final class PackageInspector {
      * Pembaca XML tanpa DTD dan tanpa entitas luar: isi paket datang dari
      * luar, dan XAML yang sah tidak pernah membutuhkan keduanya.
      */
-    private static XMLInputFactory xmlFactory() {
+    static XMLInputFactory xmlFactory() {
         XMLInputFactory factory = XMLInputFactory.newFactory();
         factory.setProperty(XMLInputFactory.SUPPORT_DTD, false);
         factory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
@@ -594,7 +652,7 @@ final class PackageInspector {
         return new Xaml(root, namespaces);
     }
 
-    /** id, version, description dari &lt;metadata&gt; .nuspec, apa pun namespace-nya. */
+    /** id, version, description, tags dari &lt;metadata&gt; .nuspec, apa pun namespace-nya. */
     private static Map<String, String> readNuspec(ZipFile zip, ZipEntry entry, String shownName) throws IOException {
         byte[] content = readBytes(zip, entry, entry.getName(), shownName, MAX_TEXT_FILE_BYTES);
         Map<String, String> values = new LinkedHashMap<>();
@@ -609,7 +667,7 @@ final class PackageInspector {
                 if (event == XMLStreamConstants.START_ELEMENT) {
                     path.add(reader.getLocalName());
                     if (path.size() == 3 && path.get(1).equals("metadata")
-                            && Set.of("id", "version", "description").contains(path.get(2))) {
+                            && Set.of("id", "version", "description", "tags").contains(path.get(2))) {
                         values.put(path.get(2), reader.getElementText().trim());
                         path.removeLast();
                     }
@@ -691,13 +749,13 @@ final class PackageInspector {
         return null;
     }
 
-    private static String firstLine(String message) {
+    static String firstLine(String message) {
         if (message == null) return "";
         int newline = message.indexOf('\n');
         return newline < 0 ? message : message.substring(0, newline);
     }
 
-    private static ApiException corrupt(String shownName, String detail) {
+    static ApiException corrupt(String shownName, String detail) {
         return ApiException.badRequest("Berkas '" + shownName + "' rusak atau bukan paket yang utuh"
                 + (detail == null || detail.isBlank() ? "." : " (" + detail + ").")).withCode(CORRUPT);
     }

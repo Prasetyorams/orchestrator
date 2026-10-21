@@ -11,6 +11,7 @@ import id.jakforge.openorchestrator.model.FileContent;
 import id.jakforge.openorchestrator.model.PackageSource;
 import id.jakforge.openorchestrator.model.Severity;
 import id.jakforge.openorchestrator.repository.AlertRepository;
+import id.jakforge.openorchestrator.repository.LibraryRepository;
 import id.jakforge.openorchestrator.repository.LogRepository;
 import id.jakforge.openorchestrator.repository.PackageRepository;
 import id.jakforge.openorchestrator.repository.ProcessRepository;
@@ -25,9 +26,13 @@ import org.springframework.util.unit.DataSize;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -61,6 +66,7 @@ public class PackageService {
     private final FolderAccessService folderAccessService;
     private final PermissionChecker permissionChecker;
     private final OpenOrchestratorProperties properties;
+    private final LibraryRepository libraryRepository;
 
     /** Tanpa {@code folderId}: seluruh umpan; selain itu paket yang dipakai proses di folder itu. */
     public List<Map<String, Object>> findAll(OpenOrchestratorPrincipal principal, String folderId) {
@@ -139,17 +145,30 @@ public class PackageService {
         }
 
         String fileName = fileNameOf(file);
-        PackageInspector.Inspection inspected = PackageInspector.inspect(original, fileName);
+        UUID tenantId = principal.tenantId();
+        Set<String> libraryNames = new HashSet<>(libraryRepository.findNames(tenantId));
+        PackageInspector.Inspection inspected = PackageInspector.inspect(original, fileName,
+                id -> libraryNames.contains(id.toLowerCase(Locale.ROOT)));
         checkSize(inspected.content().length);
 
-        UUID tenantId = principal.tenantId();
         String name = inspected.name();
         String version = inspected.version();
         if (packageRepository.exists(tenantId, name, version)) throw versionExists(name, version);
 
+        // Library dari feed (V20): dipasang robot sendiri. Versi yang belum ada
+        // diperingatkan sekarang — job-nya gagal saat diambil robot sampai diunggah.
+        LibraryResolver.Resolution libraries = LibraryResolver.resolve(inspected.dependencyVersions(),
+                LibraryService.cached(LibraryService.feed(libraryRepository, tenantId)));
+        List<String> warnings = new ArrayList<>(inspected.warnings());
+        if (!libraries.ok()) {
+            warnings.addAll(libraries.problems());
+            warnings.add("Job proses ini gagal saat diambil robot sampai library itu diunggah ke feed library.");
+        }
+
         String sha256 = Hashes.sha256Hex(inspected.content());
         insertPackage(tenantId, name, version, inspected.description(), inspected.entryPoint(), principal.username(),
                 inspected.content(), sha256, PackageSource.MANUAL_UPLOAD, fileName, Hashes.sha256Hex(original));
+        packageRepository.setDependencies(tenantId, name, version, Dependencies.toJson(inspected.dependencyVersions()));
 
         String processChange = linkUploadedVersion(tenantId, name, version, inspected.description());
 
@@ -161,7 +180,8 @@ public class PackageService {
 
         return new UploadPackageResponse(true, name, version, inspected.content().length, sha256,
                 inspected.entryPoint(), PackageSource.MANUAL_UPLOAD.name(), inspected.layout().name(),
-                inspected.converted(), name, processChange, inspected.dependencies(), inspected.warnings());
+                inspected.converted(), name, processChange, inspected.dependencies(),
+                libraries.libraries().stream().map(l -> l.name() + " " + l.version()).toList(), List.copyOf(warnings));
     }
 
     /** Proses bernama sama: dibuat kalau belum ada, dipindah hanya kalau versinya lebih lama. */
@@ -242,6 +262,11 @@ public class PackageService {
 
         insertPackage(tenantId, request.name(), request.version(), request.description(), request.entryPoint(),
                 publisher, content, sha256, PackageSource.STUDIO, sourceFileName, sourceFileName == null ? null : sha256);
+
+        // Dependensi project.json dibaca sekali di sini (V20): saat robot mengambil
+        // job-nya, library yang dibutuhkan dicari tanpa membuka paketnya lagi.
+        packageRepository.setDependencies(tenantId, request.name(), request.version(),
+                Dependencies.toJson(PackageInspector.projectDependencies(content)));
 
         // Menerbitkan paket hampir selalu berarti ingin proses dengan nama yang
         // sama tersedia untuk dijalankan. Membuatnya di sini menghemat satu

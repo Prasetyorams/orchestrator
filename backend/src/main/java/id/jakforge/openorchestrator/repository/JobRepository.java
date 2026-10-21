@@ -755,6 +755,24 @@ public class JobRepository {
                 """.formatted(exclusion, OUTCOME_COLUMNS), args.toArray());
     }
 
+    /**
+     * Job yang baru saja diambil tetapi tidak bisa dijalankan — mis. library
+     * yang dibutuhkannya tidak ada di feed (V20). Gagal di tempat, sebelum robot
+     * menyiapkan apa pun; robotnya tetap bebas mengambil job lain.
+     */
+    public Optional<Map<String, Object>> failAtClaim(UUID jobId, String errorCode, String info) {
+        return database.queryRow("""
+                UPDATE jobs
+                   SET state = 'FAULTED',
+                       error_code = ?,
+                       progress = 100,
+                       ended_at = now(),
+                       info = ?
+                 WHERE id = ? AND state = 'ASSIGNED'
+             RETURNING %s
+                """.formatted(OUTCOME_COLUMNS), errorCode, info, jobId);
+    }
+
     // -----------------------------------------------------------------
     // Pemantauan berkala (JobSupervisionService)
     // -----------------------------------------------------------------

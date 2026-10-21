@@ -91,6 +91,7 @@ public class AgentService {
     private final CalendarRepository calendarRepository;
     private final AuditService auditService;
     private final JobOutcomeService jobOutcomeService;
+    private final LibraryService libraryService;
     private final JwtService jwtService;
     private final SecretBox secretBox;
     private final OpenOrchestratorProperties properties;
@@ -331,6 +332,22 @@ public class AgentService {
         jobRepository.recordExecutionPlan(jobId, packageName, packageVersion, (String) plan.get("sha256"),
                 timeoutSeconds, stopGraceSeconds);
 
+        // Library yang dibutuhkan paketnya (V20). Yang tidak ada di feed membuat
+        // job gagal DI SINI, dengan alasan yang jelas — bukan di robot sebagai
+        // "Could not load file or assembly" sesudah sesi Windows disiapkan.
+        LibraryResolver.Resolution libraries = libraryService.resolveForPackage(tenantId, packageName, packageVersion);
+        if (!libraries.ok()) {
+            String reason = String.join(" ", libraries.problems());
+            Optional<Map<String, Object>> failed = jobRepository.failAtClaim(jobId, AgentErrorCodes.LIBRARY_NOT_FOUND,
+                    reason);
+            for (String problem : libraries.problems()) {
+                logRepository.insertJobEntry(tenantId, LogLevel.ERROR, problem, robotName, processName, jobId);
+            }
+            failed.ifPresent(jobOutcomeService::afterFinished);
+            return Optional.empty();
+        }
+        libraryService.recordForJob(tenantId, jobId, libraries.libraries());
+
         Duration tokenTtl = timeoutSeconds == null
                 ? EXECUTOR_TOKEN_WITHOUT_TIMEOUT
                 : Duration.ofSeconds(timeoutSeconds).plus(EXECUTOR_TOKEN_MARGIN);
@@ -358,6 +375,7 @@ public class AgentService {
         result.put("priority", job.get("priority"));
         result.put("runtimeType", job.get("runtimeType"));
         result.put("package", packageInfo);
+        result.put("libraries", libraries.libraries().stream().map(AgentService::libraryInfo).toList());
         result.put("entryPoint", plan.get("entryPoint"));
         result.put("inputJson", job.get("inputJson"));
         result.put("leaseExpiresAt", job.get("leaseExpiresAt"));
@@ -368,6 +386,18 @@ public class AgentService {
         result.put("executorToken", executorToken);
 
         return Optional.of(result);
+    }
+
+    /** Satu library di jawaban klaim; {@code id} adalah Id library (NuGet), seperti di .nuspec. */
+    private static Map<String, Object> libraryInfo(LibraryResolver.Available library) {
+        Map<String, Object> info = new LinkedHashMap<>();
+        info.put("id", library.name());
+        info.put("version", library.version());
+        info.put("sha256", library.sha256());
+        info.put("sizeBytes", library.sizeBytes());
+        info.put("url", "/api/agent/libraries/" + encodePath(library.name()) + "/" + encodePath(library.version())
+                + "/content");
+        return info;
     }
 
     // -----------------------------------------------------------------

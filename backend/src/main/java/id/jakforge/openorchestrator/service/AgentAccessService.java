@@ -2,6 +2,7 @@ package id.jakforge.openorchestrator.service;
 
 import id.jakforge.openorchestrator.common.ApiException;
 import id.jakforge.openorchestrator.repository.JobRepository;
+import id.jakforge.openorchestrator.repository.LibraryRepository;
 import id.jakforge.openorchestrator.repository.MachineRepository;
 import id.jakforge.openorchestrator.security.MachineKeys;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
@@ -43,6 +44,7 @@ public class AgentAccessService {
 
     private final MachineRepository machineRepository;
     private final JobRepository jobRepository;
+    private final LibraryRepository libraryRepository;
     private final Clock clock;
 
     private final Map<UUID, CachedHold> executorJobs = new ConcurrentHashMap<>();
@@ -60,6 +62,11 @@ public class AgentAccessService {
     /** Agent boleh mengunduh paket yang sedang dijalankan job robot di mesinnya. */
     public boolean canDownloadPackage(OpenOrchestratorPrincipal agent, String name, String version) {
         return name != null && version != null && jobRepository.machineRunsPackage(agent.machineId(), name, version);
+    }
+
+    /** Library (V20) yang diberikan ke job yang sedang dipegang mesin ini. */
+    public boolean canDownloadLibrary(OpenOrchestratorPrincipal agent, String name, String version) {
+        return name != null && version != null && libraryRepository.machineRunsLibrary(agent.machineId(), name, version);
     }
 
     /** 401 kalau job executor ini sudah selesai. */

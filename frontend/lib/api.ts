@@ -521,6 +521,38 @@ export type UploadPackageResult = {
   processName: string;
   processChange: "CREATED" | "UPDATED" | "UNCHANGED";
   dependencies: string[];
+  /** V20: dependensi yang ada di feed library, "Id versi" — dipasang robot sendiri. */
+  libraries?: string[];
+  warnings: string[];
+};
+
+/** Satu versi library di feed library (V20). id adalah Id library dari .nuspec, bukan kunci baris. */
+export type Library = {
+  id: string;
+  version: string;
+  description: string | null;
+  authors: string | null;
+  /** Jalur DLL di dalam .nupkg, mis. lib/net45/Tagihan.Umum.dll. */
+  assemblyFile: string;
+  /** Dependensi dari .nuspec, Id → versi. */
+  dependencies: Record<string, string>;
+  publishedBy: string | null;
+  publishedAt: string;
+  sizeBytes: number;
+  sha256: string;
+  sourceFileName: string | null;
+};
+
+/** Jawaban POST /api/libraries (V20). */
+export type UploadLibraryResult = {
+  ok: boolean;
+  id: string;
+  version: string;
+  description: string | null;
+  sizeBytes: number;
+  sha256: string;
+  assemblyFile: string;
+  dependencies: Record<string, string>;
   warnings: string[];
 };
 
@@ -1193,6 +1225,26 @@ export const OpenOrchestratorApi = {
   },
   packageUrl: (name: string, version: string) =>
     `${api.defaults.baseURL}/api/packages/${seg(name)}/${seg(version)}/content`,
+
+  // --- feed library (V20) ---
+  libraries: (search?: string) => get<Library[]>("/api/libraries", search?.trim() ? { search: search.trim() } : undefined),
+  /** Unggah library (.nupkg hasil Terbitkan proyek Library); kemajuan dan pembatalan seperti uploadPackage. */
+  uploadLibrary: (file: File, opsi?: { onProgress?: (bagian: number) => void; signal?: AbortSignal }) => {
+    const data = new FormData();
+    data.append("file", file, file.name);
+
+    return api
+      .post<UploadLibraryResult>("/api/libraries", data, {
+        headers: { "Content-Type": "multipart/form-data" },
+        signal: opsi?.signal,
+        onUploadProgress: (e) => opsi?.onProgress?.(e.total ? e.loaded / e.total : 0),
+      })
+      .then((r) => r.data);
+  },
+  deleteLibrary: (id: string, version: string) =>
+    del<{ ok: boolean }>(`/api/libraries/${seg(id)}/${seg(version)}`),
+  libraryUrl: (id: string, version: string) =>
+    `${api.defaults.baseURL}/api/libraries/${seg(id)}/${seg(version)}/content`,
 
   // --- pemicu ---
   triggers: (folderId?: string | null) => get<Trigger[]>("/api/triggers", dalam(folderId)),

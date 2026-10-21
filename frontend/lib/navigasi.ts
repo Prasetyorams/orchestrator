@@ -8,6 +8,7 @@ import {
   Folders,
   History,
   House,
+  Library,
   List,
   Package,
   Settings,
@@ -132,6 +133,8 @@ export const TAB_TENANT: Tab[] = [
     sub: SUBTAB.tenantRobot,
   },
   { label: "Paket", href: "/tenant/packages", ikon: Package, awalan: "/tenant/packages", izin: ["packages.read"] },
+  // V20: feed library — izin paket, seperti di UiPath (Packages › Libraries).
+  { label: "Library", href: "/tenant/libraries", ikon: Library, awalan: "/tenant/libraries", izin: ["packages.read"] },
   { label: "Peringatan", href: "/tenant/alerts", ikon: Bell, awalan: "/tenant/alerts", izin: ["alerts.read"] },
   { label: "Audit", href: "/tenant/audit", ikon: History, awalan: "/tenant/audit", izin: ["audit.read"] },
   {

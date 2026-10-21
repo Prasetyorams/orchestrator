@@ -149,6 +149,8 @@ public class AuditInterceptor implements HandlerInterceptor {
             rule(POST, "/api/packages", "Paket", "Terbitkan", body("name"), body("version")),
             rule(POST, "/api/packages/upload", "Paket", "Unggah", FROM_HANDLER),
             rule(DELETE, "/api/packages/{name}/{version}", "Paket", "Hapus", path("name"), path("version")),
+            rule(POST, "/api/libraries", "Library", "Unggah", FROM_HANDLER),
+            rule(DELETE, "/api/libraries/{name}/{version}", "Library", "Hapus", path("name"), path("version")),
 
             rule(POST, "/api/jobs", "Pekerjaan", "Jalankan", body("processName"), FOLDER_FROM_BODY),
             rule(POST, "/api/jobs/{id}/stop", "Pekerjaan", "Hentikan", JOB_BY_ID),
