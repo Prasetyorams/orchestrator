@@ -89,27 +89,29 @@ public class PackageRepository {
     }
 
     /**
-     * Dependensi project.json yang tersimpan (V20) sebagai teks JSON. Kosong
-     * kalau paketnya tidak ada; isinya null kalau paketnya dari sebelum V20 dan
-     * belum pernah dibaca.
+     * Dependensi project.json yang tersimpan (V20) dan penanda library-nya
+     * (V21), sebagai teks JSON. Kosong kalau paketnya tidak ada; dependencies
+     * null kalau belum pernah dibaca dari isinya.
      */
     public Optional<Map<String, Object>> findDependencies(UUID tenantId, String name, String version) {
         List<Map<String, Object>> rows = database.queryRows("""
-                SELECT dependencies FROM packages WHERE tenant_id = ? AND name = ? AND version = ?
+                SELECT dependencies, libraries FROM packages WHERE tenant_id = ? AND name = ? AND version = ?
                 """, tenantId, name, version);
 
         return rows.isEmpty() ? Optional.empty() : Optional.of(rows.getFirst());
     }
 
-    public void setDependencies(UUID tenantId, String name, String version, String dependenciesJson) {
-        database.update("UPDATE packages SET dependencies = ? WHERE tenant_id = ? AND name = ? AND version = ?",
-                dependenciesJson, tenantId, name, version);
+    public void setDependencies(UUID tenantId, String name, String version, String dependenciesJson,
+                                String librariesJson) {
+        database.update("""
+                UPDATE packages SET dependencies = ?, libraries = ? WHERE tenant_id = ? AND name = ? AND version = ?
+                """, dependenciesJson, librariesJson, tenantId, name, version);
     }
 
     /** Versi paket yang sedang disematkan proses mana pun, sekali per versi. */
     public List<Map<String, Object>> findPinnedVersions(UUID tenantId) {
         return database.queryRows("""
-                SELECT DISTINCT k.name, k.version, k.dependencies
+                SELECT DISTINCT k.name, k.version, k.dependencies, k.libraries
                   FROM processes p
                   JOIN packages k ON k.tenant_id = p.tenant_id AND k.name = p.package_name AND k.version = p.package_version
                  WHERE p.tenant_id = ?

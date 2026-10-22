@@ -114,11 +114,12 @@ final class PackageInspector {
      * @param content            isi yang disimpan: zip proyek, workflow di akarnya
      * @param dependencies       dependensi dari project.json, "Id versi" (activity dan library)
      * @param dependencyVersions dependensi yang sama sebagai Id → versi, untuk disimpan dan dicocokkan dengan feed library
+     * @param declaredLibraries  Id di "libraries" project.json (V21): dependensi yang ditandai Studio sebagai library
      * @param warnings           yang tidak bisa dipastikan server, untuk ditampilkan ke pengunggah
      */
     record Inspection(String name, String version, String description, String entryPoint, byte[] content,
                       Layout layout, List<String> dependencies, Map<String, String> dependencyVersions,
-                      List<String> warnings) {
+                      List<String> declaredLibraries, List<String> warnings) {
 
         boolean converted() {
             return layout != Layout.ZIP;
@@ -133,9 +134,10 @@ final class PackageInspector {
     }
 
     /**
-     * @param isLibrary Id dependensi yang ada di feed library (V20): dipasang
-     *                  robot dari Orchestrator, jadi tidak diperingatkan sebagai
-     *                  activity yang harus sudah ada di mesin robot
+     * @param isLibrary Id yang ada di feed library (V20): dipasang robot dari
+     *                  Orchestrator, jadi tidak diperingatkan sebagai activity
+     *                  atau pustaka yang harus sudah ada di mesin robot. Id yang
+     *                  ditandai di "libraries" project.json juga tidak.
      */
     static Inspection inspect(byte[] file, String fileName, Predicate<String> isLibrary) {
         String shownName = fileName == null || fileName.isBlank() ? "paket" : fileName;
@@ -186,22 +188,32 @@ final class PackageInspector {
     }
 
     /**
+     * @param dependencies "dependencies" project.json, Id → versi
+     * @param libraries    "libraries" project.json (V21): Id dependensi yang berupa library; kosong di paket Studio lama
+     */
+    record ProjectDependencies(Map<String, String> dependencies, List<String> libraries) {
+
+        static final ProjectDependencies NONE = new ProjectDependencies(Map.of(), List.of());
+    }
+
+    /**
      * Dependensi project.json dari isi paket yang SUDAH tersimpan (zip proyek,
-     * project.json di akarnya), Id → versi. Paket tanpa project.json, atau yang
-     * tidak terbaca, dianggap tanpa dependensi: yang dipakai di sini hanya untuk
+     * project.json di akarnya). Paket tanpa project.json, atau yang tidak
+     * terbaca, dianggap tanpa dependensi: yang dipakai di sini hanya untuk
      * mencari library yang dibutuhkan, dan paket itu sudah lolos saat terbit.
      */
-    static Map<String, String> projectDependencies(byte[] content) {
-        if (content == null) return Map.of();
+    static ProjectDependencies projectDependencies(byte[] content) {
+        if (content == null) return ProjectDependencies.NONE;
 
         try {
             return withZip(content, "paket", zip -> {
                 ZipEntry entry = readEntries(zip, "paket").get(PROJECT_JSON);
-                if (entry == null) return Map.of();
-                return dependencies(JSON.readTree(readText(zip, entry, PROJECT_JSON, "paket")));
+                if (entry == null) return ProjectDependencies.NONE;
+                JsonNode projectJson = JSON.readTree(readText(zip, entry, PROJECT_JSON, "paket"));
+                return new ProjectDependencies(dependencies(projectJson), declaredLibraries(projectJson));
             });
         } catch (RuntimeException e) {
-            return Map.of();
+            return ProjectDependencies.NONE;
         }
     }
 
@@ -272,6 +284,10 @@ final class PackageInspector {
         }
 
         Map<String, String> dependencies = dependencies(projectJson);
+        List<String> declaredLibraries = declaredLibraries(projectJson);
+        // Library — di feed, atau ditandai Studio di "libraries" — dipasang robot
+        // sendiri (V20/V21): bukan activity, dan DLL-nya bukan pustaka asing.
+        Predicate<String> library = id -> isLibrary.test(id) || declaredLibraries.stream().anyMatch(id::equalsIgnoreCase);
         List<String> uipathEvidence = new ArrayList<>();
         dependencies.keySet().stream()
                 .filter(id -> id.toLowerCase(Locale.ROOT).startsWith("uipath."))
@@ -296,7 +312,7 @@ final class PackageInspector {
                 String assembly = m.group(1);
                 if (assembly.toLowerCase(Locale.ROOT).startsWith("uipath")) {
                     uipathEvidence.add("pustaka " + assembly + " di " + path);
-                } else if (KNOWN_ASSEMBLY_PREFIXES.stream().noneMatch(assembly::startsWith)) {
+                } else if (KNOWN_ASSEMBLY_PREFIXES.stream().noneMatch(assembly::startsWith) && !library.test(assembly)) {
                     unknownAssemblies.add(assembly);
                 }
             }
@@ -336,10 +352,9 @@ final class PackageInspector {
         String description = firstText(nuspec.get("description"), text(projectJson, "description"));
         if (description != null && description.length() > 400) description = description.substring(0, 400);
 
-        // Library dari feed dipasang robot sendiri (V20); yang lain activity yang
-        // harus sudah terpasang di mesin robot.
+        // Selain library, dependensi adalah activity yang harus sudah terpasang di mesin robot.
         List<String> activities = dependencies.entrySet().stream()
-                .filter(d -> !isLibrary.test(d.getKey()))
+                .filter(d -> !library.test(d.getKey()))
                 .map(d -> d.getKey() + (d.getValue().isBlank() ? "" : " " + d.getValue())).toList();
         if (!activities.isEmpty()) {
             warnings.add("Paket ini membutuhkan activity: " + String.join(", ", activities)
@@ -360,7 +375,7 @@ final class PackageInspector {
 
         return new Inspection(name, version, description, entryPoint, content, layout,
                 dependencies.entrySet().stream().map(d -> (d.getKey() + " " + d.getValue()).trim()).toList(),
-                java.util.Collections.unmodifiableMap(dependencies), List.copyOf(warnings));
+                java.util.Collections.unmodifiableMap(dependencies), declaredLibraries, List.copyOf(warnings));
     }
 
     // -------------------------------------------------------------------- entri
@@ -727,6 +742,23 @@ final class PackageInspector {
     }
 
     // -------------------------------------------------------------------- alat
+
+    /**
+     * "libraries" project.json (V21): daftar Id, versinya tetap di
+     * "dependencies". Yang bukan teks diabaikan; Id ganda (beda huruf) sekali.
+     */
+    private static List<String> declaredLibraries(JsonNode projectJson) {
+        JsonNode node = projectJson == null ? null : projectJson.get("libraries");
+        if (node == null || !node.isArray()) return List.of();
+
+        List<String> result = new ArrayList<>();
+        for (JsonNode id : node) {
+            if (!id.isTextual() || id.asText().isBlank()) continue;
+            String trimmed = id.asText().trim();
+            if (result.stream().noneMatch(trimmed::equalsIgnoreCase)) result.add(trimmed);
+        }
+        return List.copyOf(result);
+    }
 
     private static Map<String, String> dependencies(JsonNode projectJson) {
         Map<String, String> result = new LinkedHashMap<>();

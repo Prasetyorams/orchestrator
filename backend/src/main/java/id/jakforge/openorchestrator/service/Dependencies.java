@@ -29,6 +29,28 @@ final class Dependencies {
         }
     }
 
+    /** Daftar Id ("libraries" project.json, V21) sebagai larik JSON. */
+    static String listToJson(java.util.List<String> ids) {
+        try {
+            return JSON.writeValueAsString(ids == null ? java.util.List.of() : ids);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Daftar library tidak bisa ditulis sebagai JSON.", e);
+        }
+    }
+
+    /** Teks yang rusak atau bukan larik teks dibaca sebagai daftar kosong. */
+    static java.util.List<String> listFromJson(Object json) {
+        if (json == null) return java.util.List.of();
+
+        try {
+            java.util.List<Object> raw = JSON.readValue(json.toString(), new TypeReference<>() {
+            });
+            return raw.stream().filter(String.class::isInstance).map(String.class::cast).toList();
+        } catch (JsonProcessingException | ClassCastException e) {
+            return java.util.List.of();
+        }
+    }
+
     /** Teks yang rusak atau bukan objek dibaca sebagai tanpa dependensi. */
     static Map<String, String> fromJson(Object json) {
         if (json == null) return Map.of();

@@ -2,12 +2,15 @@ package id.jakforge.openorchestrator.service;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 
 /**
@@ -17,6 +20,10 @@ import java.util.function.Function;
  * yang tidak ada di feed dianggap paket activity yang dipasang di mesin robot
  * (aturan lama, tidak berubah). Library juga boleh bergantung pada library
  * lain lewat .nuspec-nya — yang itu ikut diberikan.
+ *
+ * <p>Studio yang lebih baru menandai dependensi library di "libraries"
+ * project.json (V21). Id yang ditandai begitu PASTI library: kalau tidak ada di
+ * feed, itu masalah — bukan activity yang kebetulan tidak dikenal.
  *
  * <p>Versinya sama dengan cara OpenStudio memulihkan dependensi proyek
  * (Project.InstallDependencies): batas bawah rentang versi NuGet, kalau
@@ -89,7 +96,15 @@ final class LibraryResolver {
      * @param feed         versi yang ada di feed untuk satu Id (huruf kecil); kosong kalau Id itu bukan library
      */
     static Resolution resolve(Map<String, String> dependencies, Function<String, List<Available>> feed) {
-        if (dependencies == null || dependencies.isEmpty()) return Resolution.none();
+        return resolve(dependencies, List.of(), feed);
+    }
+
+    /** @param declared Id di "libraries" project.json: library walau belum ada di feed */
+    static Resolution resolve(Map<String, String> dependencies, Collection<String> declared,
+                              Function<String, List<Available>> feed) {
+        Map<String, String> safeDependencies = dependencies == null ? Map.of() : dependencies;
+        Collection<String> safeDeclared = declared == null ? List.of() : declared;
+        if (safeDependencies.isEmpty() && safeDeclared.isEmpty()) return Resolution.none();
 
         Map<String, List<Available>> versions = new HashMap<>();
         Function<String, List<Available>> versionsOf =
@@ -99,15 +114,32 @@ final class LibraryResolver {
         Map<String, String> chosenFor = new HashMap<>();
         List<String> problems = new ArrayList<>();
 
+        Set<String> declaredKeys = new HashSet<>();
+        for (String id : safeDeclared) {
+            declaredKeys.add(id.toLowerCase(Locale.ROOT));
+            if (safeDependencies.keySet().stream().noneMatch(id::equalsIgnoreCase)) {
+                problems.add("Library " + id + " ditandai di \"libraries\" project.json, tetapi versinya tidak disebut"
+                        + " di \"dependencies\".");
+            }
+        }
+
         Deque<Need> queue = new ArrayDeque<>();
-        dependencies.forEach((name, spec) -> queue.add(new Need(name, spec, null)));
+        safeDependencies.forEach((name, spec) -> queue.add(new Need(name, spec, null)));
 
         while (!queue.isEmpty()) {
             Need need = queue.poll();
-            List<Available> available = versionsOf.apply(need.name());
-            if (available.isEmpty()) continue; // bukan library: activity di mesin robot
-
             String key = need.name().toLowerCase(Locale.ROOT);
+            List<Available> available = versionsOf.apply(need.name());
+            if (available.isEmpty()) {
+                // Bukan library (activity di mesin robot) — kecuali Studio menandainya library.
+                if (need.requiredBy() == null && declaredKeys.contains(key)) {
+                    String required = requiredVersion(need.spec());
+                    problems.add("Library " + need.name() + (required == null ? "" : " versi " + required)
+                            + " belum ada di feed library.");
+                }
+                continue;
+            }
+
             String shownName = available.getFirst().name();
             String by = need.requiredBy() == null ? "" : " (dibutuhkan " + need.requiredBy() + ")";
 

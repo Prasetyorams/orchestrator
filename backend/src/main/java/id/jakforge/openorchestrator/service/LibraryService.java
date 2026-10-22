@@ -238,11 +238,10 @@ public class LibraryService {
         for (Map<String, Object> pinned : packageRepository.findPinnedVersions(tenantId)) {
             String packageName = (String) pinned.get("name");
             String packageVersion = (String) pinned.get("version");
-            Map<String, String> dependencies = pinned.get("dependencies") == null
-                    ? readDependencies(tenantId, packageName, packageVersion)
-                    : Dependencies.fromJson(pinned.get("dependencies"));
+            PackageInspector.ProjectDependencies dependencies = storedOrRead(pinned, tenantId, packageName, packageVersion);
 
-            boolean needed = LibraryResolver.resolve(dependencies, feed).libraries().stream()
+            boolean needed = LibraryResolver.resolve(dependencies.dependencies(), dependencies.libraries(), feed)
+                    .libraries().stream()
                     .anyMatch(l -> l.name().equalsIgnoreCase(name) && l.version().equals(version));
             if (needed) processes.addAll(packageRepository.findProcessesUsing(tenantId, packageName, packageVersion));
         }
@@ -267,11 +266,10 @@ public class LibraryService {
         Optional<Map<String, Object>> row = packageRepository.findDependencies(tenantId, packageName, packageVersion);
         if (row.isEmpty()) return LibraryResolver.Resolution.none();
 
-        Map<String, String> dependencies = row.get().get("dependencies") == null
-                ? readDependencies(tenantId, packageName, packageVersion)
-                : Dependencies.fromJson(row.get().get("dependencies"));
+        PackageInspector.ProjectDependencies dependencies = storedOrRead(row.get(), tenantId, packageName, packageVersion);
 
-        return LibraryResolver.resolve(dependencies, feed(libraryRepository, tenantId));
+        return LibraryResolver.resolve(dependencies.dependencies(), dependencies.libraries(),
+                feed(libraryRepository, tenantId));
     }
 
     /** Diberikan ke job saat diambil: yang boleh diunduh robotnya, dan yang tidak boleh dihapus selama job itu jalan. */
@@ -282,14 +280,22 @@ public class LibraryService {
     }
 
     /**
-     * Paket dari sebelum V20 belum menyimpan dependensinya: dibaca sekali dari
+     * Dependensi dan penanda library yang tersimpan; paket yang belum pernah
+     * dibaca (dari sebelum V20, atau dikosongkan V21) dibaca sekali dari
      * isinya, lalu disimpan.
      */
-    private Map<String, String> readDependencies(UUID tenantId, String packageName, String packageVersion) {
-        Map<String, String> dependencies = PackageInspector.projectDependencies(
+    private PackageInspector.ProjectDependencies storedOrRead(Map<String, Object> row, UUID tenantId,
+                                                              String packageName, String packageVersion) {
+        if (row.get("dependencies") != null) {
+            return new PackageInspector.ProjectDependencies(Dependencies.fromJson(row.get("dependencies")),
+                    Dependencies.listFromJson(row.get("libraries")));
+        }
+
+        PackageInspector.ProjectDependencies read = PackageInspector.projectDependencies(
                 packageRepository.findContent(tenantId, packageName, packageVersion).orElse(null));
-        packageRepository.setDependencies(tenantId, packageName, packageVersion, Dependencies.toJson(dependencies));
-        return dependencies;
+        packageRepository.setDependencies(tenantId, packageName, packageVersion, Dependencies.toJson(read.dependencies()),
+                Dependencies.listToJson(read.libraries()));
+        return read;
     }
 
     /** Satu kueri per Id selama satu permintaan, walau Id-nya ditanyakan berkali-kali. */

@@ -1417,6 +1417,39 @@ selalu membawa `libraries` (kosong kalau tidak ada):
   gagal dengan "Could not load file or assembly". Kalau Studio bisa menandai dependensi library di
   `project.json` (mis. kunci terpisah), server bisa menolaknya lebih awal. Apakah itu memungkinkan?
 
+  Kedua hal di atas sudah dijawab tim robot di `CATATAN-CONTOH-LIBRARY-OPENSTUDIO.md`; tindak lanjutnya di bawah.
+
+### Jawaban `CATATAN-CONTOH-LIBRARY-OPENSTUDIO.md` (22 Okt 2026, V21)
+
+Terima kasih untuk contoh paketnya dan untuk kunci `libraries`. **Sudah di-deploy** (22 Okt 2026; migrasi
+`V21__penanda_library.sql`). Tidak ada perubahan wajib di sisi robot.
+
+1. **Kunci `"libraries"` di `project.json` dipakai server**, sesuai usulan Anda:
+   - **Klaim:** Id yang ditandai di `libraries` tetapi tidak ada di feed membuat job gagal saat klaim dengan
+     `LibraryNotFound`. Contoh alasannya: "Library ContohPajak versi 1.2.0 belum ada di feed library."
+   - **Unggah Paket:** paket tetap **diterima**, tetapi dengan peringatan "belum ada di feed library", supaya
+     proses boleh diunggah lebih dulu daripada library-nya.
+   - **Id tanpa versi:** Id di `libraries` yang tidak ada di `dependencies` juga dianggap masalah.
+   - **Paket Studio lama** tanpa `libraries` tetap seperti dulu: Id yang tidak dikenal dianggap activity.
+   - **Versi tetap hanya dibaca dari `dependencies`**, dengan aturan versi persis yang sama.
+   - **Paket yang sudah tersimpan** dibaca ulang dari isinya saat pertama dibutuhkan, karena V21 mengosongkan
+     dependensi yang tersimpan. Jadi paket yang terbit sesudah V20 pun ikut terbaca penandanya.
+2. **Peringatan palsu diperbaiki.** Unggah Paket untuk `LibraryConsumer` sempat memperingatkan "Workflow merujuk
+   pustaka yang bukan bawaan OpenStudio: ContohPajak", karena XAML-nya merujuk `assembly=ContohPajak`. Sekarang
+   pustaka yang namanya ada di feed, atau ditandai di `libraries`, tidak lagi dianggap asing.
+3. **Kedua contoh paket asli diuji melawan backend uji V21**:
+   - sidiknya cocok dengan catatan Anda;
+   - `LibraryConsumer` yang diunggah sebelum library ada diterima dengan peringatan, lalu job-nya `LibraryNotFound`;
+   - `ContohPajak` diterima tanpa peringatan;
+   - klaim berikutnya membawa `libraries[] = ContohPajak 1.2.0` dengan sidik berkas asli;
+   - agent mengunduh bita yang identik;
+   - menghapus `ContohPajak` ditolak 409 selama proses masih membutuhkannya.
+
+   Seluruh E2E: 64 pemeriksaan lulus. Job-nya sendiri tidak dijalankan di sini; itu sudah Anda uji di lab
+   (`docs/catatan-orchestrator-feed-library.md` di cabang `claude/st4-multifile`).
+4. **Catatan untuk sisi robot:** pemeriksaan `LibraryNotFound` dari penanda ini terjadi di server saat klaim. Robot
+   tidak perlu membaca `libraries` dari `project.json` sendiri.
+
 ---
 
 # Bagian 5 — Open Assistant: masuk lewat dasbor (V11)

@@ -151,6 +151,42 @@ class LibraryResolverTest {
     }
 
     @Test
+    @DisplayName("ditandai di \"libraries\" tetapi belum ada di feed: masalah (bukan activity)")
+    void declaredButMissing() {
+        LibraryResolver.Resolution r = LibraryResolver.resolve(Map.of("ContohPajak", "[1.2.0]", "OpenStudio.Mail.Activities", "2.0.1"),
+                List.of("contohpajak"), name -> List.of());
+
+        assertEquals(List.of("Library ContohPajak versi 1.2.0 belum ada di feed library."), r.problems());
+    }
+
+    @Test
+    @DisplayName("ditandai dan ada di feed: diberikan seperti biasa")
+    void declaredAndInFeed() {
+        add("ContohPajak", "1.2.0", Map.of());
+
+        LibraryResolver.Resolution r = LibraryResolver.resolve(Map.of("ContohPajak", "[1.2.0]"), List.of("ContohPajak"),
+                lowerName -> feed.stream().filter(a -> a.name().toLowerCase(Locale.ROOT).equals(lowerName)).toList());
+
+        assertTrue(r.ok(), r.problems().toString());
+        assertEquals(List.of("ContohPajak 1.2.0"), names(r));
+    }
+
+    @Test
+    @DisplayName("ditandai tanpa versi di dependencies: masalah")
+    void declaredWithoutVersion() {
+        LibraryResolver.Resolution r = LibraryResolver.resolve(Map.of(), List.of("ContohPajak"), name -> List.of());
+
+        assertEquals(1, r.problems().size());
+        assertTrue(r.problems().getFirst().contains("versinya tidak disebut"), r.problems().toString());
+    }
+
+    @Test
+    @DisplayName("paket Studio lama tanpa \"libraries\": Id yang tidak dikenal tetap activity")
+    void undeclaredUnknownStaysActivity() {
+        assertTrue(LibraryResolver.resolve(Map.of("ContohPajak", "[1.2.0]"), List.of(), name -> List.of()).ok());
+    }
+
+    @Test
     @DisplayName("tanpa dependensi: tidak ada library, tanpa kueri")
     void noDependencies() {
         assertTrue(resolve(Map.of()).libraries().isEmpty());

@@ -4,6 +4,7 @@ import id.jakforge.openorchestrator.common.ApiException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 
 import static id.jakforge.openorchestrator.service.PackageInspectorTest.MAIN;
@@ -213,13 +214,49 @@ class LibraryInspectorTest {
     }
 
     @Test
-    @DisplayName("dependensi project.json dari paket yang tersimpan; tanpa project.json atau rusak: kosong")
+    @DisplayName("dependensi dan penanda library project.json dari paket yang tersimpan; tanpa project.json atau rusak: kosong")
     void storedPackageDependencies() {
-        assertEquals(Map.of("Tagihan.Umum", "1.2.0"), PackageInspector.projectDependencies(zip("Main.xaml", MAIN,
-                "project.json", "{\"dependencies\":{\"Tagihan.Umum\":\"1.2.0\"}}")));
-        assertEquals(Map.of(), PackageInspector.projectDependencies(zip("Main.xaml", MAIN)));
-        assertEquals(Map.of(), PackageInspector.projectDependencies(zip("project.json", "{ bukan json")));
-        assertEquals(Map.of(), PackageInspector.projectDependencies("bukan zip".getBytes()));
-        assertEquals(Map.of(), PackageInspector.projectDependencies(null));
+        PackageInspector.ProjectDependencies stored = PackageInspector.projectDependencies(zip("Main.xaml", MAIN,
+                "project.json", "{\"dependencies\":{\"Tagihan.Umum\":\"1.2.0\"},\"libraries\":[\"Tagihan.Umum\",\"tagihan.umum\",3,\"\"]}"));
+        assertEquals(Map.of("Tagihan.Umum", "1.2.0"), stored.dependencies());
+        assertEquals(List.of("Tagihan.Umum"), stored.libraries(), "hanya teks, Id ganda sekali");
+
+        assertEquals(PackageInspector.ProjectDependencies.NONE, PackageInspector.projectDependencies(zip("Main.xaml", MAIN)));
+        assertEquals(PackageInspector.ProjectDependencies.NONE, PackageInspector.projectDependencies(zip("project.json", "{ bukan json")));
+        assertEquals(PackageInspector.ProjectDependencies.NONE, PackageInspector.projectDependencies("bukan zip".getBytes()));
+        assertEquals(PackageInspector.ProjectDependencies.NONE, PackageInspector.projectDependencies(null));
+        assertEquals(List.of(), PackageInspector.projectDependencies(zip("project.json",
+                "{\"dependencies\":{},\"libraries\":\"Tagihan.Umum\"}")).libraries(), "bukan larik: diabaikan");
+    }
+
+    @Test
+    @DisplayName("Unggah Paket: workflow yang memakai activity library (assembly=Id) tidak diperingatkan sebagai pustaka asing")
+    void libraryAssemblyInWorkflow() {
+        String xaml = MAIN.replace("xmlns:c=", "xmlns:p=\"clr-namespace:ContohPajak;assembly=ContohPajak\" xmlns:c=");
+        String project = "{\"name\":\"Konsumen\",\"main\":\"Main.xaml\",\"dependencies\":{\"ContohPajak\":\"[1.2.0]\"}}";
+
+        PackageInspector.Inspection inFeed = PackageInspector.inspect(zip("Main.xaml", xaml, "project.json", project),
+                "Konsumen.1.0.0.zip", id -> id.equalsIgnoreCase("contohpajak"));
+        PackageInspector.Inspection notInFeed = PackageInspector.inspect(zip("Main.xaml", xaml, "project.json", project),
+                "Konsumen.1.0.0.zip");
+
+        assertTrue(inFeed.warnings().isEmpty(), inFeed.warnings().toString());
+        assertTrue(notInFeed.warnings().stream().anyMatch(w -> w.contains("bukan bawaan OpenStudio: ContohPajak")),
+                notInFeed.warnings().toString());
+    }
+
+    @Test
+    @DisplayName("Unggah Paket: Id di \"libraries\" project.json adalah library walau belum ada di feed")
+    void declaredLibrariesAreNotActivities() {
+        String xaml = MAIN.replace("xmlns:c=", "xmlns:p=\"clr-namespace:ContohPajak;assembly=ContohPajak\" xmlns:c=");
+        String project = "{\"name\":\"Konsumen\",\"main\":\"Main.xaml\",\"dependencies\":{\"ContohPajak\":\"[1.2.0]\","
+                + "\"OpenStudio.Mail.Activities\":\"2.0.1\"},\"libraries\":[\"contohpajak\"]}";
+
+        PackageInspector.Inspection p = PackageInspector.inspect(zip("Main.xaml", xaml, "project.json", project),
+                "Konsumen.1.0.0.zip");
+
+        assertEquals(List.of("contohpajak"), p.declaredLibraries());
+        assertEquals(1, p.warnings().size(), p.warnings().toString());
+        assertTrue(p.warnings().getFirst().contains("activity: OpenStudio.Mail.Activities 2.0.1"), p.warnings().toString());
     }
 }

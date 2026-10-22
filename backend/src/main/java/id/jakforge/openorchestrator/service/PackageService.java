@@ -158,7 +158,7 @@ public class PackageService {
         // Library dari feed (V20): dipasang robot sendiri. Versi yang belum ada
         // diperingatkan sekarang — job-nya gagal saat diambil robot sampai diunggah.
         LibraryResolver.Resolution libraries = LibraryResolver.resolve(inspected.dependencyVersions(),
-                LibraryService.cached(LibraryService.feed(libraryRepository, tenantId)));
+                inspected.declaredLibraries(), LibraryService.cached(LibraryService.feed(libraryRepository, tenantId)));
         List<String> warnings = new ArrayList<>(inspected.warnings());
         if (!libraries.ok()) {
             warnings.addAll(libraries.problems());
@@ -168,7 +168,8 @@ public class PackageService {
         String sha256 = Hashes.sha256Hex(inspected.content());
         insertPackage(tenantId, name, version, inspected.description(), inspected.entryPoint(), principal.username(),
                 inspected.content(), sha256, PackageSource.MANUAL_UPLOAD, fileName, Hashes.sha256Hex(original));
-        packageRepository.setDependencies(tenantId, name, version, Dependencies.toJson(inspected.dependencyVersions()));
+        packageRepository.setDependencies(tenantId, name, version, Dependencies.toJson(inspected.dependencyVersions()),
+                Dependencies.listToJson(inspected.declaredLibraries()));
 
         String processChange = linkUploadedVersion(tenantId, name, version, inspected.description());
 
@@ -265,8 +266,9 @@ public class PackageService {
 
         // Dependensi project.json dibaca sekali di sini (V20): saat robot mengambil
         // job-nya, library yang dibutuhkan dicari tanpa membuka paketnya lagi.
+        PackageInspector.ProjectDependencies dependencies = PackageInspector.projectDependencies(content);
         packageRepository.setDependencies(tenantId, request.name(), request.version(),
-                Dependencies.toJson(PackageInspector.projectDependencies(content)));
+                Dependencies.toJson(dependencies.dependencies()), Dependencies.listToJson(dependencies.libraries()));
 
         // Menerbitkan paket hampir selalu berarti ingin proses dengan nama yang
         // sama tersedia untuk dijalankan. Membuatnya di sini menghemat satu

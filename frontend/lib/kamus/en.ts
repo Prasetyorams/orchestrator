@@ -1498,4 +1498,8 @@ export const PESAN_EN: Record<string, string> = {
   "Library {0} dibutuhkan dalam dua versi: {1} ({2}) dan {3} ({4}). Robot hanya bisa memasang satu.": "Library {0} is needed in two versions: {1} ({2}) and {3} ({4}). A robot can install only one.",
   "paket proses": "process package",
   "Paket ini membutuhkan lebih dari {0} library.": "This package needs more than {0} libraries.",
+  // penanda library di project.json (V21)
+  "Library {0} ditandai di \"libraries\" project.json, tetapi versinya tidak disebut di \"dependencies\".": "Library {0} is listed in \"libraries\" in project.json, but its version isn't given in \"dependencies\".",
+  "Library {0} versi {1} belum ada di feed library.": "Library {0} version {1} isn't in the library feed yet.",
+  "Library {0} belum ada di feed library.": "Library {0} isn't in the library feed yet.",
 };
