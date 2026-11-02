@@ -188,6 +188,23 @@ public class JwtService {
         return new OpenOrchestratorPrincipal(subject, tenantId, name, claims.get(CLAIM_ROLE, String.class));
     }
 
+    /**
+     * Kapan token ini kedaluwarsa — untuk sambungan yang hidup lebih lama dari
+     * satu permintaan (WebSocket Robot Agent), yang harus ditutup saat itu.
+     *
+     * @throws JwtException kalau tokennya rusak, palsu, atau sudah kedaluwarsa
+     */
+    public Instant expiresAt(String token) {
+        Date expiration = Jwts.parser()
+                .verifyWith(signingKey)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload()
+                .getExpiration();
+
+        return expiration == null ? null : expiration.toInstant();
+    }
+
     public long expirationMinutes() {
         return expirationMinutes;
     }

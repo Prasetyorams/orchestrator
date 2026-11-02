@@ -14,6 +14,7 @@ import id.jakforge.openorchestrator.repository.QueueRepository.HeldItem;
 import id.jakforge.openorchestrator.repository.RobotRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -43,6 +44,8 @@ public class JobOutcomeService {
     private final AlertRepository alertRepository;
     private final LogRepository logRepository;
     private final QueueRepository queueRepository;
+    /** Petunjuk WebSocket ke Robot Agent (AgentPushService). */
+    private final ApplicationEventPublisher events;
 
     /** @param job baris job SESUDAH berubah menjadi selesai (kolom camelCase) */
     public void afterFinished(Map<String, Object> job) {
@@ -134,6 +137,7 @@ public class JobOutcomeService {
         String info = "Percobaan ulang ke-" + attempt + " sesudah " + errorCode + ". Menunggu robot yang tersedia.";
 
         if (!jobRepository.insertRetry(retryId, job, info)) return;
+        events.publishEvent(new AgentPushEvents.JobQueued(retryId));
 
         UUID jobId = Uuids.parseOrNull((String) job.get("id"));
 

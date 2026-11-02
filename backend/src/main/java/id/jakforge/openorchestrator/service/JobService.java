@@ -26,6 +26,7 @@ import id.jakforge.openorchestrator.repository.ProcessRepository;
 import id.jakforge.openorchestrator.security.OpenOrchestratorPrincipal;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -85,6 +86,8 @@ public class JobService {
     private final ProcessRepository processRepository;
     private final MachineRepository machineRepository;
     private final OpenOrchestratorProperties properties;
+    /** Petunjuk WebSocket ke Robot Agent (AgentPushService). */
+    private final ApplicationEventPublisher events;
 
     /** Tanpa {@code folderId}: pekerjaan seluruh penyewa. */
     public List<Map<String, Object>> findAll(OpenOrchestratorPrincipal principal, String state, String processName,
@@ -196,6 +199,7 @@ public class JobService {
 
             logRepository.insertSystemEntry(tenantId,
                     "Pekerjaan dijadwalkan untuk " + request.processName() + ".", request.processName(), jobId);
+            events.publishEvent(new AgentPushEvents.JobQueued(jobId));
 
             jobIds.add(jobId);
         }
@@ -303,6 +307,7 @@ public class JobService {
 
         logRepository.insertSystemEntry(tenantId, "Pekerjaan dijalankan ulang dari " + jobId + ".", processName,
                 newJobId);
+        events.publishEvent(new AgentPushEvents.JobQueued(newJobId));
 
         return JobsCreatedResponse.of(List.of(newJobId));
     }
@@ -436,6 +441,7 @@ public class JobService {
         if (jobRepository.requestStop(principal.tenantId(), jobId) == 0) {
             throw ApiException.badRequest("Pekerjaan itu tidak sedang menunggu atau berjalan.");
         }
+        events.publishEvent(new AgentPushEvents.CommandRequested(jobId, JobCommands.STOP));
     }
 
     /**
@@ -464,6 +470,7 @@ public class JobService {
 
         logRepository.insertJobEntry(tenantId, LogLevel.WARN, "Diminta dimatikan paksa oleh " + principal.username() + ".",
                 (String) job.get("robotName"), (String) job.get("processName"), jobId);
+        events.publishEvent(new AgentPushEvents.CommandRequested(jobId, JobCommands.KILL));
     }
 
     /**
@@ -493,6 +500,7 @@ public class JobService {
 
         logRepository.insertJobEntry(tenantId, LogLevel.INFO, "Jeda diminta dari dasbor oleh " + principal.username() + ".",
                 (String) job.get("robotName"), (String) job.get("processName"), jobId);
+        events.publishEvent(new AgentPushEvents.CommandRequested(jobId, JobCommands.PAUSE));
     }
 
     /**
@@ -537,6 +545,7 @@ public class JobService {
                 (paused ? "Diminta dilanjutkan dari dasbor oleh " : "Permintaan jeda dibatalkan oleh ")
                         + principal.username() + ".",
                 (String) job.get("robotName"), (String) job.get("processName"), jobId);
+        events.publishEvent(new AgentPushEvents.CommandRequested(jobId, JobCommands.RESUME));
     }
 
     public void delete(OpenOrchestratorPrincipal principal, String jobId) {

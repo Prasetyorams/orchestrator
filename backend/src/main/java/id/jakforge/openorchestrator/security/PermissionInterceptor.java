@@ -252,6 +252,7 @@ public class PermissionInterceptor implements HandlerInterceptor {
             agent(POST, "/api/agent/jobs/{id}/attachments"),
             agent(POST, "/api/agent/logs"),
             agent(GET, "/api/agent/triggers"),
+            agent(GET, "/api/agent/ws"),
             agent(GET, "/api/agent/libraries/{name}/{version}/content"),
 
             // --- catatan dan peringatan ---

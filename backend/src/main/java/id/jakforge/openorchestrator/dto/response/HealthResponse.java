@@ -38,7 +38,8 @@ public record HealthResponse(String product, String status, String time, int con
             "packages.upload.binary", // POST /api/packages menerima multipart/form-data (bagian file + medan yang sama)
             "triggers.calendar",  // V16: pemicu bisa memakai kalender hari non-kerja; /api/agent/triggers membawa nonWorkingDays
             "packages.manualUpload", // V17: POST /api/packages/upload (dasbor); daftar paket membawa source (STUDIO/MANUAL_UPLOAD); hapus versi yang dipakai 409 PACKAGE_IN_USE
-            "libraries.feed");     // V20: /api/libraries (unggah .nupkg library, daftar, unduh, hapus); klaim job membawa libraries[]; GET /api/agent/libraries/{id}/{version}/content
+            "libraries.feed",      // V20: /api/libraries (unggah .nupkg library, daftar, unduh, hapus); klaim job membawa libraries[]; GET /api/agent/libraries/{id}/{version}/content
+            "agent.ws");           // GET /api/agent/ws: WebSocket per mesin, petunjuk jobAvailable/command/settingsChanged; polling tetap jadi cadangan
 
     static final List<Integer> API_VERSIONS = List.of(1, 2);
 

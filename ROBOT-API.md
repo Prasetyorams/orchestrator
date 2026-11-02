@@ -1450,6 +1450,125 @@ Terima kasih untuk contoh paketnya dan untuk kunci `libraries`. **Sudah di-deplo
 4. **Catatan untuk sisi robot:** pemeriksaan `LibraryNotFound` dari penanda ini terjadi di server saat klaim. Robot
    tidak perlu membaca `libraries` dari `project.json` sendiri.
 
+## Ringkasan tindak lanjut catatan tim robot (per 2 Nov 2026)
+
+Semua catatan yang Anda tinggalkan di repo ini sejak 20 Okt sudah ditindaklanjuti dan sudah di-deploy.
+Rinciannya ada di bagian masing-masing di berkas ini.
+
+| Catatan Anda (cabang `jakforge/…`) | Yang kami kerjakan | Status |
+|---|---|---|
+| `CATATAN-PREFIKS-OPENSTUDIO.md` (20 Okt) | Unggah Paket mengenal pustaka `OpenStudio` / `OpenStudio.*`; peringatan palsu hilang | di-deploy 20 Okt (`3c4c4e5`) |
+| `CATATAN-FEED-LIBRARY-OPENSTUDIO.md` (21 Okt) | feed library V20: `/api/libraries`, `libraries[]` di klaim, `/api/agent/libraries/…`, `LibraryNotFound` | di-deploy 21 Okt (`4654eea`) |
+| `CATATAN-CONTOH-LIBRARY-OPENSTUDIO.md` (21 Okt) | V21: kunci `"libraries"` di `project.json` dipakai server; peringatan palsu untuk assembly library hilang; kedua contoh paket asli Anda diuji | di-deploy 22 Okt (`17903d3`) |
+| `CATATAN-JALUR-PUSH-AGENT.md` (27 Okt) | WebSocket `/api/agent/ws` (kemampuan `agent.ws`): petunjuk `jobAvailable` / `command` / `settingsChanged`; gerbang `oo https` meneruskan WebSocket | di-deploy 2 Nov |
+
+**Yang kami tunggu dari sisi Anda:**
+1. **Robot Agent memakai `agent.ws`:** sambung ke `/api/agent/ws` kalau kemampuannya ada di `/api/health`, dan
+   tetap polling sebagai cadangan. Kabari kalau sudah diuji melawan server.
+2. **Info proxy di jaringan tujuan (bank):** apakah ada proxy yang memeriksa TLS di antara robot dan server. Kalau
+   WebSocket ternyata diblokir di sana, kami bisa menambah klaim long-poll (usulan A Anda).
+3. **Cabang catatan yang sudah dijawab** silakan ditutup atau dihapus. Kalau ada yang masih kurang, tulis catatan
+   baru seperti biasa.
+
+## Push WebSocket ke Robot Agent (2 Nov 2026)
+
+Jawaban `CATATAN-JALUR-PUSH-AGENT.md` (cabang `jakforge/catatan-jalur-push-agent`). Yang dibuat adalah
+**WebSocket**, sesuai rekomendasi tim robot, dalam bentuk yang ringan:
+- hanya **petunjuk** dari server ke agent, jadi isinya seperti usulan B tetapi lewat WebSocket;
+- klaim, laporan keadaan, log, dan denyut **tetap HTTP** seperti sekarang.
+
+**Sudah di-deploy** (2 Nov 2026). Tidak ada migrasi dan **tidak ada perubahan wajib**: agent yang tidak menyambung tetap polling.
+
+### Sambungan
+
+- **Endpoint:** `GET /api/agent/ws`, dengan header `Authorization: Bearer <token agent>` (token tidak pernah di alamat).
+  - Docker: `ws://<server>:8080/api/agent/ws`.
+  - Windows Server dengan `oo https`: `wss://<alamat>:8443/api/agent/ws`. Gerbang sudah meneruskan WebSocket.
+  - Kemampuannya diumumkan sebagai `agent.ws` di `/api/health`.
+- **Handshake adalah permintaan HTTP biasa**, jadi aturannya sama dengan endpoint agent lain, dan penolakannya
+  berupa jawaban HTTP JSON, bukan sambungan yang langsung ditutup:
+  - tanpa token atau token rusak: `401`;
+  - token pengguna: `403`;
+  - machine key sudah diganti atau dicabut: `401 MachineKeyRevoked`;
+  - `GET` tanpa `Upgrade: websocket`: `400`.
+- **Satu sambungan per mesin.** Sambungan baru dari mesin yang sama menggantikan yang lama, dan yang lama ditutup
+  dengan kode `4000`.
+- **Ping:** server mengirim ping tiap 25 detik. `ClientWebSocket` menjawab pong sendiri.
+- **Pesan dari agent ke server tidak dipakai.** Pesan teks dibaca lalu diabaikan, dan pesan di atas 4 KB menutup
+  sambungan.
+
+### Pesan (teks JSON, server → agent)
+
+| `type` | Isi | Yang dilakukan agent |
+|---|---|---|
+| `hello` | `machineId`, `serverTime`, `events`, `pingSeconds` (25), `settingsVersion` | selalu pesan pertama; tidak perlu apa-apa |
+| `jobAvailable` | `robotId` | klaim sekarang untuk robot itu (`POST /api/agent/jobs/claim`) |
+| `command` | `jobId`, `command` (`StopJob`/`KillJob`/`PauseJob`/`ResumeJob`) | berdenyut sekarang; perintah yang berlaku tetap yang di jawaban denyut |
+| `settingsChanged` | `settingsVersion` | masuk lagi untuk mengambil setelan, seperti `settingsVersion` di denyut |
+
+- **`jobAvailable`** dikirim untuk job PENDING yang **bisa diambil robot itu**, dengan aturan yang sama dengan klaim:
+  robot sasaran atau robot folder, mesin sasaran, dan mesin yang terdaftar dan aktif di folder. Sumber job-nya
+  bisa Start Job, Jalankan Ulang, pemicu, atau percobaan ulang otomatis.
+- **`command`** dikirim saat Stop/Kill/Pause/Resume diminta dari dasbor, dan saat Orchestrator menghentikan job
+  yang melewati batas waktunya.
+- **`settingsChanged`** dikirim saat versi setelan mesin berubah: slot, lease, runtime, robot, atau machine key.
+- **`type` lain** sebaiknya diabaikan, karena jenis petunjuk bisa bertambah.
+- **Petunjuk bisa hilang** (sambungan putus atau ditolak proxy) **tanpa menghilangkan apa pun**: job tetap menunggu
+  klaim berikutnya, dan perintah tetap ada di denyut berikutnya.
+
+### Kode tutup
+
+| Kode | Arti | Saran untuk agent |
+|---|---|---|
+| `4000` | diganti sambungan baru dari mesin yang sama | jangan menyambung ulang dari sambungan lama ini |
+| `4401` | token kedaluwarsa, machine key diganti/dicabut, atau mesin dihapus | masuk lagi (`/api/agent/login`), lalu sambung lagi |
+| `1001` | server berhenti, atau pengiriman/ping gagal | sambung lagi dengan jeda bertambah (mis. 1, 2, 5, 10, 30 dtk) |
+
+Sambungan **ditutup tepat saat token agent kedaluwarsa** (umurnya 1 jam). Sesudah login ulang, sambungkan lagi
+dengan token yang baru.
+
+### Saran pemakaian di sisi agent
+
+- **Selama tersambung:** klaim di sela denyut boleh dijarangkan (mis. hanya saat `jobAvailable` ditambah sekali tiap
+  denyut). Polling sebaiknya tetap ada sebagai jaring pengaman kalau ada petunjuk yang tidak sampai.
+- **Tanpa `agent.ws` di `/api/health`, atau handshake gagal:** pakai polling 3 detik seperti sekarang.
+- **Persyaratan:** `ClientWebSocket` di .NET Framework 4.6.2 butuh Windows 8 / Server 2012 ke atas.
+
+### Jawaban tiga pertanyaan
+
+1. **Dibuat** dalam bentuk WebSocket petunjuk di atas. Long-poll (A) tidak dibuat sekarang; bisa ditambah kalau
+   ternyata WebSocket diblokir di jaringan tujuan.
+2. **Batas yang dipasang:**
+   - satu sambungan per mesin;
+   - sambungan yang diam tidak memakan utas Tomcat, dan batas sambungan Tomcat 8.192;
+   - pengiriman ke agent yang macet lebih dari 5 detik menutup sambungannya;
+   - pesan dari agent paling besar 4 KB.
+
+   Sambungan disimpan di memori satu instance backend; kalau nanti backend lebih dari satu instance, perlu
+   jalur bersama di antaranya.
+3. **Proxy:**
+   - Gerbang `oo https` meneruskan WebSocket, tanpa batas waktu permintaan, dengan keep-alive 65 detik.
+   - Ping 25 detik menjaga sambungan dari proxy yang memutus sambungan diam.
+   - Proxy kantor yang memeriksa TLS bisa memblokir upgrade, dan ini **belum** diuji di jaringan bank; polling tetap
+     jadi cadangan. Kalau di jaringan tujuan ada proxy seperti itu, mohon kabari supaya bisa dicoba bersama.
+
+### Diuji di sisi Orchestrator
+
+**E2E 32 pemeriksaan** melawan backend uji, langsung dan lewat gerbang `oo https` dengan sertifikat uji (verifikasi
+TLS menyala). Yang diuji: handshake (401/403/400/101), `hello`, `jobAvailable` (Start Job dan percobaan ulang,
+dan tidak ada untuk mesin lain), `command` untuk Stop/Kill/Pause/Resume, `settingsChanged`, penggantian sambungan
+(`4000`), dan penutupan saat machine key diganti (`4401`). Jeda yang terukur di lab:
+
+| Kejadian | Jeda |
+|---|---|
+| Start Job → `jobAvailable` | ±60 ms |
+| Stop → `command` | ±40 ms |
+| lewat gerbang 8443 | ±45 ms |
+| `settingsChanged` | ≤ ±2 dtk |
+| key diganti → sambungan ditutup | ≤ ±2 dtk |
+
+**Belum** diuji dengan Robot Agent sungguhan, dan belum di jaringan bank.
+
 ---
 
 # Bagian 5 — Open Assistant: masuk lewat dasbor (V11)

@@ -42,7 +42,7 @@ class JobOutcomeQueueReleaseTest {
             }
         };
         return new JobOutcomeService(new JobRepository(database), new RobotRepository(database, TestProperties.defaults()),
-                new AlertRepository(database), new LogRepository(database), queues);
+                new AlertRepository(database), new LogRepository(database), queues, event -> { });
     }
 
     private static Map<String, Object> job(String state) {

@@ -12,6 +12,7 @@ import id.jakforge.openorchestrator.repository.TriggerRepository;
 import id.jakforge.openorchestrator.repository.TriggerRepository.DueTrigger;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -54,6 +55,8 @@ public class TriggerFiringService {
     private final LogRepository logRepository;
     private final AlertRepository alertRepository;
     private final NextRunCalculator nextRunCalculator;
+    /** Petunjuk WebSocket ke Robot Agent (AgentPushService). */
+    private final ApplicationEventPublisher events;
 
     /** Pemicu yang sudah waktunya jalan; masing-masing dijalankan lewat {@link #fireIfDue}. */
     public List<UUID> findDueTriggerIds() {
@@ -140,6 +143,7 @@ public class TriggerFiringService {
         logRepository.insertSystemEntry(trigger.tenantId(),
                 "Pemicu '" + trigger.name() + "' menjadwalkan " + trigger.processName() + ".",
                 trigger.processName(), jobId);
+        events.publishEvent(new AgentPushEvents.JobQueued(jobId));
 
         log.info("Pemicu '{}' menjadwalkan {}; berikutnya {}.", trigger.name(), trigger.processName(), nextRunAt);
     }

@@ -47,7 +47,7 @@ class TriggerFiringServiceTest {
 
     private final TriggerFiringService firingService = new TriggerFiringService(triggers, calendars, processes,
             new JobRepository(database), new LogRepository(database), new AlertRepository(database),
-            new NextRunCalculator(Clock.fixed(NOW, ZoneOffset.UTC)));
+            new NextRunCalculator(Clock.fixed(NOW, ZoneOffset.UTC)), event -> { });
 
     private DueTrigger dueTrigger(String cron, String priority) {
         return new DueTrigger(UUID.randomUUID(), tenantId, folderId, "Harian", "Tagihan", null, 30, cron, priority,

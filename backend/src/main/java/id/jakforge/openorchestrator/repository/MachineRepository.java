@@ -249,4 +249,21 @@ public class MachineRepository {
     public void bumpSettingsVersion(UUID machineId) {
         database.update("UPDATE machines SET settings_version = settings_version + 1 WHERE id = ?", machineId);
     }
+
+    /** Versi setelan dan hash kunci mesin-mesin ini — mesin yang sudah dihapus tidak ada di hasilnya. */
+    public Map<UUID, PushState> findPushStates(java.util.Collection<UUID> machineIds) {
+        Map<UUID, PushState> states = new LinkedHashMap<>();
+        if (machineIds.isEmpty()) return states;
+
+        database.query("SELECT id, settings_version, key_hash FROM machines WHERE id IN ("
+                        + Database.placeholders(machineIds.size()) + ")",
+                (rs, rowNumber) -> states.put(rs.getObject(1, UUID.class),
+                        new PushState(rs.getInt(2), rs.getString(3))),
+                machineIds.toArray());
+        return states;
+    }
+
+    /** @param keyHash null kalau kuncinya sudah dicabut */
+    public record PushState(int settingsVersion, String keyHash) {
+    }
 }

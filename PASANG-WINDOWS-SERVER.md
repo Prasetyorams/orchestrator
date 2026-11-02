@@ -130,6 +130,9 @@ baru kalau `oo pasang` dijalankan lagi.
 Untuk server yang port 443-nya sudah dipakai layanan lain. `oo` menjalankan
 **gerbang** HTTPS kecil (Node bawaan, tugas `OpenOrchestrator\Gerbang`) di satu
 port: `/api/…` dan `/actuator/…` diteruskan ke backend, selebihnya ke dasbor.
+WebSocket Robot Agent (`wss://…/api/agent/ws`) ikut diteruskan. Kalau di antara
+robot dan server ada proxy yang memblokir WebSocket, robot tetap jalan lewat
+polling, hanya job mulai sedikit lebih lambat.
 Backend dan dasbor lalu hanya menerima dari server itu sendiri (127.0.0.1).
 
 **Yang diminta ke IT:**

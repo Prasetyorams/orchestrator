@@ -824,6 +824,58 @@ function gerbangProses() {
       res.on("close", () => { if (!res.writableFinished) naik.destroy(); });
       req.pipe(naik);
     });
+  // WebSocket Robot Agent (/api/agent/ws, kemampuan agent.ws): permintaan
+  // upgrade diteruskan ke backend apa adanya, lalu kedua soket disambung.
+  // Jawaban yang bukan 101 (401/403 JSON dari backend) dikembalikan seperti
+  // jawaban HTTP biasa. Jalur lain tidak punya WebSocket.
+  server.on("upgrade", (req, soket, kepala) => {
+    soket.on("error", () => {});
+    if (!/^\/api\/agent\/ws(\?|$)/.test(req.url)) {
+      soket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+      return;
+    }
+
+    const asal = (req.socket.remoteAddress || "").replace(/^::ffff:/, "");
+    const headers = { ...req.headers };
+    headers["x-forwarded-for"] = headers["x-forwarded-for"] ? headers["x-forwarded-for"] + ", " + asal : asal;
+    headers["x-forwarded-proto"] = "https";
+    headers["x-forwarded-host"] = req.headers.host || "";
+
+    const kepalaJawaban = (r, tambahan = [], buang = []) => {
+      const baris = [`HTTP/1.1 ${r.statusCode} ${r.statusMessage}`];
+      for (let i = 0; i < r.rawHeaders.length; i += 2) {
+        if (!buang.includes(r.rawHeaders[i].toLowerCase())) baris.push(`${r.rawHeaders[i]}: ${r.rawHeaders[i + 1]}`);
+      }
+      return baris.concat(tambahan).join("\r\n") + "\r\n\r\n";
+    };
+
+    const naik = http.request({ host: "127.0.0.1", port: portBe, method: req.method, path: req.url, headers });
+    naik.on("upgrade", (r, soketNaik, kepalaNaik) => {
+      soketNaik.on("error", () => soket.destroy());
+      soket.on("close", () => soketNaik.destroy());
+      soketNaik.on("close", () => soket.destroy());
+      soket.write(kepalaJawaban(r));
+      if (kepalaNaik && kepalaNaik.length) soket.write(kepalaNaik);
+      if (kepala && kepala.length) soketNaik.write(kepala);
+      soketNaik.pipe(soket);
+      soket.pipe(soketNaik);
+    });
+    // Badan dari Node sudah tidak ber-chunk: ditulis ulang dengan panjangnya.
+    naik.on("response", (r) => {
+      const bagian = [];
+      r.on("data", (b) => bagian.push(b));
+      r.on("end", () => {
+        const isi = Buffer.concat(bagian);
+        soket.end(Buffer.concat([Buffer.from(kepalaJawaban(r, [`Content-Length: ${isi.length}`, "Connection: close"],
+          ["transfer-encoding", "content-length", "connection", "keep-alive"])), isi]));
+      });
+    });
+    naik.on("error", (e) => {
+      console.log(`${new Date().toISOString()} 502 ${req.method} ${req.url} → backend (WebSocket): ${e.code || e.message}`);
+      soket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+    });
+    naik.end();
+  });
   // Unggahan paket bisa lama; tidak ada batas waktu permintaan.
   server.requestTimeout = 0;
   server.headersTimeout = 60_000;

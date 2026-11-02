@@ -1,6 +1,7 @@
 package id.jakforge.openorchestrator.service;
 
 import id.jakforge.openorchestrator.common.Uuids;
+import id.jakforge.openorchestrator.model.JobCommands;
 import id.jakforge.openorchestrator.config.OpenOrchestratorProperties;
 import id.jakforge.openorchestrator.model.LogLevel;
 import id.jakforge.openorchestrator.model.Severity;
@@ -9,6 +10,7 @@ import id.jakforge.openorchestrator.repository.JobRepository;
 import id.jakforge.openorchestrator.repository.LogRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,6 +42,8 @@ public class JobSupervisionService {
     private final AlertRepository alertRepository;
     private final LogRepository logRepository;
     private final OpenOrchestratorProperties properties;
+    /** Petunjuk WebSocket ke Robot Agent (AgentPushService). */
+    private final ApplicationEventPublisher events;
 
     /** Lease penyiapan habis: agent hilang sebelum workflow mulai. Boleh diulang otomatis. */
     @Transactional
@@ -91,6 +95,8 @@ public class JobSupervisionService {
 
         for (Map<String, Object> job : overdue) {
             logJob(job, LogLevel.WARN, "Melewati batas waktu proses; Orchestrator meminta berhenti.");
+            events.publishEvent(new AgentPushEvents.CommandRequested(Uuids.parseOrNull((String) job.get("id")),
+                    JobCommands.STOP));
 
             UUID tenantId = Uuids.parseOrNull((String) job.get("tenantId"));
             if (tenantId != null) {

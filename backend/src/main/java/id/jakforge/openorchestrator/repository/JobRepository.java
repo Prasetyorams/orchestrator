@@ -756,6 +756,33 @@ public class JobRepository {
     }
 
     /**
+     * Robot Agent mana yang bisa mengambil job PENDING ini — aturan yang sama
+     * dengan {@link #claimNextForAgent} (robot sasaran atau robot folder, mesin
+     * sasaran, mesin terdaftar di folder dan aktif), untuk petunjuk WebSocket.
+     */
+    public List<Map<String, Object>> findPushTargets(UUID jobId) {
+        return database.queryRows("""
+                SELECT r.machine_id, r.id AS robot_id
+                  FROM jobs j
+                  JOIN robots r ON r.tenant_id = j.tenant_id AND r.machine_id IS NOT NULL
+                  JOIN machines m ON m.id = r.machine_id
+                 WHERE j.id = ? AND j.state = 'PENDING'
+                   AND (j.robot_name = r.name
+                        OR ((j.robot_name IS NULL OR j.robot_name = '')
+                            AND EXISTS (SELECT 1 FROM folder_robots fr
+                                         WHERE fr.folder_id = j.folder_id AND fr.robot_id = r.id)))
+                   AND (j.target_machine_name IS NULL OR j.target_machine_name = m.name)
+                   AND %s
+                """.formatted(machineServesFolder("m.id")), jobId);
+    }
+
+    /** Mesin Robot Agent yang memegang job ini, kalau ada. */
+    public Optional<UUID> findAgentMachine(UUID jobId) {
+        return database.queryScalar("SELECT machine_id FROM jobs WHERE id = ? AND contract_version = 2", jobId)
+                .map(value -> value instanceof UUID uuid ? uuid : UUID.fromString(value.toString()));
+    }
+
+    /**
      * Job yang baru saja diambil tetapi tidak bisa dijalankan — mis. library
      * yang dibutuhkannya tidak ada di feed (V20). Gagal di tempat, sebelum robot
      * menyiapkan apa pun; robotnya tetap bebas mengambil job lain.
